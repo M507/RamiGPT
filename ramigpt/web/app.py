@@ -19,6 +19,8 @@ stop_task_flag = threading.Event()
 stop_full_ai = threading.Event()
 # Per inventory-session stop flags for Full AI
 stop_full_ai_by_session = {}
+# When Full AI runs on a real OS thread (benchmark worker), socketio.sleep is unsafe.
+_ai_tls = threading.local()
 
 from pwn import *
 context.log_level = "error"
@@ -674,7 +676,7 @@ def autonomous(session_data):
                 stop_reason = "stopped"
                 slog.event("FULL_AI_STOP", "Stop flag set — exiting autonomous loop")
                 break
-            socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
+            _ai_sleep(1)
             i += 1
             try:
                 emit_session(session_id, f"AI request#{i}======================================================================", color="#f85149")
@@ -743,7 +745,7 @@ def autonomous(session_data):
                         slog.warning(f"recv timeout after command: {command!r}")
                         # Stop runaway commands (grep -r / find / …) before draining.
                         _interrupt_shell(shell)
-                        socketio.sleep(0.2)
+                        _ai_sleep(0.2)
                         _interrupt_shell(shell)
                         shell_output_bytes = recv_for_duration(shell, 2)
                         shell_output = _safe_decode(shell_output_bytes).strip()
@@ -754,6 +756,31 @@ def autonomous(session_data):
                             f"HANG_RECOVERY_DRAIN #{i}",
                             f"after timeout drain:\n{shell_output}",
                         )
+
+                        # Interactive `sudo vim /path` leaves the PTY in vim; Ctrl-C
+                        # alone often prints "Type :qa …". Quit the editor before
+                        # treating this as a hard reconnect (session 003_…195756Z).
+                        if _looks_like_editor_stuck(shell_output):
+                            slog.event(
+                                "EDITOR_STUCK",
+                                "Detected interactive editor — sending :qa!",
+                                command=command,
+                                ai_request=i,
+                            )
+                            quit_drain = _try_quit_editor(shell)
+                            if quit_drain:
+                                emit_session(session_id, quit_drain)
+                                shell_output = (shell_output + "\n" + quit_drain).strip()
+                                shell_output_lines = shell_output.split("\n")
+                                slog.block(
+                                    f"EDITOR_QUIT_DRAIN #{i}",
+                                    f"after :qa!:\n{quit_drain}",
+                                )
+                            last_after_quit = (
+                                shell_output_lines[-1] if shell_output_lines else ""
+                            ).strip()
+                            if _is_shell_prompt_line(last_after_quit):
+                                slog.info("hang recovery: prompt restored after editor quit")
 
                         hostname = session_data.get('hostname')
                         hang_diag = diagnose_root(hostname, shell_output)
@@ -992,6 +1019,72 @@ def autonomous(session_data):
             pass
 
 
+def _ai_sleep(seconds: float) -> None:
+    """Sleep that is safe both on the eventlet hub and on OS threads."""
+    if getattr(_ai_tls, "use_time_sleep", False):
+        time.sleep(seconds)
+        return
+    try:
+        socketio.sleep(seconds)
+    except Exception:  # noqa: BLE001
+        time.sleep(seconds)
+
+
+def start_autonomous_task(session_data: dict):
+    """
+    Start Full AI.
+
+    - UI / Socket.IO greenlets: ``socketio.start_background_task`` (normal path).
+    - Benchmark OS worker thread: a real ``threading.Thread`` with ``time.sleep``,
+      because ``start_background_task`` / hub spawn from that thread never runs
+      (benchmark suite 2336cf67… hung at FULL_AI_REQUESTED with no FULL_AI_START).
+    """
+    session_id = (session_data or {}).get("sid") or "unknown"
+    use_os_thread = bool(
+        (session_data or {}).get("use_os_thread")
+        or (session_data or {}).get("inline_full_ai")
+        or (session_data or {}).get("from_benchmark")
+    )
+
+    def _runner() -> None:
+        if use_os_thread:
+            _ai_tls.use_time_sleep = True
+        try:
+            autonomous(session_data)
+        except Exception:  # noqa: BLE001
+            debug_logger.exception(f"full_ai.crash session_id={session_id!r}")
+            try:
+                loop[session_id] = 0
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+                mark_full_ai_finished(session_id)
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            if use_os_thread:
+                _ai_tls.use_time_sleep = False
+
+    if use_os_thread:
+        thread = threading.Thread(
+            target=_runner,
+            name=f"autonomous-{str(session_id)[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        debug_logger.info(
+            f"full_ai.spawn OS-thread session_id={session_id!r} thread={thread.name}"
+        )
+        return thread
+
+    socketio.start_background_task(_runner)
+    debug_logger.info(
+        f"full_ai.spawn socketio.start_background_task session_id={session_id!r}"
+    )
+    return None
+
+
 def execute_beroot(session_data):
     """
     Background task: upload BeRoot to the target, run it, attach findings to the
@@ -1127,7 +1220,7 @@ def execute_beroot(session_data):
             provider=get_settings().ai_provider,
             model=get_settings().active_model(),
         )
-        socketio.start_background_task(autonomous, session_data)
+        start_autonomous_task(session_data)
 
 
 @app.route('/action3', methods=['POST', 'DELETE'])
@@ -1235,7 +1328,7 @@ def action1():
             provider=get_settings().ai_provider,
             model=get_settings().active_model(),
         )
-        socketio.start_background_task(autonomous, session_data)
+        start_autonomous_task(session_data)
 
     elif action == "stop":
         flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
@@ -1407,6 +1500,44 @@ def _interrupt_shell(shell) -> None:
         pass
 
 
+def _looks_like_editor_stuck(text: str) -> bool:
+    """True when drain/output shows an interactive vim/editor UI."""
+    t = (text or "").lower()
+    markers = (
+        "type  :qa",
+        "type :qa",
+        "press <enter> to exit vim",
+        "-- insert --",
+        "-- replace --",
+        "entering ex mode",
+        "[no write since last change]",
+        "e325: attention",
+        "found a swap file",
+    )
+    return any(m in t for m in markers)
+
+
+def _try_quit_editor(shell) -> str:
+    """
+    Escape an interactive vim (and similar) then force-quit.
+    Returns whatever was drained after the quit attempts.
+    """
+    if shell is None:
+        return ""
+    try:
+        shell.send(b"\x1b")  # ESC — leave insert / operator-pending
+    except Exception:  # noqa: BLE001
+        pass
+    _ai_sleep(0.15)
+    for payload in (b":qa!\r", b":q!\r", b"ZQ", b"\x03"):
+        try:
+            shell.send(payload)
+        except Exception:  # noqa: BLE001
+            pass
+        _ai_sleep(0.2)
+    return _safe_decode(recv_for_duration(shell, 1.5)).strip()
+
+
 def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_default, session=None, emit_func=None):
     """
     Read until a real shell prompt appears as its own line.
@@ -1476,7 +1607,7 @@ def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_defa
                             pass
                     return buf, shell_output_lines, str(shell_output_lines), shell_output
 
-            socketio.sleep(0.05)
+            _ai_sleep(0.05)
 
         # Timeout — keep noise out of the UI; hang-recovery / reconnect handles it.
         debug_logger.debug(
@@ -1872,6 +2003,8 @@ register_benchmark_hooks(
     stop_full_ai_by_session=stop_full_ai_by_session,
     loop=loop,
     emit_session=emit_session,
+    root_won_by_session=root_won_by_session,
+    start_autonomous_task=start_autonomous_task,
 )
 register_benchmark_routes(app)
 

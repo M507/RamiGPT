@@ -48,7 +48,16 @@ _hooks: Dict[str, Any] = {}
 
 def register_benchmark_hooks(**kwargs: Any) -> None:
     """Inject runtime dependencies from ramigpt.web.app (SSH shells, autonomous, …)."""
+    global root_won_by_session, full_ai_finished_by_session
     _hooks.update(kwargs)
+    # Share the app-level flag maps so Full AI root detection and the
+    # benchmark waiter always read/write the same objects.
+    shared_root = kwargs.get("root_won_by_session")
+    if isinstance(shared_root, dict):
+        root_won_by_session = shared_root
+    shared_done = kwargs.get("full_ai_finished_by_session")
+    if isinstance(shared_done, dict):
+        full_ai_finished_by_session = shared_done
 
 
 def _utcnow() -> str:
@@ -282,12 +291,9 @@ def _disconnect_session(session_id: str) -> None:
 
 
 def _start_full_ai(session_id: str) -> None:
-    flask_app: Flask = _hooks["flask_app"]
     store = get_session_store()
     saved = store.get_session(session_id)
     stop_flags = _hooks["stop_full_ai_by_session"]
-    socketio = _hooks["socketio"]
-    autonomous = _hooks["autonomous"]
     loop = _hooks["loop"]
 
     root_won_by_session[session_id] = False
@@ -303,7 +309,21 @@ def _start_full_ai(session_id: str) -> None:
         "hostname": saved.hostname if saved else "pehost",
         "server": saved.host if saved else "127.0.0.1",
         "port": saved.port if saved else 22,
+        "from_benchmark": True,
+        "use_os_thread": True,
     }
+
+    starter = _hooks.get("start_autonomous_task")
+    if callable(starter):
+        starter(session_data)
+        debug_logger.info(
+            f"[benchmark] Full AI spawned via start_autonomous_task session_id={session_id}"
+        )
+        return
+
+    # Fallback — same OS-thread semantics as start_autonomous_task.
+    flask_app: Flask = _hooks["flask_app"]
+    autonomous = _hooks["autonomous"]
 
     def _runner() -> None:
         with flask_app.app_context():
@@ -312,7 +332,9 @@ def _start_full_ai(session_id: str) -> None:
             finally:
                 mark_full_ai_finished(session_id)
 
-    socketio.start_background_task(_runner)
+    threading.Thread(
+        target=_runner, name=f"bench-ai-{session_id[:8]}", daemon=True
+    ).start()
 
 
 def _session_data(session_id: str) -> Dict[str, Any]:
@@ -350,7 +372,10 @@ def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
             raise RuntimeError("execute_beroot hook not registered")
         _log(run, "Running BeRoot (AI on) — scan then Full AI until root")
         session_data["with_ai"] = True
-        # Blocking: scan completes here; Full AI continues in a background task.
+        # Run Full AI on an OS thread (time.sleep). start_background_task from
+        # this benchmark worker never executes under eventlet.
+        session_data["from_benchmark"] = True
+        session_data["use_os_thread"] = True
         try:
             execute_beroot(session_data)
         except Exception as exc:  # noqa: BLE001

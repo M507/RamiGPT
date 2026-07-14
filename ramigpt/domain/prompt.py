@@ -52,6 +52,19 @@ def normalize_ai_command(command):
         s,
         flags=re.IGNORECASE,
     )
+
+    # Bare `sudo vim /path` (no -c) opens an interactive editor and desyncs the PTY
+    # (session 003_…195756Z: "Type :qa to exit Vim"). Rewrite to a non-interactive
+    # GTFOBins-style probe that still validates NOPASSWD vim → root.
+    head = s.split("&&")[0].strip()
+    vim_m = re.match(
+        r"""^(sudo\s+(?:/(?:usr/)?bin/)?vim(?:\.basic)?)\b""",
+        head,
+        flags=re.IGNORECASE,
+    )
+    if vim_m and not re.search(r"(^|\s)-c\b|(^|\s)--cmd\b", head):
+        s = f"{vim_m.group(1)} -c ':!id' -c ':q!' /dev/null"
+
     return s
 
 
