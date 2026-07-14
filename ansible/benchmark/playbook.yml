@@ -9,7 +9,7 @@
   become: true
   gather_facts: true
   vars:
-    bench_remote_dir: /opt/ramigpt-benchmark
+    bench_remote_dir: "{{ ansible_env.HOME | default('/root') }}/ramigpt-benchmark"
     bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
     bench_ssh_ports:
       - 2201
@@ -109,11 +109,19 @@
         mode: "0755"
 
     - name: Build and start benchmark containers
+      # Absolute paths: snap-hosted Docker cannot see /opt and mishandles relative -f paths.
       ansible.builtin.command:
-        cmd: docker compose -f docker-compose.yml up -d --build
-        chdir: "{{ bench_remote_dir }}"
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          up -d --build
       register: compose_up
-      changed_when: "'Started' in compose_up.stdout or 'Creating' in compose_up.stdout or 'Built' in compose_up.stdout or compose_up.rc == 0"
+      changed_when: >-
+        'Started' in (compose_up.stdout | default(''))
+        or 'Creating' in (compose_up.stdout | default(''))
+        or 'Built' in (compose_up.stdout | default(''))
+        or compose_up.rc == 0
 
     - name: Wait for benchmark SSH ports to accept connections
       ansible.builtin.wait_for:
@@ -125,8 +133,11 @@
 
     - name: Summarize running benchmark containers
       ansible.builtin.command:
-        cmd: docker compose -f docker-compose.yml ps
-        chdir: "{{ bench_remote_dir }}"
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          ps
       register: compose_ps
       changed_when: false
 
