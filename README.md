@@ -129,9 +129,18 @@ pip install -r requirements.txt
 python app.py
 ```
 
+By default the local server **auto-reloads** when Python, template, or static files change (`APP_RELOAD=1`). Set `APP_RELOAD=0` to disable.
+
+```sh
+# optional: turn reload off
+APP_RELOAD=0 python app.py
+```
+
 The app listens on `127.0.0.1:8443` by default (override with `APP_HOST` / `APP_PORT`).
 
 Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
+
+The app opens into a **multi-session workspace** (sidebar inventory + server workspace). Create sessions, connect when ready, then use the Terminal tab for SSH and RamiGPT AI tools. AI provider settings are available from the top bar gear icon before connecting.
 
 ## Integrated Tools
 
@@ -158,6 +167,9 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `docs/` | Screenshots and documentation assets |
 | `tests/` | Automated tests |
 | `data/` | Runtime logs and sessions (gitignored) |
+| `data/sessions/hosts/` | One JSON file per saved SSH session/host |
+| `data/sessions/meta.json` | Groups + recent session ids |
+
 | `certs/` | TLS certificates (gitignored) |
 
 ## Features

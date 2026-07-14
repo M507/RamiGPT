@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_session import Session
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
 import logging
 import os
@@ -15,6 +15,8 @@ import threading
 # Shared variable accessible to the background task and main application
 stop_task_flag = threading.Event()
 stop_full_ai = threading.Event()
+# Per inventory-session stop flags for Full AI
+stop_full_ai_by_session = {}
 
 from pwn import *
 context.log_level = "error"
@@ -35,15 +37,29 @@ from ramigpt.paths import (
 
 ensure_runtime_dirs()
 
-# Endpoints reachable before SSH login (local setup / AI config).
+# Endpoints reachable without an active SSH session (workspace is open by default).
 PUBLIC_ENDPOINTS = frozenset({
+    "index",
+    "workspace",
     "login",
     "connect",
+    "static",
     "get_ai_settings",
     "update_ai_settings",
     "reload_ai_settings",
     "test_ai_settings",
-    "static",
+    "api_inventory",
+    "api_create_session",
+    "api_update_session",
+    "api_delete_session",
+    "api_move_session",
+    "api_connect_session",
+    "api_disconnect_session",
+    "api_reconnect_session",
+    "api_session_status",
+    "api_credentials_lookup",
+    "api_get_prompt_context",
+    "api_put_prompt_context",
 })
 
 
@@ -78,7 +94,7 @@ _KEY_FILE = str(CERTS_DIR / "key.pem")
 socketio = SocketIO(app, ssl_context=(_CERT_FILE, _KEY_FILE))
 
 
-# Dictionary to hold SSH shells
+# Dictionary to hold SSH shells (keyed by inventory session id)
 ssh_shells = {}
 ssh_ssh_conns = {}
 prompt_delimiters = {}
@@ -90,18 +106,75 @@ timeout_default = 6
 prompt_delimiter = b"$ "  # Assuming the prompt ends with $ and a space
 shell_recvuntil_v4_list = []
 
+
+def resolve_server_session_id():
+    """Active inventory session id from JSON body or Flask session."""
+    data = request.get_json(silent=True) or {}
+    return (
+        data.get("server_session_id")
+        or session.get("active_server_session_id")
+        or session.get("sid")
+        or getattr(session, "sid", None)
+    )
+
+
+def emit_session(session_id, data, color=None):
+    payload = {"data": data, "server_session_id": session_id}
+    if color is not None:
+        payload["color"] = color
+    socketio.emit("message", payload, namespace="/get", to=session_id)
+
+
+def close_ssh_connection(session_id):
+    shell = ssh_shells.pop(session_id, None)
+    conn = ssh_ssh_conns.pop(session_id, None)
+    prompts.pop(session_id, None)
+    prompt_delimiters.pop(session_id, None)
+    last_commands.pop(session_id, None)
+    beroots.pop(session_id, None)
+    loop.pop(session_id, None)
+    flag = stop_full_ai_by_session.pop(session_id, None)
+    if flag:
+        flag.set()
+    try:
+        if shell is not None:
+            shell.close()
+    except Exception:
+        pass
+    try:
+        if conn is not None:
+            conn.close()
+    except Exception:
+        pass
+
+
 def login_required(f):
+    """Soft gate: workspace is open; SSH routes still check for a live shell."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'logged_in' not in session or not session['logged_in']:
-            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
 @socketio.on('connect', namespace='/get')
 def test_connect():
     print('Client connected')
-    #socketio.start_background_task(send_time)
+
+@socketio.on('join', namespace='/get')
+def on_join(data):
+    session_id = (data or {}).get('server_session_id')
+    if session_id:
+        join_room(session_id)
+        emit('message', {
+            'data': f'[*] Subscribed to session {session_id[:8]}…',
+            'color': '#8b949e',
+            'server_session_id': session_id,
+        })
+
+@socketio.on('leave', namespace='/get')
+def on_leave(data):
+    session_id = (data or {}).get('server_session_id')
+    if session_id:
+        leave_room(session_id)
 
 @socketio.on('disconnect', namespace='/get')
 def test_disconnect():
@@ -114,17 +187,22 @@ def send_time():
         socketio.emit('message', {'data': 'Current time: ' + time_str}, namespace='/get')
 
 @app.route('/')
-@login_required
 def index():
-    global stop_task_flag
+    """Primary multi-session workspace (no forced connect form)."""
+    return render_template('workspace.html')
 
-    session_data_copy = session.copy()
-    session_data_copy['sid'] = session.sid
-    shell = ssh_shells.get(session.sid)
 
-    stop_task_flag.clear()  # Make sure the flag is clear at the start
-    socketio.start_background_task(shell_interaction, shell, socketio.emit, session_data_copy)
-    return render_template('index.html', hostname = session['hostname'], username = session['username'])
+@app.route('/workspace')
+def workspace():
+    return render_template('workspace.html')
+
+
+@app.route('/terminal')
+def terminal_legacy():
+    """Legacy full-page terminal kept for compatibility."""
+    hostname = session.get('hostname', 'host')
+    username = session.get('username', 'user')
+    return render_template('index.html', hostname=hostname, username=username)
 
 @app.route('/login')
 def login():
@@ -175,7 +253,8 @@ def get_or_create_ssh_shell(session_id, create_new=False):
                 user=session.get('username'),
                 host=session.get('server'), 
                 port=session.get('port'), 
-                password=session.get('password')
+                password=session.get('password'),
+                timeout=10,
             )
             ssh_conn.set_env('TERM', '')
             
@@ -197,11 +276,42 @@ def get_or_create_ssh_shell(session_id, create_new=False):
             debug_logger.exception("Failed to create or use SSH shell.")
             raise e
 
+
+def start_shell_listener(session_id):
+    """Background recv loop scoped to one inventory session."""
+    shell = ssh_shells.get(session_id)
+    if shell is None:
+        return
+    session_data = {
+        "sid": session_id,
+        "hostname": session.get("hostname"),
+        "username": session.get("username"),
+        "password": session.get("password"),
+        "server": session.get("server"),
+        "port": session.get("port"),
+    }
+    stop_task_flag.clear()
+
+    def _emit(event, data, namespace="/get", **kwargs):
+        payload = dict(data or {})
+        payload["server_session_id"] = session_id
+        room = kwargs.pop("to", None) or session_id
+        socketio.emit(event, payload, namespace=namespace, to=room, **kwargs)
+
+    socketio.start_background_task(shell_interaction, shell, _emit, session_data)
+
 @app.before_request
 def check_authentication():
-    # Allow login, connect, and settings/setup APIs before SSH session exists.
-    if "logged_in" not in session and request.endpoint not in PUBLIC_ENDPOINTS:
-        return redirect(url_for("login"))
+    # Local workspace app: allow inventory + settings without SSH login.
+    # SSH command routes validate a live shell themselves.
+    if request.endpoint in PUBLIC_ENDPOINTS or (request.endpoint or "").startswith("api_"):
+        return
+    if request.path.startswith("/api/") or request.path.startswith("/static"):
+        return
+    # Remaining privileged routes require at least one active inventory selection
+    if request.endpoint in ("logout",):
+        return
+    return
 
 @app.route('/connect', methods=['POST'])
 def connect():
@@ -300,16 +410,16 @@ def shell_conditions(command, shell, prompt_delimiter, session_data, just_got_ro
 
 def autonomous(session_data):
     global stop_task_flag
-    global stop_full_ai
 
     with app.app_context():
         """Background task for a specific session using passed session data."""
-        max_reqs = _max_ai_requests()
-        socketio.emit('message', {'data': f'Giving AI full freedom to send {max_reqs} commands', 'color': "#1E90FF"}, namespace='/get')
         session_id = session_data['sid']
+        max_reqs = _max_ai_requests()
+        emit_session(session_id, f'Giving AI full freedom to send {max_reqs} commands', color="#58a6ff")
         debug_logger.info(f"Starting autonomous loop for session: {session_id}")
         i = 0
         just_got_root = False
+        stop_flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         
         # Safely fetching session-specific data with default values and debugging
         prompt_delimiter = prompt_delimiters.get(session_id, "$")  # Default to "#" if not set
@@ -320,18 +430,18 @@ def autonomous(session_data):
         debug_logger.debug(f"autonomous(): Initial setup for session {session_id}: prompt_delimiter={prompt_delimiter}, shell={shell}, priv_esc={priv_esc}")
         
         while i < max_reqs:  # Ensure the loop runs only if it's enabled
-            if stop_full_ai.is_set():
+            if stop_flag.is_set():
                 break
             socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
             i += 1
             try:
-                socketio.emit('message', {'data': f"AI request#{i}======================================================================", 'color': "#FF0000"}, namespace='/get')
+                emit_session(session_id, f"AI request#{i}======================================================================", color="#f85149")
                 debug_logger.debug(f"AI request#{i}======================================================================")
                 
                 # Create a prompt
                 prompt = priv_esc.generate_prompt()
                 if _debug_enabled():
-                    socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
+                    emit_session(session_id, f"[DEBUG] About to send prompt:\n{prompt}")
                 
                 debug_logger.debug(f"[DEBUG] About to send prompt:\n{prompt}")
 
@@ -472,17 +582,27 @@ def action3():
 
 
     if action == "start":
-        loop[session.sid] = 1
-        # Start the background task with session data
-        session_data_copy = session.copy()
-        session_data_copy['sid'] = session.sid
+        session_id = resolve_server_session_id()
+        if not session_id or session_id not in ssh_shells:
+            return jsonify(error="No active SSH connection. Connect this session first."), 400
+        loop[session_id] = 1
+        session_data_copy = {
+            "sid": session_id,
+            "username": session.get("username"),
+            "password": session.get("password"),
+            "hostname": session.get("hostname"),
+            "server": session.get("server"),
+            "port": session.get("port"),
+        }
         socketio.start_background_task(execute_beroot, session_data_copy)
-        socketio.emit('message', {'data': 'Starting..'}, namespace='/get')
+        emit_session(session_id, "Starting BeRoot…", color="#58a6ff")
 
     elif action == "stop":
-        loop[session.sid] = 0
+        session_id = resolve_server_session_id()
+        if session_id:
+            loop[session_id] = 0
+            emit_session(session_id, "Stopping…", color="#8b949e")
         debug_logger.info(f"Action '{action}' triggered at {time_str}. Emitting 'Stopping..' message.")
-        socketio.emit('message', {'data': 'Stopping..'}, namespace='/get')
 
     else:
         debug_logger.warning(f"Invalid action received: {action}")
@@ -494,8 +614,6 @@ def action3():
 @app.route('/action1', methods=['POST', 'DELETE'])
 @login_required
 def action1():
-    global stop_full_ai
-
     debug_logger.debug("Received request at /action1 endpoint.")
     
     if not request.is_json:
@@ -510,26 +628,32 @@ def action1():
         return jsonify(error="Missing action parameter."), 400
 
     time_str = time.strftime('%H:%M:%S')  # Get current time
+    session_id = resolve_server_session_id()
+    if not session_id or session_id not in ssh_shells:
+        return jsonify(error="No active SSH connection. Connect this session first."), 400
 
-    # Prepare session data for the background task
+    session["active_server_session_id"] = session_id
     session_data = {
-        'sid': session.sid,
+        'sid': session_id,
         'username': session.get('username'),
         'password': session.get('password'),
-        'hostname': session.get('hostname')
+        'hostname': session.get('hostname'),
+        'server': session.get('server'),
+        'port': session.get('port'),
     }
 
     if action == "start":
-        stop_full_ai.clear()
-        loop[session.sid] = 1
-        # Start the background task with session data
+        flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
+        flag.clear()
+        loop[session_id] = 1
         socketio.start_background_task(autonomous, session_data)
 
     elif action == "stop":
-        stop_full_ai.set()  # Signal the task to stop
-        loop[session.sid] = 0
+        flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
+        flag.set()
+        loop[session_id] = 0
         debug_logger.info(f"Action '{action}' triggered at {time_str}. Emitting 'Stopping..' message.")
-        socketio.emit('message', {'data': 'Stopping..'}, namespace='/get')
+        emit_session(session_id, "Stopping Full AI…", color="#8b949e")
 
     else:
         debug_logger.warning(f"Invalid action received: {action}")
@@ -751,15 +875,13 @@ def execute():
 
     # Debugging statement to log each request to this endpoint
     debug_logger.debug("Received a POST request to /execute")
-    # socketio.emit('message', {'data': "Received a POST request to /execute"}, namespace='/get')
 
-    # Check if the user is logged in
-    if 'logged_in' not in session:
-        debug_logger.warning("Attempt to execute command without authentication.")
-        return jsonify(error="Unauthorized"), 401
+    session_id = resolve_server_session_id()
+    if not session_id or session_id not in ssh_shells:
+        debug_logger.warning("Execute without active SSH session.")
+        return jsonify(error="No active SSH connection. Connect this session first."), 400
 
-    # Logging session ID for debugging
-    session_id = session.sid
+    session["active_server_session_id"] = session_id
     debug_logger.debug(f"Session ID: {session_id}")
     try:
         try:
@@ -801,12 +923,15 @@ def execute():
 
         last_commands[session_id] = command
         shell.sendline(command)
-        socketio.emit('message', {'data': f"{prompt_delimiter.decode('utf-8').strip()} "+command}, namespace='/get')
+        delim = prompt_delimiter.decode('utf-8').strip() if isinstance(prompt_delimiter, (bytes, bytearray)) else str(prompt_delimiter).strip()
+        emit_session(session_id, f"{delim} {command}")
 
         output = ""
         return jsonify(output=output), 200
     except Exception as e:
-        socketio.emit('message', {'data': f"[ERROR] Failed to execute command - {e}"}, namespace='/get')
+        sid = resolve_server_session_id()
+        if sid:
+            emit_session(sid, f"[ERROR] Failed to execute command - {e}", color="#f85149")
         debug_logger.exception("Failed to execute command.")
         return jsonify(error=str(e)), 500
 
@@ -814,21 +939,42 @@ def modify_entry(entry_type, action):
     """ Generic function to add or remove an entry dynamically. """
     debug_logger.debug(f"Received request to {action} {entry_type}.")
 
-    if 'logged_in' not in session:
-        debug_logger.warning("Unauthorized access attempt.")
-        return jsonify(error="Unauthorized"), 401
-
-    data = request.get_json()
+    data = request.get_json() or {}
     text = data.get("text", "").strip()
     if not text:
         debug_logger.warning("Invalid or empty input received.")
         return jsonify(success=False, message="Invalid or empty input."), 400
 
-    session_id = session.sid
+    session_id = resolve_server_session_id()
+    if not session_id:
+        return jsonify(success=False, message="No session selected."), 400
+
+    from ramigpt.services.session_store import get_session_store
+
+    store = get_session_store()
     priv_esc = prompts.get(session_id)
-    if not priv_esc:
-        debug_logger.error(f"Session error: No privilege escalation object found for session {session_id}.")
-        return jsonify(success=False, message="Session error."), 500
+
+    # If not connected yet, still allow editing persisted guidance for this session
+    if priv_esc is None:
+        try:
+            ctx = store.get_prompt_context(session_id)
+        except KeyError:
+            return jsonify(success=False, message="Session not found."), 404
+        bucket = {"fact": "facts", "hint": "hints", "avoid": "avoids"}.get(entry_type)
+        if not bucket:
+            return jsonify(success=False, message="Invalid operation."), 400
+        items = list(ctx[bucket])
+        if action == "add":
+            if text not in items:
+                items.append(text)
+        else:
+            items = [i for i in items if i != text]
+        updated = store.set_prompt_context(session_id, **{bucket: items})
+        return jsonify(
+            success=True,
+            message=f"{entry_type.capitalize()} {action}d successfully.",
+            **updated,
+        ), 200
 
     # Get the correct function dynamically
     function_name = ENTRY_TYPES.get(entry_type, {}).get(action)
@@ -843,8 +989,18 @@ def modify_entry(entry_type, action):
     try:
         # Execute the function dynamically
         getattr(priv_esc, function_name)(text)
+        # Persist so reconnect / session switch keeps Facts, Hints, Avoid
+        store.sync_prompt_lists_from_runtime(
+            session_id, priv_esc.facts, priv_esc.hints, priv_esc.avoids
+        )
         debug_logger.info(f"Successfully {action}d {entry_type}: {text}")
-        return jsonify(success=True, message=f"{entry_type.capitalize()} {action}d successfully."), 200
+        return jsonify(
+            success=True,
+            message=f"{entry_type.capitalize()} {action}d successfully.",
+            facts=list(priv_esc.facts),
+            hints=list(priv_esc.hints),
+            avoids=list(priv_esc.avoids),
+        ), 200
     except Exception as e:
         debug_logger.exception(f"Error occurred while executing {function_name} for {entry_type}: {e}")
         return jsonify(success=False, message="Internal server error."), 500
@@ -860,13 +1016,27 @@ def handle_entry(entry_type):
 
 @app.route('/logout')
 def logout():
-    session_id = session.sid
-    if session_id in ssh_shells:
-        ssh_shells[session_id].close()  # Close the shell
-        del ssh_shells[session_id]  # Remove from global dictionary
-    session.pop('logged_in', None)
+    # Disconnect active inventory session if present
+    active = session.get("active_server_session_id")
+    if active and active in ssh_shells:
+        close_ssh_connection(active)
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
+
+
+from ramigpt.web.inventory_api import register_inventory_routes
+
+register_inventory_routes(
+    app,
+    ssh_shells=ssh_shells,
+    ssh_ssh_conns=ssh_ssh_conns,
+    prompts=prompts,
+    prompt_delimiters=prompt_delimiters,
+    open_ssh_connection=get_or_create_ssh_shell,
+    close_ssh_connection=close_ssh_connection,
+    emit_session=emit_session,
+    start_shell_listener=start_shell_listener,
+)
 
 
 @app.route('/api/settings', methods=['GET'])
@@ -966,13 +1136,29 @@ def test_ai_settings():
 
 
 if __name__ == '__main__':
+    # Prefer: python app.py (project root). Reloader defaults on via APP_RELOAD.
     host = os.getenv("APP_HOST", "127.0.0.1")
     port = int(os.getenv("APP_PORT", "8443"))
+    use_reloader = os.getenv("APP_RELOAD", "1").strip().lower() in {"1", "true", "yes", "on"}
+    if use_reloader:
+        app.config["TEMPLATES_AUTO_RELOAD"] = True
     socketio.run(
         app,
         host=host,
         port=port,
         debug=False,
+        use_reloader=use_reloader,
+        reloader_options={
+            "exclude_patterns": [
+                "*/data/*",
+                "*/.git/*",
+                "*/venv/*",
+                "*/__pycache__/*",
+                "*/certs/*",
+                "*.pyc",
+                "*.log",
+            ],
+        },
         keyfile=_KEY_FILE,
         certfile=_CERT_FILE,
         allow_unsafe_werkzeug=True,
