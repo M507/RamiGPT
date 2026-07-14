@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_session import Session
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
+from pathlib import Path
 import logging
 import os
 import time
@@ -250,58 +251,166 @@ def terminal_legacy():
 def login():
     return render_template('login.html')
 
-def upload_beroot(ssh_conn):
-    # Directory to be copied and destination
-    local_path = str(BEROOT_DIR)
-    remote_path = '/tmp/'
+def _sh_single_quote(value: str) -> str:
+    """Escape a string for safe inclusion inside shell single quotes."""
+    return "'" + str(value or "").replace("'", "'\"'\"'") + "'"
 
-    # Copy directory to server
-    ssh_conn.upload(local_path, remote_path)
-    socketio.emit('message', {'data': f'ssh_conn.upload uploading\n', 'color': "#1E90FF"}, namespace='/get')
 
-    # Opening a shell
-    shell = ssh_conn.process('/bin/sh', env={'TERM': ''})
+def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 180) -> str:
+    """
+    Upload tools/beroot/Linux to /tmp/Linux on the remote host, run BeRoot,
+    and return the scanner stdout (also written remotely to /tmp/beroot.txt).
+    """
+    ensure_runtime_dirs()
+    if not BEROOT_DIR.is_dir() or not (BEROOT_DIR / "beroot.py").is_file():
+        raise FileNotFoundError(f"BeRoot package missing at {BEROOT_DIR}")
 
-    shell_output_bytes, \
-    shell_output_lines, \
-    shell_output_lines_string, \
-    shell_output = shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default)
-    debug_logger.debug(f"upload_beroot.shell_recvuntil() shell_output: {shell_output}\n")
+    if slog is not None:
+        slog.info(f"beroot: uploading {BEROOT_DIR} → /tmp/")
+    # pwntools uploads the directory itself, landing as /tmp/Linux/
+    ssh_conn.upload(str(BEROOT_DIR), "/tmp/")
 
-    # Executing the specific command sequence
-    command = """{ python3 /tmp/Linux/beroot.py --password '"""+session.get('password')+"""' || python /tmp/Linux/beroot.py --password '"""+session.get('password')+"""'; } 2>/dev/null | tee /tmp/output.txt; cp /tmp/output.txt /tmp/beroot.txt"""
-    shell.sendline(command)
-    socketio.emit('message', {'data': f'connecting shell.sendline(command)\n', 'color': "#1E90FF"}, namespace='/get')
+    pw = _sh_single_quote(password)
+    # cd into the package so `from beroot.run import run` resolves.
+    remote_cmd = (
+        "cd /tmp/Linux && "
+        "{ python3 beroot.py --password "
+        + pw
+        + " || python beroot.py --password "
+        + pw
+        + "; } > /tmp/beroot.txt 2>&1; "
+        "echo __BEROOT_EXIT__:$?; "
+        "wc -c /tmp/beroot.txt"
+    )
+    if slog is not None:
+        slog.info("beroot: starting remote scan (this can take a minute)")
 
-    debug_logger.debug(f"python3 /tmp/Linux/beroot.py commnad")
+    runner = ssh_conn.process("/bin/sh", env={"TERM": ""})
+    try:
+        # Drain banner / prompt noise briefly
+        recv_for_duration(runner, 1.0)
+        runner.sendline(remote_cmd.encode() if isinstance(remote_cmd, str) else remote_cmd)
+        deadline = time.time() + max(30, int(timeout))
+        buf = b""
+        while time.time() < deadline:
+            try:
+                chunk = runner.recv(timeout=2)
+            except Exception:  # noqa: BLE001
+                chunk = b""
+            if chunk:
+                buf += chunk
+                if b"__BEROOT_EXIT__:" in buf:
+                    # Grab trailing wc line
+                    try:
+                        buf += runner.recv(timeout=2)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break
+        else:
+            # Timed out — still try to read whatever is left and the output file.
+            if slog is not None:
+                slog.warning(f"beroot: remote scan timed out after {timeout}s — fetching partial output")
+            extra = recv_for_duration(runner, 2)
+            if extra:
+                buf += extra
+    finally:
+        try:
+            runner.close()
+        except Exception:  # noqa: BLE001
+            pass
 
-    shell_output_bytes, \
-    shell_output_lines, \
-    shell_output_lines_string, \
-    shell_output = shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default)
-    
-    debug_logger.debug(f"upload_beroot.shell_recvuntil() shell_output: {shell_output}\n")
-    socketio.emit('message', {'data': f'shell_output: {shell_output}\n', 'color': "#1E90FF"}, namespace='/get')
+    # Prefer the file BeRoot wrote; fall back to captured stdout.
+    text = ""
+    try:
+        raw = ssh_conn.download_data("/tmp/beroot.txt")
+        if isinstance(raw, bytes):
+            text = raw.decode("utf-8", errors="replace")
+        else:
+            text = str(raw or "")
+    except Exception as exc:  # noqa: BLE001
+        if slog is not None:
+            slog.warning(f"beroot: download /tmp/beroot.txt failed: {exc}")
+        text = buf.decode("utf-8", errors="replace")
 
-    shell.close()
+    text = (text or "").strip()
+    if not text:
+        raise RuntimeError(
+            "BeRoot produced empty output. "
+            f"Remote buffer tail: {buf[-500:]!r}"
+        )
+
+    # BeRoot's sudo -ll parser often misses modern NOPASSWD listings; append a
+    # plain `sudo -l` capture so privilege-escalation rules stay visible to the AI.
+    try:
+        probe = ssh_conn.process("/bin/sh", env={"TERM": ""})
+        try:
+            recv_for_duration(probe, 0.5)
+            probe_cmd = (
+                f"echo { _sh_single_quote(password) } | sudo -S -l 2>/dev/null; "
+                "sudo -ln 2>/dev/null; echo __SUDO_L_DONE__"
+            )
+            probe.sendline(probe_cmd.encode())
+            pbuf = b""
+            p_end = time.time() + 20
+            while time.time() < p_end:
+                try:
+                    chunk = probe.recv(timeout=1)
+                except Exception:  # noqa: BLE001
+                    chunk = b""
+                if chunk:
+                    pbuf += chunk
+                    if b"__SUDO_L_DONE__" in pbuf:
+                        break
+            sudo_l = pbuf.decode("utf-8", errors="replace")
+            sudo_l = sudo_l.split("__SUDO_L_DONE__")[0]
+            # Drop shell echo of the command / prompt noise
+            lines = [
+                ln for ln in sudo_l.splitlines()
+                if ln.strip() and not ln.strip().startswith("$")
+                and "sudo -S -l" not in ln and "sudo -ln" not in ln
+            ]
+            sudo_clean = "\n".join(lines).strip()
+            if sudo_clean and (
+                "may run" in sudo_clean.lower()
+                or "NOPASSWD" in sudo_clean
+                or "sudoers" in sudo_clean.lower()
+                or "(root)" in sudo_clean
+            ):
+                text = (
+                    text
+                    + "\n\n################ sudo -l (runner capture) ################\n\n"
+                    + sudo_clean
+                    + "\n"
+                )
+        finally:
+            try:
+                probe.close()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as exc:  # noqa: BLE001
+        if slog is not None:
+            slog.warning(f"beroot: sudo -l enrichment skipped: {exc}")
+
+    if slog is not None:
+        slog.info(f"beroot: scan finished ({len(text)} chars)")
+        slog.block("BEROOT_OUTPUT", text[:20000])
+    return text
+
 
 def get_or_create_ssh_shell(session_id, create_new=False):
     if session_id in ssh_shells:
         return ssh_shells[session_id]
     elif create_new:
         try:
-            # SSH connection setup
+            # SSH connection setup (BeRoot is NOT uploaded here — Run tool does that)
             ssh_conn = ssh(
                 user=session.get('username'),
-                host=session.get('server'), 
-                port=session.get('port'), 
+                host=session.get('server'),
+                port=session.get('port'),
                 password=session.get('password'),
                 timeout=10,
             )
             ssh_conn.set_env('TERM', '')
-            
-            # Upload beroot files to the server
-            upload_beroot(ssh_conn)
 
             # Opening a shell
             shell = ssh_conn.process('/bin/sh', env={'TERM': ''})
@@ -309,7 +418,7 @@ def get_or_create_ssh_shell(session_id, create_new=False):
             shell_output_lines, \
             shell_output_lines_string, \
             shell_output = shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default)
-            
+
             # Saving the shell and connection objects
             ssh_shells[session_id] = shell
             ssh_ssh_conns[session_id] = ssh_conn
@@ -420,13 +529,13 @@ def shell_conditions(command, shell, prompt_delimiter, session_data, just_got_ro
                 return 
                 break
             if "Password:" in shell_output:
-                debug_logger.info(f"Prompting for password: {shell_output}")
+                debug_logger.info("password prompt detected (su)")
                 shell.sendline(session_data.get('password'))
     if command.startswith("sudo ") and not command.startswith("sudo -l"):
         shell_output = recv_for_duration(shell, timeout_default).decode('utf-8').strip()
         priv_esc.add_history(f"{prompt_delimiter.decode('utf-8').strip()} {command}", shell_output)
         if f"password for {session_data.get('username')}" in shell_output:
-            debug_logger.info(f"Sudo password required: {shell_output}")
+            debug_logger.info("password prompt detected (sudo)")
             shell.sendline(session_data.get('password'))
 
     if "sudo " in command and not command.startswith("sudo -l"):
@@ -459,7 +568,10 @@ def autonomous(session_data):
         slog = get_session_logger(session_id)
         max_reqs = _max_ai_requests()
         emit_session(session_id, f'Giving AI full freedom to send {max_reqs} commands', color="#58a6ff")
-        debug_logger.info(f"Starting autonomous loop for session: {session_id}")
+        debug_logger.info(
+            f"full_ai.start session_id={session_id!r} host={session_data.get('server')!r}:"
+            f"{session_data.get('port')}"
+        )
         slog.event(
             "FULL_AI_START",
             f"Starting autonomous loop (max_reqs={max_reqs})",
@@ -467,8 +579,17 @@ def autonomous(session_data):
             server=session_data.get("server"),
             port=session_data.get("port"),
         )
+        GlobalTimer.start(
+            session_id,
+            hostname=session_data.get("hostname"),
+            server=session_data.get("server"),
+            port=session_data.get("port"),
+            username=session_data.get("username"),
+            max_reqs=max_reqs,
+        )
         i = 0
         just_got_root = False
+        stop_reason = "max_requests"
         stop_flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         reconnect_budget = 3
         
@@ -477,19 +598,17 @@ def autonomous(session_data):
         shell = ssh_shells.get(session_id)
         priv_esc = prompts.get(session_id)
 
-        # Debug initial state of the session-specific objects
-        debug_logger.debug(f"autonomous(): Initial setup for session {session_id}: prompt_delimiter={prompt_delimiter}, shell={shell}, priv_esc={priv_esc}")
         slog.info(f"initial shell={bool(shell)} prompt_delimiter={prompt_delimiter!r} priv_esc={bool(priv_esc)}")
         
         while i < max_reqs:  # Ensure the loop runs only if it's enabled
             if stop_flag.is_set():
+                stop_reason = "stopped"
                 slog.event("FULL_AI_STOP", "Stop flag set — exiting autonomous loop")
                 break
             socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
             i += 1
             try:
                 emit_session(session_id, f"AI request#{i}======================================================================", color="#f85149")
-                debug_logger.debug(f"AI request#{i}======================================================================")
                 slog.info(f"AI request#{i}")
                 
                 # Create a prompt
@@ -497,16 +616,14 @@ def autonomous(session_data):
                 if _debug_enabled():
                     emit_session(session_id, f"[DEBUG] About to send prompt:\n{prompt}")
                 
-                debug_logger.debug(f"[DEBUG] About to send prompt:\n{prompt}")
+                # Prompt/response live in the session run log only (not debug.log).
                 slog.debug(f"prompt #{i}:\n{prompt}")
 
-                GlobalTimer.start()
                 system = "You are an experienced pentester."
                 response = get_answer(system, prompt)
                 trimmed_ai_command = priv_esc.filter_output(response)
                 command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
                 
-                debug_logger.info(f"Executing command: {command}")
                 slog.ai_turn(
                     request_n=i,
                     system=system,
@@ -521,6 +638,7 @@ def autonomous(session_data):
                 if shell is None:
                     slog.error("No shell available before sendline — attempting reconnect")
                     if not _reconnect_shell_for_session(session_id, session_data, slog):
+                        stop_reason = "reconnect_failed"
                         break
                     slog = get_session_logger(session_id)
                     shell = ssh_shells.get(session_id)
@@ -668,9 +786,9 @@ def autonomous(session_data):
                             )
                             if diagnosis.get("got_root"):
                                 last_line = shell_output_lines[-1] if shell_output_lines else shell_output
-                                GlobalTimer.stop(f"""Autonomous - Hostname:{hostname}, Server:{session_data.get('server')}, Username:{session_data.get('username')}""".strip('\n'))
                                 emit_session(session_id, f"{shell_output}\npwned!")
                                 just_got_root = True
+                                stop_reason = "root"
                                 root_won_by_session[session_id] = True
                                 try:
                                     from ramigpt.benchmark.orchestrator import mark_root_won
@@ -701,11 +819,11 @@ def autonomous(session_data):
                                 reconnect_budget=reconnect_budget,
                             )
                             emit_session(session_id, "[BREAKAGE] Reconnect failed — stopping Full AI", color="#f85149")
+                            stop_reason = "reconnect_exhausted"
                             break
 
                     last_line = shell_output_lines[-1] if shell_output_lines else ""
                 
-                debug_logger.debug(f"[Debug] shell_output: {shell_output}")
                 processed_output = priv_esc.remove_last_line(shell_output)
                 processed_output = priv_esc.process_command_output(command, processed_output)
                 # Do not prefix with the shell prompt — that taught the model to emit "$ cmd".
@@ -738,10 +856,9 @@ def autonomous(session_data):
                 )
 
                 if won:
-                    GlobalTimer.stop(f"""Autonomous - Hostname:{hostname}, Server:{session_data.get('server')}, Username:{session_data.get('username')}""".strip('\n'))
-                    # prompt_delimiters[session_id] = last_line
                     emit_session(session_id, f"{shell_output}\npwned!")
                     just_got_root = True
+                    stop_reason = "root"
                     root_won_by_session[session_id] = True
                     try:
                         from ramigpt.benchmark.orchestrator import mark_root_won
@@ -753,17 +870,29 @@ def autonomous(session_data):
                     emit_session(session_id, f"{summary}\n", color="#1E90FF")
                     break
             except Exception as e:
-                debug_logger.exception("Failed to execute command.")
+                debug_logger.exception(f"full_ai.error session_id={session_id!r}")
                 slog.exception(f"Failed to execute command: {e}")
                 slog.event("ERROR", str(e), ai_request=i)
                 emit_session(session_id, f"Error: {str(e)}")
-                output = ""
+                stop_reason = "error"
                 break
         slog.event(
             "FULL_AI_END",
             "Autonomous loop finished",
             got_root=just_got_root,
             requests_run=i,
+            stop_reason=stop_reason,
+        )
+        GlobalTimer.stop(
+            session_id,
+            label="FULL_AI",
+            outcome="root" if just_got_root else stop_reason,
+            requests_run=i,
+            got_root=just_got_root,
+        )
+        debug_logger.info(
+            f"full_ai.end session_id={session_id!r} got_root={just_got_root} "
+            f"requests={i} reason={stop_reason}"
         )
         try:
             from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -772,73 +901,132 @@ def autonomous(session_data):
             pass
 
 
-def execute_beroot(session):
-    """Background task for a specific session using passed session data."""
-    session_id = session['sid']
-    ssh_conn = ssh_ssh_conns.get(session_id)
-    shell = ssh_shells.get(session_id)
-    prompt_delimiter = prompt_delimiters.get(session_id, "$").decode('utf-8').strip()
+def execute_beroot(session_data):
+    """
+    Background task: upload BeRoot to the target, run it, pull results into the
+    session prompt context, then optionally ask the AI for one follow-up command.
+    """
+    with app.app_context():
+        session_id = session_data["sid"]
+        slog = get_session_logger(session_id)
+        ssh_conn = ssh_ssh_conns.get(session_id)
+        shell = ssh_shells.get(session_id)
+        delim = prompt_delimiters.get(session_id, b"$ ")
+        if isinstance(delim, (bytes, bytearray)):
+            prompt_delim_str = delim.decode("utf-8", errors="replace").strip()
+        else:
+            prompt_delim_str = str(delim).strip()
 
-    # Downloading the beroot.txt file
-    local_filename = str(BEROOT_DOWNLOADS_DIR / f"{session_id}_beroot.txt")
-    ssh_conn.download('/tmp/beroot.txt', local_filename)
-    socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
-    
-    # Logging successful download
-    debug_logger.info(f"beroot.txt file downloaded successfully as {local_filename}")
-    if _debug_enabled():
-        socketio.emit('message', {'data': f"beroot.txt file downloaded successfully as {local_filename}"}, namespace='/get')
-    
-    beroots[session_id] = local_filename
+        if ssh_conn is None:
+            emit_session(session_id, "[BeRoot] No SSH connection — connect first.", color="#f85149")
+            loop[session_id] = 0
+            return
 
-    beroot_file = beroots[session_id]
-    beroot_string = read_file_to_string(beroot_file)
-    
-    priv_esc = prompts.get(session_id)
-    priv_esc.set_BeRoot(beroot_string)
+        password = session_data.get("password") or ""
+        slog.event(
+            "BEROOT_START",
+            "Uploading and running BeRoot on remote host",
+            server=session_data.get("server"),
+            port=session_data.get("port"),
+            username=session_data.get("username"),
+        )
+        emit_session(session_id, "[BeRoot] Uploading toolkit to /tmp/Linux …", color="#58a6ff")
+        debug_logger.info(
+            f"beroot.start session_id={session_id!r} "
+            f"host={session_data.get('server')!r}:{session_data.get('port')}"
+        )
 
-    socketio.emit('message', {'data': f"[EXCUTION] BeRoot:\n{beroot_string}", 'color': "#FF0000"}, namespace='/get')
+        try:
+            beroot_string = upload_and_run_beroot(
+                ssh_conn,
+                password=password,
+                slog=slog,
+                timeout=180,
+            )
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception(f"beroot.failed session_id={session_id!r}")
+            slog.exception(f"beroot failed: {exc}")
+            slog.event("BEROOT_FAILED", str(exc))
+            emit_session(session_id, f"[BeRoot] Failed: {exc}", color="#f85149")
+            loop[session_id] = 0
+            return
 
-    # Create a prompt
-    prompt = priv_esc.generate_prompt()
-    if _debug_enabled():
-        socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
+        # Persist a local copy for the session
+        ensure_runtime_dirs()
+        local_filename = str(BEROOT_DOWNLOADS_DIR / f"{session_id}_beroot.txt")
+        try:
+            Path(local_filename).write_text(beroot_string, encoding="utf-8")
+            # Also try SFTP download so /tmp/beroot.txt and local stay aligned
+            try:
+                ssh_conn.download("/tmp/beroot.txt", local_filename)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as exc:  # noqa: BLE001
+            slog.warning(f"beroot: could not write local copy: {exc}")
 
-    system = "You are an experienced pentester."
-    response = get_answer(system, prompt)
-    trimmed_ai_command = priv_esc.filter_output(response)
-    command = remove_matching_quotes(trimmed_ai_command)
-    #socketio.emit('message', {'data': f"[DEBUG] About to execute command:\n{command}"}, namespace='/get')
-    
-    debug_logger.info(f"Executing command: {command}")
-    shell.sendline(command)
-    last_commands[session_id] = command
-    socketio.emit('message', {'data': f"{prompt_delimiter} {command}"}, namespace='/get')
+        beroots[session_id] = local_filename
+        priv_esc = prompts.get(session_id)
+        if priv_esc is not None:
+            priv_esc.set_BeRoot(beroot_string)
+
+        preview = beroot_string if len(beroot_string) < 12000 else (
+            beroot_string[:6000] + "\n…[truncated]…\n" + beroot_string[-4000:]
+        )
+        emit_session(session_id, f"[BeRoot] Scan complete ({len(beroot_string)} chars):\n{preview}", color="#1E90FF")
+        slog.event("BEROOT_OK", f"Scan complete ({len(beroot_string)} chars)", local_file=local_filename)
+        debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)}")
+
+        # Optional: ask the AI for one command informed by BeRoot findings.
+        if priv_esc is None or shell is None:
+            loop[session_id] = 0
+            return
+        try:
+            prompt = priv_esc.generate_prompt()
+            system = "You are an experienced pentester."
+            response = get_answer(system, prompt)
+            command = normalize_ai_command(remove_matching_quotes(priv_esc.filter_output(response)))
+            if not command:
+                emit_session(session_id, "[BeRoot] AI returned no follow-up command.", color="#8b949e")
+                loop[session_id] = 0
+                return
+            slog.ai_turn(
+                request_n=len(getattr(priv_esc, "history", []) or []) + 1,
+                system=system,
+                prompt=prompt or "",
+                raw_response=response or "",
+                filtered_command=command or "",
+                source="beroot_followup",
+            )
+            last_commands[session_id] = command
+            shell.sendline(command)
+            emit_session(session_id, f"{prompt_delim_str} {command}")
+        except Exception as exc:  # noqa: BLE001
+            slog.warning(f"beroot AI follow-up skipped: {exc}")
+            emit_session(session_id, f"[BeRoot] Scan saved; AI follow-up skipped: {exc}", color="#8b949e")
+        finally:
+            loop[session_id] = 0
 
 
 @app.route('/action3', methods=['POST', 'DELETE'])
 @login_required
 def action3():
-    debug_logger.debug("Received request at /action3 endpoint.")
-    
     if not request.is_json:
         debug_logger.warning("Request does not contain JSON data.")
         return jsonify(error="Invalid request format."), 400
 
-    action = request.json.get('action', '').strip()
-    debug_logger.debug(f"Action received: {action}")
-
+    action = (request.json.get('action') or '').strip()
     if not action:
-        debug_logger.warning("No action specified in the request.")
         return jsonify(error="Missing action parameter."), 400
 
-    time_str = time.strftime('%H:%M:%S')  # Get current time
-
+    time_str = time.strftime('%H:%M:%S')
 
     if action == "start":
         session_id = resolve_server_session_id()
         if not session_id or session_id not in ssh_shells:
             return jsonify(error="No active SSH connection. Connect this session first."), 400
+        if session_id not in ssh_ssh_conns:
+            return jsonify(error="No SSH connection object for this session."), 400
+        # Pause the interactive listener so it does not race BeRoot's helper shell.
         loop[session_id] = 1
         session_data_copy = {
             "sid": session_id,
@@ -849,20 +1037,20 @@ def action3():
             "port": session.get("port"),
         }
         socketio.start_background_task(execute_beroot, session_data_copy)
-        emit_session(session_id, "Starting BeRoot…", color="#58a6ff")
+        emit_session(session_id, "Starting BeRoot (upload + scan)…", color="#58a6ff")
+        return jsonify(output="beroot_started", session_id=session_id), 200
 
     elif action == "stop":
         session_id = resolve_server_session_id()
         if session_id:
             loop[session_id] = 0
             emit_session(session_id, "Stopping…", color="#8b949e")
-        debug_logger.info(f"Action '{action}' triggered at {time_str}. Emitting 'Stopping..' message.")
+        debug_logger.info(f"Action '{action}' triggered at {time_str}.")
+        return jsonify(output="response"), 200
 
     else:
         debug_logger.warning(f"Invalid action received: {action}")
         return jsonify(error="Invalid action specified."), 400
-
-    return jsonify(output="response"), 200
 
 
 @app.route('/action1', methods=['POST', 'DELETE'])
@@ -976,7 +1164,6 @@ def shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
 def shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_default, session = None, emit_func = None):
-    debug_logger.info(f"shell_recvuntil_v2() :{line}")
     shell_output_bytes  = shell.recvuntil(prompt_delimiter, drop=False, timeout=timeout_default)
     shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
     shell_output        = shell_output_bytes.decode('utf-8').strip()
@@ -985,13 +1172,11 @@ def shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_defa
         if emit_func != None:
             if _debug_enabled():
                 emit_func('message', {'data': f"[Debug] Password:"}, namespace='/get')
-        debug_logger.info(f"if Password: in line:{line}")
         shell.sendline(session.get('password'))  # Send the sudo password
     if f"password for {session.get('username')}" in shell_output:
         if emit_func != None:
             if _debug_enabled():
                 emit_func('message', {'data': f"[Debug] Password:"}, namespace='/get')
-        debug_logger.info(f"Sudo password required: {shell_output}")
         shell.sendline(session.get('password'))
     if emit_func != None:
         if _debug_enabled():
@@ -1005,8 +1190,6 @@ def shell_recvuntil_v3(shell, prompt_delimiter, drop=False, timeout=timeout_defa
         # Handle the case where the recvuntil times out, possibly due to a sudo password prompt
         if emit_func:
             emit_func('message', {'data': '[Debug] Timeout occurred, possibly stuck at prompt'}, namespace='/get')
-        debug_logger.warning("Timeout occurred, attempting to handle sudo password prompt")
-        
         shell.sendline(session.get('password'))  # Attempt to send the password
         shell_output_bytes = shell.recvuntil(prompt_delimiter, drop=drop, timeout=timeout)  # Try to receive again
 
@@ -1019,9 +1202,6 @@ def shell_recvuntil_v3(shell, prompt_delimiter, drop=False, timeout=timeout_defa
         if _debug_enabled():
             emit_func('message', {'data': f"[Debug] shell_recvuntil_v2:{shell_output_lines_string}"}, namespace='/get')
     
-    # Logging the output for debugging
-    debug_logger.info(f"shell_recvuntil_v2() output: {shell_output}")
-
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
 def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_default, session=None, emit_func=None):
@@ -1040,11 +1220,10 @@ def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_defa
             # Handle the case where the recvuntil times out, possibly due to a sudo password prompt
             #emit_func('message', {'data': f"[Debug] {shell_output_lines_string}", 'color': "#1E90FF"}, namespace='/get')
             emit_func('message', {'data': '[Debug] Timeout occurred, possibly stuck at prompt', 'color': "#FF0000"}, namespace='/get')
-            debug_logger.warning("Timeout occurred, attempting to handle sudo password prompt")
             return None, None, None, None
         except Exception as e:
             #emit_func('message', {'data': f"[Debug] {shell_output_lines_string}", 'color': "#1E90FF"}, namespace='/get')
-            debug_logger.error(f"Unexpected error in shell_recvuntil_v4: {str(e)}")
+            debug_logger.error(f"shell_recvuntil_v4 error: {e}")
             emit_func('message', {'data': f"[Debug] shell_recvuntil_v4 - Error: {str(e)}", 'color': "#FF0000"}, namespace='/get')
             return None, None, None, None
 
@@ -1065,7 +1244,6 @@ def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_defa
 
 def shell_interaction(shell, emit_func, session, max_retries=1000000):
     with app.app_context():
-        debug_logger.debug("[Debug] Entering shell_interaction")
         session_id = session['sid']
         slog = get_session_logger(session_id)
         shell = ssh_shells.get(session_id)
@@ -1097,7 +1275,6 @@ def shell_interaction(shell, emit_func, session, max_retries=1000000):
                             command = last_commands.get(session_id, "")
                             decoded_data = priv_esc.process_command_output(command, decoded_data)
                             priv_esc.add_history(command, decoded_data)
-                            prompt = priv_esc.generate_prompt()
                             io_n += 1
                             slog.shell_io(
                                 request_n=io_n,
@@ -1119,28 +1296,23 @@ def shell_interaction(shell, emit_func, session, max_retries=1000000):
                                     reasons=diagnosis,
                                 )
 
-                            debug_logger.debug(f"[Debug] shell_interaction() Data received: {decoded_data}\nprompt:{prompt}")
                             emit_func('message', {'data': f"{decoded_data}\n"}, namespace='/get')
 
             except EOFError:
-                debug_logger.error("[Debug] EOFError: Shell stream closed.")
+                debug_logger.warning(f"shell_interaction EOF session_id={session_id!r}")
                 emit_func('message', {'data': "[Debug] Shell stream closed", 'color': "#FF0000"}, namespace='/get')
                 retries += 1
                 if retries < max_retries:
-                    debug_logger.info(f"Retrying shell interaction... Attempt {retries + 1}")
-                continue
+                    continue
             
-            except Exception as e:
-                #debug_logger.error(f"Unexpected error in shell_interaction: {str(e)}")
-                #emit_func('message', {'data': f"[Debug] Unexpected error in shell_interaction: {str(e)}", 'color': "#FF0000"}, namespace='/get')
+            except Exception:
                 retries += 1
                 if retries < max_retries:
-                    debug_logger.info(f"Retrying shell interaction... Attempt {retries + 1}")
-                continue
+                    continue
 
             break  # Exit loop if no exceptions are raised
         
-        debug_logger.debug("[Debug] Exiting shell_interaction")
+        slog.info("shell_interaction listener exited")
         emit_func('message', {'data': "[Debug] Exiting shell interaction", 'color': "#FF0000"}, namespace='/get')
 
 
@@ -1221,35 +1393,23 @@ def execute():
     global stop_task_flag
     stop_task_flag.clear()  # Make sure the flag is clear at the start
 
-    # Debugging statement to log each request to this endpoint
-    debug_logger.debug("Received a POST request to /execute")
-
     session_id = resolve_server_session_id()
     if not session_id or session_id not in ssh_shells:
-        debug_logger.warning("Execute without active SSH session.")
+        debug_logger.warning("execute rejected: no active SSH session")
         return jsonify(error="No active SSH connection. Connect this session first."), 400
 
     session["active_server_session_id"] = session_id
     slog = get_session_logger(session_id)
-    debug_logger.debug(f"Session ID: {session_id}")
     try:
         try:
-            # Initialize variables and fetch session specific objects
             trimmed_ai_command = ""
             just_got_root = False
             prompt_delimiter = prompt_delimiters.get(session_id, "$")  
             shell = ssh_shells.get(session_id)
             priv_esc = prompts.get(session_id)
 
-            # Debugging statements to log fetched objects and initial values
-            debug_logger.debug(f"Initial trimmed_ai_command: {trimmed_ai_command}")
-            debug_logger.debug(f"Initial just_got_root: {just_got_root}")
-            debug_logger.debug(f"Prompt delimiter for session {session_id}: {prompt_delimiter}")
-            debug_logger.debug(f"Shell object for session {session_id}: {shell}")
-            debug_logger.debug(f"Privilege escalation object for session {session_id}: {priv_esc}")
-
         except Exception as e:
-            debug_logger.error(f"An error occurred while executing command: {str(e)}", exc_info=True)
+            debug_logger.exception(f"execute setup failed session_id={session_id!r}")
             slog.exception(f"execute() setup failed: {e}")
             return jsonify(error=str(e)), 500
 
@@ -1264,7 +1424,6 @@ def execute():
 
         if from_ai:
             system = "You are an experienced pentester."
-            #socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
             response = get_answer(system, prompt)
             trimmed_ai_command = priv_esc.filter_output(response)
             trimmed_ai_command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
@@ -1277,11 +1436,8 @@ def execute():
                 filtered_command=command or "",
                 source="execute_ai",
             )
-            #socketio.emit('message', {'data': f"[DEBUG] About to send command:\n{command}\nFrom {response}"}, namespace='/get')
         else:
             slog.info(f"manual command requested: {command}")
-
-        debug_logger.info(f"Executing command: {command}")
 
         last_commands[session_id] = command
         shell.sendline(command)
@@ -1296,7 +1452,7 @@ def execute():
         if sid:
             emit_session(sid, f"[ERROR] Failed to execute command - {e}", color="#f85149")
             get_session_logger(sid).exception(f"Failed to execute command: {e}")
-        debug_logger.exception("Failed to execute command.")
+        debug_logger.exception(f"execute failed session_id={session_id!r}")
         return jsonify(error=str(e)), 500
 
 def modify_entry(entry_type, action):
