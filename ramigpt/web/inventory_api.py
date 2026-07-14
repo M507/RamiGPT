@@ -16,6 +16,7 @@ from ramigpt.services.runtime_status import (
 )
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
+from ramigpt.utils.session_logging import get_session_logger
 
 
 def register_inventory_routes(
@@ -155,6 +156,13 @@ def register_inventory_routes(
             set_status(session_id, "connected")
             store.touch_recent(session_id)
             start_shell_listener(session_id)
+            get_session_logger(session_id).event(
+                "CONNECT",
+                f"Connected to {saved.host}:{saved.port}",
+                username=saved.username,
+                hostname=saved.hostname,
+                name=saved.name,
+            )
             emit_session(
                 session_id,
                 f"[+] Connected to {saved.name} ({saved.host}:{saved.port})",
@@ -188,6 +196,7 @@ def register_inventory_routes(
                 )
             close_ssh_connection(session_id)
             set_status(session_id, "disconnected")
+            get_session_logger(session_id).event("DISCONNECT", "Session disconnected")
             emit_session(session_id, "[*] Disconnected", color="#8b949e")
             return jsonify(success=True, status="disconnected"), 200
         except Exception as exc:

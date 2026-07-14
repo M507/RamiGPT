@@ -6,19 +6,32 @@ __pycache__/
 *.pyo
 *.log
 *.pem
+*.jsonl
 
-# Runtime data
-data/logs/*
+# Runtime data — global + per-session logs
+data/logs/**
 !data/logs/.gitkeep
+!data/logs/sessions/
+!data/logs/sessions/.gitkeep
+# Keep directory, ignore everything under each session id
+data/logs/sessions/**
+!data/logs/sessions/.gitkeep
+
 data/sessions/**
 !data/sessions/.gitkeep
 !data/sessions/hosts/
 !data/sessions/hosts/.gitkeep
+
+# Local benchmark lab credentials (never commit)
 data/benchmark/remote.json
 !data/benchmark/.gitkeep
 !data/benchmark/remote.example.json
+
 tools/beroot/Linux/downloaded/*
 !tools/beroot/Linux/downloaded/.gitkeep
+
+# Flask filesystem sessions
+data/sessions/flask_session/
 
 # IDE / OS
 .idea/
