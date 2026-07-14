@@ -8,7 +8,9 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+import json
 
 from ramigpt.benchmark.targets import TARGETS
 from ramigpt.paths import PROJECT_ROOT
@@ -120,6 +122,39 @@ def tear_down_local(log: LogFn = _default_log) -> None:
         log(f"Local teardown warning: {exc}")
 
 
+def test_ssh_access(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> Dict[str, Any]:
+    """Verify SSH login to the remote lab host (pre-flight before Ansible)."""
+    try:
+        from pwn import ssh as pwn_ssh
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"pwntools SSH unavailable: {exc}") from exc
+
+    log(f"Testing SSH {cfg.username}@{cfg.host}:{cfg.port}")
+    conn = pwn_ssh(
+        user=cfg.username,
+        host=cfg.host,
+        port=int(cfg.port),
+        password=cfg.password,
+        timeout=15,
+    )
+    try:
+        out = conn.run("id && hostname && uname -srm", timeout=15).recvall(timeout=15)
+        text = out.decode(errors="replace").strip()
+        log(f"SSH OK:\n{text}")
+        return {
+            "ok": True,
+            "host": cfg.host,
+            "port": cfg.port,
+            "username": cfg.username,
+            "output": text,
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def deploy_remote(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> str:
     """
     Use Ansible to install Docker (if needed), copy compose assets, bring targets up,
@@ -133,27 +168,33 @@ def deploy_remote(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> str:
             "for remote benchmark deploy."
         )
 
+    # Pre-flight SSH so we fail fast with a clear error before Ansible.
+    test_ssh_access(cfg, log=log)
+
+    # Keep secrets out of inventory.ini (passwords may contain @ / spaces).
     inventory_body = "\n".join(
         [
             "[benchmark_hosts]",
-            (
-                f"bench ansible_host={cfg.host} ansible_user={cfg.username} "
-                f"ansible_password={cfg.password} ansible_port={cfg.port}"
-            ),
+            f"bench ansible_host={cfg.host} ansible_user={cfg.username} ansible_port={cfg.port}",
             "",
             "[all:vars]",
-            "ansible_connection=ssh",
+            "ansible_connection=paramiko",
             "ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'",
             "ansible_python_interpreter=auto_silent",
             "ansible_become=true",
-            f"ansible_become_password={cfg.password}",
             "",
         ]
     )
+    extra_vars = {
+        "ansible_password": cfg.password,
+        "ansible_become_password": cfg.password,
+    }
 
     with tempfile.TemporaryDirectory(prefix="ramigpt-bench-") as tmp:
         inv_path = Path(tmp) / "inventory.ini"
+        vars_path = Path(tmp) / "extra_vars.json"
         inv_path.write_text(inventory_body, encoding="utf-8")
+        vars_path.write_text(json.dumps(extra_vars), encoding="utf-8")
         log(f"Running Ansible playbook against {cfg.host}:{cfg.port} as {cfg.username}")
         _run(
             [
@@ -161,6 +202,8 @@ def deploy_remote(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> str:
                 "-i",
                 str(inv_path),
                 str(ANSIBLE_PLAYBOOK),
+                "-e",
+                f"@{vars_path}",
             ],
             cwd=PROJECT_ROOT,
             log=log,

@@ -48,11 +48,32 @@
         creates: /usr/bin/docker
       when: docker_version_check.rc != 0
 
-    - name: Ensure Docker service is running
-      ansible.builtin.service:
-        name: docker
+    - name: Detect systemd Docker unit (classic or snap)
+      ansible.builtin.shell: |
+        if systemctl list-unit-files 2>/dev/null | grep -q '^docker\.service'; then
+          echo docker
+        elif systemctl list-unit-files 2>/dev/null | grep -q '^snap\.docker\.dockerd\.service'; then
+          echo snap.docker.dockerd
+        else
+          echo none
+        fi
+      register: docker_unit
+      changed_when: false
+
+    - name: Ensure Docker daemon service is running
+      ansible.builtin.systemd:
+        name: "{{ docker_unit.stdout | trim }}"
         state: started
         enabled: true
+      when: docker_unit.stdout | trim != "none"
+
+    - name: Verify Docker daemon responds
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: docker_info.rc == 0
 
     - name: Ensure Docker Compose plugin is available
       ansible.builtin.shell: docker compose version

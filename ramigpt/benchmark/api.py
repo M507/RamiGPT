@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from flask import Flask, jsonify, request
 
+from ramigpt.benchmark.deploy import RemoteDeployConfig, test_ssh_access
 from ramigpt.benchmark.orchestrator import get_status, request_stop, start_run
+from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.benchmark.targets import DEFAULT_TIMEOUT_SECONDS, list_targets
 from ramigpt.utils import debug_logger
 
@@ -18,13 +20,43 @@ def register_benchmark_routes(app: Flask) -> None:
     def api_benchmark_status():
         return jsonify(get_status()), 200
 
+    @app.route("/api/benchmark/remote-config", methods=["GET"])
+    def api_benchmark_remote_config():
+        return jsonify(public_remote_config()), 200
+
+    @app.route("/api/benchmark/remote/test", methods=["POST"])
+    def api_benchmark_remote_test():
+        body = request.get_json(silent=True) or {}
+        merged = merge_remote_override(
+            body.get("remote") if isinstance(body.get("remote"), dict) else body
+        )
+        if not merged.get("host") or not merged.get("username") or not merged.get("password"):
+            return jsonify(
+                ok=False,
+                error="host, username, and password required (from UI or data/benchmark/remote.json)",
+            ), 400
+        try:
+            result = test_ssh_access(
+                RemoteDeployConfig(
+                    host=merged["host"],
+                    username=merged["username"],
+                    password=merged["password"],
+                    port=int(merged.get("port") or 22),
+                )
+            )
+            return jsonify(result), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Remote SSH test failed")
+            return jsonify(ok=False, error=str(exc)), 400
+
     @app.route("/api/benchmark/start", methods=["POST"])
     def api_benchmark_start():
         if not request.is_json:
             return jsonify(error="JSON body required"), 400
         body = request.get_json(silent=True) or {}
-        mode = (body.get("mode") or "local").strip().lower()
-        timeout = body.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+        preset = load_remote_config()
+        mode = (body.get("mode") or preset.get("mode") or "local").strip().lower()
+        timeout = body.get("timeout_seconds", preset.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         remote = body.get("remote") or None
         try:
             timeout_i = int(timeout)

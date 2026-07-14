@@ -18,6 +18,7 @@ from ramigpt.benchmark.deploy import (
     deploy_local,
     deploy_remote,
 )
+from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.benchmark.targets import (
     BENCH_GROUP_ID,
     BENCH_PASSWORD,
@@ -110,16 +111,20 @@ def get_current_run() -> Optional[BenchmarkRun]:
 def get_status() -> Dict[str, Any]:
     with _lock:
         run = _current
+        remote_cfg = public_remote_config()
         return {
             "running": bool(run and run.phase not in {"done", "error"}),
             "run": run.to_public_dict() if run else None,
             "targets": [t.to_dict() for t in TARGETS],
             "defaults": {
-                "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+                "timeout_seconds": int(
+                    remote_cfg.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS
+                ),
                 "username": BENCH_USERNAME,
                 "password": BENCH_PASSWORD,
                 "ports": [t.port for t in TARGETS],
             },
+            "remote_preset": remote_cfg,
             "history": list(_history[-10:]),
         }
 
@@ -425,12 +430,22 @@ def start_run(
 ) -> BenchmarkRun:
     global _current
 
-    mode = (mode or "").strip().lower()
+    preset = load_remote_config()
+    mode = (mode or preset.get("mode") or "local").strip().lower()
     if mode not in {"local", "remote"}:
         raise ValueError("mode must be 'local' or 'remote'")
+
+    if timeout_seconds is None:
+        timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
+
+    merged_remote: Optional[Dict[str, Any]] = None
     if mode == "remote":
-        if not remote or not remote.get("host") or not remote.get("username") or not remote.get("password"):
-            raise ValueError("remote host, username, and password are required")
+        merged_remote = merge_remote_override(remote)
+        if not merged_remote.get("host") or not merged_remote.get("username") or not merged_remote.get("password"):
+            raise ValueError(
+                "remote host, username, and password are required "
+                "(set them in data/benchmark/remote.json or the Benchmark UI)"
+            )
 
     required = (
         "flask_app",
@@ -456,14 +471,7 @@ def start_run(
             id=str(uuid.uuid4()),
             mode=mode,
             timeout_seconds=max(10, int(timeout_seconds or DEFAULT_TIMEOUT_SECONDS)),
-            remote={
-                "host": remote.get("host"),
-                "username": remote.get("username"),
-                "password": remote.get("password"),
-                "port": int(remote.get("port") or 22),
-            }
-            if mode == "remote" and remote
-            else None,
+            remote=merged_remote,
             targets=[
                 TargetRunResult(
                     target_id=t.id,

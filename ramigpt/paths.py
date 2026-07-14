@@ -16,6 +16,8 @@ LOGS_DIR = DATA_DIR / "logs"
 SESSIONS_DIR = DATA_DIR / "sessions"
 SESSION_HOSTS_DIR = SESSIONS_DIR / "hosts"
 SESSION_META_PATH = SESSIONS_DIR / "meta.json"
+BENCHMARK_DIR = DATA_DIR / "benchmark"
+BENCHMARK_REMOTE_CONFIG = BENCHMARK_DIR / "remote.json"
 DOCS_DIR = PROJECT_ROOT / "docs"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -28,5 +30,5 @@ STATIC_DIR = WEB_DIR / "static"
 
 def ensure_runtime_dirs() -> None:
     """Create directories needed at runtime."""
-    for path in (LOGS_DIR, SESSIONS_DIR, SESSION_HOSTS_DIR, BEROOT_DOWNLOADS_DIR, CERTS_DIR):
+    for path in (LOGS_DIR, SESSIONS_DIR, SESSION_HOSTS_DIR, BENCHMARK_DIR, BEROOT_DOWNLOADS_DIR, CERTS_DIR):
         path.mkdir(parents=True, exist_ok=True)

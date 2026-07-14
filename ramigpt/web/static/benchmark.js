@@ -150,14 +150,69 @@
   async function refresh() {
     const data = await api("/api/benchmark/status");
     renderTargets(data.targets, data.defaults);
+    applyRemotePreset(data.remote_preset);
     renderRun(data.run, data.running);
     if (data.defaults && $("bench-timeout") && !data.running) {
       const field = $("bench-timeout");
+      const presetTimeout =
+        (data.remote_preset && data.remote_preset.timeout_seconds) ||
+        data.defaults.timeout_seconds ||
+        60;
       if (document.activeElement !== field && !field.dataset.touched) {
-        field.value = data.defaults.timeout_seconds || 60;
+        field.value = presetTimeout;
       }
     }
     return data;
+  }
+
+  let remotePresetApplied = false;
+
+  function applyRemotePreset(preset) {
+    if (!preset || remotePresetApplied) return;
+    const source = $("bench-remote-source");
+    if (source) {
+      source.innerHTML = preset.config_exists
+        ? `Prefills from <code>${escapeHtml(preset.config_path || "data/benchmark/remote.json")}</code>.`
+        : `No <code>data/benchmark/remote.json</code> yet — enter remote credentials below (see remote.example.json).`;
+    }
+    if (preset.host && $("bench-remote-host") && !$("bench-remote-host").value) {
+      $("bench-remote-host").value = preset.host;
+    }
+    if (preset.port && $("bench-remote-port")) {
+      $("bench-remote-port").value = preset.port;
+    }
+    if (preset.username && $("bench-remote-user") && !$("bench-remote-user").value) {
+      $("bench-remote-user").value = preset.username;
+    }
+    if (preset.password && $("bench-remote-pass") && !$("bench-remote-pass").value) {
+      $("bench-remote-pass").value = preset.password;
+    }
+    if (preset.config_exists && preset.host) {
+      const remoteRadio = document.querySelector('input[name="bench-mode"][value="remote"]');
+      if (remoteRadio && !document.querySelector('input[name="bench-mode"]:checked')?.dataset.userPicked) {
+        remoteRadio.checked = true;
+        syncModeUI();
+      }
+    }
+    remotePresetApplied = true;
+  }
+
+  async function testRemoteAccess() {
+    setStatus("Testing SSH…");
+    try {
+      const data = await api("/api/benchmark/remote/test", {
+        method: "POST",
+        body: {
+          host: ($("bench-remote-host").value || "").trim(),
+          port: parseInt($("bench-remote-port").value, 10) || 22,
+          username: ($("bench-remote-user").value || "").trim(),
+          password: $("bench-remote-pass").value || "",
+        },
+      });
+      setStatus(data.ok ? `SSH OK — ${data.output}` : data.error || "SSH failed", !data.ok);
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
   }
 
   async function startBenchmark() {
@@ -173,10 +228,7 @@
         username: ($("bench-remote-user").value || "").trim(),
         password: $("bench-remote-pass").value || "",
       };
-      if (!payload.remote.host || !payload.remote.username || !payload.remote.password) {
-        setStatus("Remote host, username, and password are required.", true);
-        return;
-      }
+      // Empty password falls back to data/benchmark/remote.json on the server.
     }
     try {
       $("bench-start").disabled = true;
@@ -215,7 +267,10 @@
       el.addEventListener("click", closeModal);
     });
     document.querySelectorAll('input[name="bench-mode"]').forEach((el) => {
-      el.addEventListener("change", syncModeUI);
+      el.addEventListener("change", () => {
+        el.dataset.userPicked = "1";
+        syncModeUI();
+      });
     });
     const timeout = $("bench-timeout");
     if (timeout) {
@@ -226,9 +281,11 @@
     const start = $("bench-start");
     const stop = $("bench-stop");
     const openBtn = $("btn-benchmark");
+    const testBtn = $("bench-test-remote");
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (openBtn) openBtn.addEventListener("click", openModal);
+    if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
   }
 
   window.BenchmarkUI = { open: openModal, close: closeModal, refresh };

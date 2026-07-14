@@ -35,15 +35,21 @@
 
       <section class="bench-section" id="bench-remote-fields" hidden>
         <h3>Remote SSH (Ansible controller → host)</h3>
+        <p class="muted small" id="bench-remote-source">
+          Prefills from <code>data/benchmark/remote.json</code> when present.
+        </p>
         <div class="form-row">
-          <label>Host / IP<input type="text" id="bench-remote-host" placeholder="10.10.1.50"></label>
+          <label>Host / IP<input type="text" id="bench-remote-host" placeholder="10.10.1.109"></label>
           <label>SSH port<input type="number" id="bench-remote-port" value="22"></label>
         </div>
         <div class="form-row">
-          <label>Username<input type="text" id="bench-remote-user" placeholder="ubuntu"></label>
-          <label>Password<input type="password" id="bench-remote-pass" placeholder="sudo / SSH password"></label>
+          <label>Username<input type="text" id="bench-remote-user" placeholder="root"></label>
+          <label>Password<input type="password" id="bench-remote-pass" placeholder="from remote.json"></label>
         </div>
-        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers still use <code>zeus / benchmark</code> on ports 2201–2202.</p>
+        <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0">
+          <button type="button" class="btn btn-secondary" id="bench-test-remote">Test SSH access</button>
+        </div>
+        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers use <code>zeus / benchmark</code> on ports 2201–2202 after deploy.</p>
       </section>
 
       <section class="bench-section">
