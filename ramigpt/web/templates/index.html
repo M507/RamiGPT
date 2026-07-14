@@ -82,6 +82,11 @@
                                 </select>
                             </td>
                             <td>
+                                <label title="After the scan, run Full AI using tool findings" style="white-space:nowrap;">
+                                    <input type="checkbox" id="toolAiCheckbox" checked> AI
+                                </label>
+                            </td>
+                            <td>
                                 <!-- Run button for the selected tool -->
                                 <button class="logout-button" onclick="runSelectedTool()">Run</button>
                             </td>
@@ -143,12 +148,14 @@ function runSelectedTool() {
         // Define the action3 function for starting or stopping
         async function action3(start) {
             const method = start ? "POST" : "DELETE";
+            const aiBox = document.getElementById("toolAiCheckbox");
+            const withAi = !(aiBox && !aiBox.checked);
             const response = await fetch("/action3", {
                 method: method,
                 headers: {
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({ action: "start" })
+                body: JSON.stringify({ action: "start", ai: withAi })
             });
 
             if (response.ok) {

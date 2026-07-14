@@ -58,12 +58,13 @@ def register_benchmark_routes(app: Flask) -> None:
         mode = (body.get("mode") or preset.get("mode") or "local").strip().lower()
         timeout = body.get("timeout_seconds", preset.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         remote = body.get("remote") or None
+        tools = body.get("tools", preset.get("tools"))
         try:
             timeout_i = int(timeout)
         except (TypeError, ValueError):
             return jsonify(error="timeout_seconds must be an integer"), 400
         try:
-            run = start_run(mode=mode, timeout_seconds=timeout_i, remote=remote)
+            run = start_run(mode=mode, timeout_seconds=timeout_i, remote=remote, tools=tools)
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except RuntimeError as exc:

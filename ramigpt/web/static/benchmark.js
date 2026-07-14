@@ -78,6 +78,44 @@
     }
   }
 
+  function renderTools(available, defaults) {
+    const list = $("bench-tool-list");
+    if (!list) return;
+    const tools = available && available.length ? available : [
+      {
+        id: "beroot",
+        name: "BeRoot",
+        description: "Scan first, then Full AI uses findings until root",
+        default: true,
+      },
+    ];
+    const selected = (defaults && defaults.tools) || {};
+    list.innerHTML = tools
+      .map((t) => {
+        const checked =
+          selected[t.id] != null ? !!selected[t.id] : t.default !== false;
+        return `<label class="bench-tool-check">
+          <input type="checkbox" data-tool-id="${escapeHtml(t.id)}" ${checked ? "checked" : ""}>
+          <span>
+            <strong>${escapeHtml(t.name || t.id)}</strong>
+            <small>${escapeHtml(t.description || "")}</small>
+          </span>
+        </label>`;
+      })
+      .join("");
+  }
+
+  function selectedTools() {
+    const out = {};
+    document.querySelectorAll("#bench-tool-list input[data-tool-id]").forEach((el) => {
+      out[el.getAttribute("data-tool-id")] = !!el.checked;
+    });
+    if (!Object.keys(out).length) {
+      out.beroot = true;
+    }
+    return out;
+  }
+
   function renderTargets(targets, defaults) {
     const list = $("bench-target-list");
     if (!list) return;
@@ -150,6 +188,9 @@
   async function refresh() {
     const data = await api("/api/benchmark/status");
     renderTargets(data.targets, data.defaults);
+    if (!$("bench-tool-list")?.dataset.userTouched) {
+      renderTools(data.available_tools, data.defaults);
+    }
     applyRemotePreset(data.remote_preset);
     renderRun(data.run, data.running);
     if (data.defaults && $("bench-timeout") && !data.running) {
@@ -157,7 +198,7 @@
       const presetTimeout =
         (data.remote_preset && data.remote_preset.timeout_seconds) ||
         data.defaults.timeout_seconds ||
-        60;
+        180;
       if (document.activeElement !== field && !field.dataset.touched) {
         field.value = presetTimeout;
       }
@@ -219,7 +260,8 @@
     setStatus("");
     const payload = {
       mode: mode(),
-      timeout_seconds: parseInt($("bench-timeout").value, 10) || 60,
+      timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
+      tools: selectedTools(),
     };
     if (payload.mode === "remote") {
       payload.remote = {
@@ -276,6 +318,12 @@
     if (timeout) {
       timeout.addEventListener("input", () => {
         timeout.dataset.touched = "1";
+      });
+    }
+    const toolList = $("bench-tool-list");
+    if (toolList) {
+      toolList.addEventListener("change", () => {
+        toolList.dataset.userTouched = "1";
       });
     }
     const start = $("bench-start");

@@ -5,6 +5,7 @@ from functools import wraps
 from pathlib import Path
 import logging
 import os
+import re
 import time
 import warnings
 
@@ -60,14 +61,66 @@ def _looks_like_password_prompt(text: str) -> bool:
     )
 
 
+def _still_waiting_on_password(text: str) -> bool:
+    """
+    True only if the shell is *currently* stuck at a password prompt.
+    Do not use whole-buffer substring checks — BeRoot follow-up drains often
+    contain an earlier `[sudo] password for …` line even after `$` returns.
+    """
+    if not text:
+        return False
+    lines = [
+        ln.strip()
+        for ln in str(text).replace("\r", "\n").split("\n")
+        if ln.strip()
+    ]
+    if not lines:
+        return False
+    last = lines[-1]
+    # Recovered prompt means we are no longer waiting.
+    if last in {"$", "#"} or last.endswith("$") or last.endswith("#"):
+        return False
+    return _looks_like_password_prompt(last)
+
+
 def _answer_password_prompt(shell, session_data, slog=None) -> str:
     """Send the session password once and drain leftover prompt noise."""
     password = session_data.get("password") or ""
     if slog is not None:
         slog.info("answering password prompt (password not logged)")
-    shell.sendline(password)
+    payload = password.encode() if isinstance(password, str) else password
+    shell.sendline(payload)
     drained = recv_for_duration(shell, 2)
     return drained.decode("utf-8", errors="replace") if drained else ""
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
+
+
+def sanitize_beroot_for_prompt(beroot_text: str) -> str:
+    """
+    Prepare BeRoot output for the model: strip ANSI and drop misleading
+    `sudo <bin>` GTFOBins lines from the SUID section (those binaries are SUID,
+    not sudo rules — keeping them looks like fake NOPASSWD advice).
+    """
+    text = _strip_ansi(beroot_text or "").strip()
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    cleaned = []
+    in_suid = False
+    for line in lines:
+        header = line.strip().lower()
+        if header.startswith("################") and "suid" in header:
+            in_suid = True
+        elif header.startswith("################"):
+            in_suid = False
+        if in_suid and re.search(r"^\s*-\s*sudo\s+\S+", line):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
 
 # Endpoints reachable without an active SSH session (workspace is open by default).
 PUBLIC_ENDPOINTS = frozenset({
@@ -136,6 +189,9 @@ ssh_ssh_conns = {}
 prompt_delimiters = {}
 prompts = {}
 loop = {}
+
+# session_id -> monotonic epoch so stale shell_interaction tasks exit quietly
+shell_listener_epoch = {}
 beroots = {}
 last_commands = {}
 # session_id -> True when Full AI detects root (benchmark + UI)
@@ -157,18 +213,22 @@ def resolve_server_session_id():
 
 
 def emit_session(session_id, data, color=None):
+    # Persist first so a reconnect history reload cannot miss this line while the
+    # websocket delivery is still in flight (or dropped because we left the room).
+    try:
+        if session_id:
+            get_session_logger(session_id).ui(str(data), color=color)
+    except Exception:  # noqa: BLE001
+        pass
     payload = {"data": data, "server_session_id": session_id}
     if color is not None:
         payload["color"] = color
     socketio.emit("message", payload, namespace="/get", to=session_id)
-    try:
-        if session_id:
-            get_session_logger(session_id).ui(str(data))
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def close_ssh_connection(session_id):
+    # Invalidate any running shell_interaction for this session first.
+    shell_listener_epoch[session_id] = shell_listener_epoch.get(session_id, 0) + 1
     shell = ssh_shells.pop(session_id, None)
     conn = ssh_ssh_conns.pop(session_id, None)
     prompts.pop(session_id, None)
@@ -429,10 +489,13 @@ def get_or_create_ssh_shell(session_id, create_new=False):
 
 
 def start_shell_listener(session_id):
-    """Background recv loop scoped to one inventory session."""
+    """Background recv loop scoped to one inventory session (single active epoch)."""
     shell = ssh_shells.get(session_id)
     if shell is None:
         return
+    # Bump epoch so any previous listener for this session exits quietly.
+    shell_listener_epoch[session_id] = shell_listener_epoch.get(session_id, 0) + 1
+    epoch = shell_listener_epoch[session_id]
     session_data = {
         "sid": session_id,
         "hostname": session.get("hostname"),
@@ -440,6 +503,7 @@ def start_shell_listener(session_id):
         "password": session.get("password"),
         "server": session.get("server"),
         "port": session.get("port"),
+        "listener_epoch": epoch,
     }
     stop_task_flag.clear()
 
@@ -450,6 +514,7 @@ def start_shell_listener(session_id):
         socketio.emit(event, payload, namespace=namespace, to=room, **kwargs)
 
     socketio.start_background_task(shell_interaction, shell, _emit, session_data)
+
 
 @app.before_request
 def check_authentication():
@@ -521,7 +586,8 @@ def shell_conditions(command, shell, prompt_delimiter, session_data, just_got_ro
             last_line = shell_output_lines[-1]
             if got_root(session_data.get('hostname'), last_line):
                 prompt_delimiters[session_id] = last_line
-                socketio.emit('message', {'data': f'{shell_output}\npwned!'}, namespace='/get')
+                socketio.emit('message', {'data': shell_output}, namespace='/get')
+                socketio.emit('message', {'data': 'pwned!', 'color': '#ff0000'}, namespace='/get')
                 just_got_root = True
                 summary = priv_esc.generate_summary()
                 color = "#1E90FF"  # Determine the color based on your logic or data
@@ -549,7 +615,8 @@ def shell_conditions(command, shell, prompt_delimiter, session_data, just_got_ro
         shell_output = shell_output_bytes.decode('utf-8').strip()
         for line in shell_output_lines:
             if got_root(session_data.get('hostname'), line):
-                socketio.emit('message', {'data': f'{shell_output}\npwned!'}, namespace='/get')
+                socketio.emit('message', {'data': shell_output}, namespace='/get')
+                socketio.emit('message', {'data': 'pwned!', 'color': '#ff0000'}, namespace='/get')
                 just_got_root = True
                 prompt_delimiters[session_id] = shell_output_lines[-1]
                 summary = priv_esc.generate_summary()
@@ -578,6 +645,8 @@ def autonomous(session_data):
             hostname=session_data.get("hostname"),
             server=session_data.get("server"),
             port=session_data.get("port"),
+            provider=get_settings().ai_provider,
+            model=get_settings().active_model(),
         )
         GlobalTimer.start(
             session_id,
@@ -623,13 +692,15 @@ def autonomous(session_data):
                 response = get_answer(system, prompt)
                 trimmed_ai_command = priv_esc.filter_output(response)
                 command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
-                
+                settings = get_settings()
                 slog.ai_turn(
                     request_n=i,
                     system=system,
                     prompt=prompt or "",
                     raw_response=response or "",
                     filtered_command=command or "",
+                    provider=settings.ai_provider,
+                    model=settings.active_model(),
                 )
                 if not command:
                     slog.warning(f"AI returned empty/unusable command on request#{i}; skipping")
@@ -651,7 +722,7 @@ def autonomous(session_data):
                     shell_output_bytes, \
                     shell_output_lines, \
                     shell_output_lines_string, \
-                    shell_output = shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=1, session = session, emit_func = socketio.emit)
+                    shell_output = shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=8, session=session_data, emit_func=socketio.emit)
 
                     if shell_output is None:
                         slog.shell_io(
@@ -665,24 +736,66 @@ def autonomous(session_data):
                     
                     # If it hangs (common after interactive priv-esc like vim/awk shells)
                     if shell_output == None:
-                        emit_session(
-                            session_id,
-                            "[Debug] Autonomous() - timeout occurred, possibly stuck at prompt",
-                            color="#FF0000",
-                        )
+                        if stop_flag.is_set():
+                            stop_reason = "stopped"
+                            slog.event("FULL_AI_STOP", "Stop during command wait — exiting")
+                            break
                         slog.warning(f"recv timeout after command: {command!r}")
-                        shell_output_bytes = recv_for_duration(shell, 4)
-                        shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
-                        shell_output        = shell_output_bytes.decode('utf-8').strip()
-                        shell_output_lines_string = str(shell_output_lines)
-                        emit_session(session_id, shell_output or "(empty drain)")
+                        # Stop runaway commands (grep -r / find / …) before draining.
+                        _interrupt_shell(shell)
+                        socketio.sleep(0.2)
+                        _interrupt_shell(shell)
+                        shell_output_bytes = recv_for_duration(shell, 2)
+                        shell_output = _safe_decode(shell_output_bytes).strip()
+                        shell_output_lines = shell_output.split("\n")
+                        if shell_output:
+                            emit_session(session_id, shell_output)
                         slog.block(
                             f"HANG_RECOVERY_DRAIN #{i}",
                             f"after timeout drain:\n{shell_output}",
                         )
 
+                        hostname = session_data.get('hostname')
+                        hang_diag = diagnose_root(hostname, shell_output)
+                        if not hang_diag.get("got_root") and shell_output_lines:
+                            for ln in shell_output_lines:
+                                dln = diagnose_root(hostname, ln)
+                                if dln.get("got_root"):
+                                    hang_diag = dln
+                                    break
+                        # Nested root shells often show only `#` — that IS success.
+                        if hang_diag.get("got_root"):
+                            slog.root_check(
+                                request_n=i,
+                                hostname=hostname or "",
+                                last_line=(shell_output_lines[-1] if shell_output_lines else "") or "",
+                                shell_output=shell_output or "",
+                                won=True,
+                                reasons=hang_diag,
+                            )
+                            if shell_output:
+                                emit_session(session_id, shell_output)
+                            emit_session(session_id, "pwned!", color="#ff0000")
+                            just_got_root = True
+                            stop_reason = "root"
+                            root_won_by_session[session_id] = True
+                            try:
+                                from ramigpt.benchmark.orchestrator import mark_root_won
+                                mark_root_won(session_id)
+                            except Exception:
+                                pass
+                            last = (shell_output_lines[-1] if shell_output_lines else "").strip()
+                            if last.endswith("#") or last == "#":
+                                prompt_delimiters[session_id] = b"# "
+                                prompt_delimiter = b"# "
+                            priv_esc.add_history(command, shell_output or "")
+                            summary = priv_esc.generate_summary()
+                            slog.block("SUMMARY", summary or "")
+                            emit_session(session_id, f"{summary}\n", color="#1E90FF")
+                            break
+
                         # Prefer answering sudo/su password prompts over hang-reconnect.
-                        if _looks_like_password_prompt(shell_output):
+                        if _looks_like_password_prompt(shell_output) and _still_waiting_on_password(shell_output):
                             slog.event(
                                 "PASSWORD_PROMPT",
                                 "Timeout was a password prompt — supplying session password",
@@ -695,15 +808,13 @@ def autonomous(session_data):
                                 shell,
                                 prompt_delimiter,
                                 drop=False,
-                                timeout=3,
-                                session=session,
+                                timeout=8,
+                                session=session_data,
                                 emit_func=socketio.emit,
                             )
                             if more_out is None:
                                 extra = recv_for_duration(shell, 3)
-                                more_out = (after_pw or "") + "\n" + (
-                                    extra.decode("utf-8", errors="replace") if extra else ""
-                                )
+                                more_out = (after_pw or "") + "\n" + _safe_decode(extra)
                                 more_lines = more_out.split("\n")
                             else:
                                 more_out = ((after_pw or "") + "\n" + more_out).strip()
@@ -718,109 +829,56 @@ def autonomous(session_data):
                             )
                             # Fall through to normal history / root check below.
                         else:
-                            # Nudge interactive editors / nested shells, then probe identity.
-                            shell.sendline("!/bin/sh")
-                            socketio.sleep(0.5)
-                            shell.sendline("id")
-                            socketio.sleep(0.5)
-                            shell.sendline("id")
-                            slog.info("hang recovery nudged: !/bin/sh then id x2")
-
-                            shell_output_bytes = recv_for_duration(shell, 4)
-                            shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
-                            shell_output        = shell_output_bytes.decode('utf-8').strip()
-                            shell_output_lines_string = str(shell_output_lines)
-                            if not shell_output_lines or shell_output_lines == ['']:
-                                shell_output_lines = [shell_output]
-
-                            emit_session(session_id, shell_output or "(empty post-hang probe)")
-                            emit_session(
-                                session_id,
-                                "Start interacting with the shell again",
-                                color="#1E90FF",
-                            )
-                            slog.shell_io(
-                                request_n=i,
-                                command="!/bin/sh ; id ; id",
-                                output=shell_output,
-                                note="post-hang probe before reconnect decision",
-                            )
-
-                            dump_path = slog.breakage(
-                                "prompt_timeout_after_command",
-                                command=command,
-                                shell_output=shell_output,
-                                needs_reconnect=True,
-                                ai_request=i,
-                                hint="Shell hung or dropped into an interactive editor; reconnect required",
-                            )
-                            debug_logger.warning(
-                                f"[BREAKAGE] session={session_id} needs reconnect after command={command!r} dump={dump_path}"
-                            )
-                            emit_session(
-                                session_id,
-                                f"[BREAKAGE] Shell interaction lost — logged to {dump_path}. Reconnecting…",
-                                color="#f85149",
-                            )
-
-                            hostname = session_data.get('hostname')
-                            diagnosis = diagnose_root(hostname, shell_output)
-                            if not diagnosis.get("got_root") and shell_output_lines:
-                                for ln in shell_output_lines:
-                                    dln = diagnose_root(hostname, ln)
-                                    if dln.get("got_root"):
-                                        diagnosis = dln
-                                        break
-                            slog.root_check(
-                                request_n=i,
-                                hostname=hostname or "",
-                                last_line=(shell_output_lines[-1] if shell_output_lines else "") or "",
-                                shell_output=shell_output or "",
-                                won=bool(diagnosis.get("got_root")),
-                                reasons=diagnosis,
-                            )
-                            # Keep the failed attempt in model history so it is not blindly retried.
-                            priv_esc.add_history(
-                                command,
-                                (shell_output or "") + "\n[runner] command hung / lost shell prompt",
-                            )
-                            if diagnosis.get("got_root"):
-                                last_line = shell_output_lines[-1] if shell_output_lines else shell_output
-                                emit_session(session_id, f"{shell_output}\npwned!")
-                                just_got_root = True
-                                stop_reason = "root"
-                                root_won_by_session[session_id] = True
-                                try:
-                                    from ramigpt.benchmark.orchestrator import mark_root_won
-                                    mark_root_won(session_id)
-                                except Exception:
-                                    pass
-                                summary = priv_esc.generate_summary()
-                                slog.block("SUMMARY", summary or "")
-                                emit_session(session_id, f"{summary}\n", color="#1E90FF")
+                            last_drain = (shell_output_lines[-1] if shell_output_lines else "").strip()
+                            # If we already have a healthy prompt back after Ctrl-C, continue.
+                            if _is_shell_prompt_line(last_drain):
+                                slog.info("hang recovery: prompt restored after interrupt")
+                                # Fall through to normal history / root check.
+                            elif stop_flag.is_set():
+                                stop_reason = "stopped"
+                                slog.event("FULL_AI_STOP", "Stop during hang recovery — exiting")
                                 break
-
-                            # Reconnect and continue Full AI if budget remains.
-                            if reconnect_budget > 0 and _reconnect_shell_for_session(session_id, session_data, slog):
-                                reconnect_budget -= 1
-                                slog = get_session_logger(session_id)
-                                shell = ssh_shells.get(session_id)
-                                prompt_delimiter = prompt_delimiters.get(session_id, prompt_delimiter)
+                            else:
+                                # Desynced or nested UI — open a clean /bin/sh and continue.
+                                dump_path = slog.breakage(
+                                    "prompt_timeout_after_command",
+                                    command=command,
+                                    shell_output=shell_output,
+                                    needs_reconnect=True,
+                                    ai_request=i,
+                                    hint="No stable prompt after interrupt; reconnecting",
+                                )
+                                debug_logger.warning(
+                                    f"[BREAKAGE] session={session_id} needs reconnect after command={command!r} dump={dump_path}"
+                                )
                                 emit_session(
                                     session_id,
-                                    f"[RECONNECT] Shell restored ({reconnect_budget} reconnect(s) left). Continuing Full AI…",
-                                    color="#58a6ff",
+                                    "[BREAKAGE] Shell desynced — reconnecting…",
+                                    color="#f85149",
                                 )
-                                slog.info(f"continuing after reconnect; requests so far={i}; budget_left={reconnect_budget}")
-                                continue
-                            slog.event(
-                                "RECONNECT_EXHAUSTED",
-                                "Could not restore shell — stopping Full AI for this session",
-                                reconnect_budget=reconnect_budget,
-                            )
-                            emit_session(session_id, "[BREAKAGE] Reconnect failed — stopping Full AI", color="#f85149")
-                            stop_reason = "reconnect_exhausted"
-                            break
+                                priv_esc.add_history(
+                                    command,
+                                    (shell_output or "") + "\n[runner] command hung / lost shell prompt",
+                                )
+                                if reconnect_budget > 0 and _reconnect_shell_for_session(session_id, session_data, slog):
+                                    reconnect_budget -= 1
+                                    slog = get_session_logger(session_id)
+                                    shell = ssh_shells.get(session_id)
+                                    prompt_delimiter = prompt_delimiters.get(session_id, prompt_delimiter)
+                                    emit_session(
+                                        session_id,
+                                        f"[RECONNECT] Shell restored ({reconnect_budget} reconnect(s) left). Continuing Full AI…",
+                                        color="#58a6ff",
+                                    )
+                                    continue
+                                slog.event(
+                                    "RECONNECT_EXHAUSTED",
+                                    "Could not restore shell — stopping Full AI for this session",
+                                    reconnect_budget=reconnect_budget,
+                                )
+                                emit_session(session_id, "[BREAKAGE] Reconnect failed — stopping Full AI", color="#f85149")
+                                stop_reason = "reconnect_exhausted"
+                                break
 
                     last_line = shell_output_lines[-1] if shell_output_lines else ""
                 
@@ -836,15 +894,21 @@ def autonomous(session_data):
                 prompt = priv_esc.generate_prompt()
 
                 hostname = session_data.get('hostname')
+                # Prefer last line (real prompt / id). Never score every dump line —
+                # a lone `#` comment mid-/etc would false-trigger root.
                 diagnosis = diagnose_root(hostname, last_line)
                 if not diagnosis.get("got_root"):
+                    # Full blob only for uid=0(root) / root@host# markers, not comment lines.
                     diagnosis = diagnose_root(hostname, shell_output)
                 if not diagnosis.get("got_root") and shell_output_lines:
-                    for ln in shell_output_lines:
-                        dln = diagnose_root(hostname, ln)
-                        if dln.get("got_root"):
-                            diagnosis = dln
-                            break
+                    for ln in shell_output_lines[-5:]:
+                        if "uid=0" in ln or "euid=0" in ln or (
+                            ln.strip().startswith("root@") and "#" in ln
+                        ):
+                            dln = diagnose_root(hostname, ln)
+                            if dln.get("got_root"):
+                                diagnosis = dln
+                                break
                 won = bool(diagnosis.get("got_root"))
                 slog.root_check(
                     request_n=i,
@@ -856,7 +920,9 @@ def autonomous(session_data):
                 )
 
                 if won:
-                    emit_session(session_id, f"{shell_output}\npwned!")
+                    if shell_output:
+                        emit_session(session_id, shell_output)
+                    emit_session(session_id, "pwned!", color="#ff0000")
                     just_got_root = True
                     stop_reason = "root"
                     root_won_by_session[session_id] = True
@@ -873,7 +939,23 @@ def autonomous(session_data):
                 debug_logger.exception(f"full_ai.error session_id={session_id!r}")
                 slog.exception(f"Failed to execute command: {e}")
                 slog.event("ERROR", str(e), ai_request=i)
-                emit_session(session_id, f"Error: {str(e)}")
+                emit_session(session_id, f"Error: {str(e)}", color="#f85149")
+                # Recover the PTY and continue Full AI instead of aborting on decode / tube faults.
+                try:
+                    _interrupt_shell(ssh_shells.get(session_id) or shell)
+                except Exception:  # noqa: BLE001
+                    pass
+                if reconnect_budget > 0 and _reconnect_shell_for_session(session_id, session_data, slog):
+                    reconnect_budget -= 1
+                    slog = get_session_logger(session_id)
+                    shell = ssh_shells.get(session_id)
+                    prompt_delimiter = prompt_delimiters.get(session_id, prompt_delimiter)
+                    emit_session(
+                        session_id,
+                        f"[RECONNECT] Recovered after error ({reconnect_budget} left). Continuing…",
+                        color="#58a6ff",
+                    )
+                    continue
                 stop_reason = "error"
                 break
         slog.event(
@@ -882,6 +964,8 @@ def autonomous(session_data):
             got_root=just_got_root,
             requests_run=i,
             stop_reason=stop_reason,
+            provider=get_settings().ai_provider,
+            model=get_settings().active_model(),
         )
         GlobalTimer.stop(
             session_id,
@@ -894,6 +978,13 @@ def autonomous(session_data):
             f"full_ai.end session_id={session_id!r} got_root={just_got_root} "
             f"requests={i} reason={stop_reason}"
         )
+        # Re-enable interactive shell listener (paused while Full AI owns the PTY).
+        loop[session_id] = 0
+        emit_session(
+            session_id,
+            f"[Full AI] finished (reason={stop_reason})",
+            color="#8b949e",
+        )
         try:
             from ramigpt.benchmark.orchestrator import mark_full_ai_finished
             mark_full_ai_finished(session_id)
@@ -903,23 +994,25 @@ def autonomous(session_data):
 
 def execute_beroot(session_data):
     """
-    Background task: upload BeRoot to the target, run it, pull results into the
-    session prompt context, then optionally ask the AI for one follow-up command.
+    Background task: upload BeRoot to the target, run it, attach findings to the
+    session prompt, then optionally hand off to Full AI (when with_ai=True).
     """
     with app.app_context():
         session_id = session_data["sid"]
+        with_ai = bool(session_data.get("with_ai", True))
         slog = get_session_logger(session_id)
         ssh_conn = ssh_ssh_conns.get(session_id)
         shell = ssh_shells.get(session_id)
-        delim = prompt_delimiters.get(session_id, b"$ ")
-        if isinstance(delim, (bytes, bytearray)):
-            prompt_delim_str = delim.decode("utf-8", errors="replace").strip()
-        else:
-            prompt_delim_str = str(delim).strip()
 
         if ssh_conn is None:
             emit_session(session_id, "[BeRoot] No SSH connection — connect first.", color="#f85149")
             loop[session_id] = 0
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+                    mark_full_ai_finished(session_id)
+                except Exception:
+                    pass
             return
 
         password = session_data.get("password") or ""
@@ -929,11 +1022,16 @@ def execute_beroot(session_data):
             server=session_data.get("server"),
             port=session_data.get("port"),
             username=session_data.get("username"),
+            with_ai=with_ai,
         )
-        emit_session(session_id, "[BeRoot] Uploading toolkit to /tmp/Linux …", color="#58a6ff")
+        emit_session(
+            session_id,
+            f"[BeRoot] Uploading toolkit to /tmp/Linux … (AI={'on' if with_ai else 'off'})",
+            color="#58a6ff",
+        )
         debug_logger.info(
             f"beroot.start session_id={session_id!r} "
-            f"host={session_data.get('server')!r}:{session_data.get('port')}"
+            f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
         )
 
         try:
@@ -949,62 +1047,87 @@ def execute_beroot(session_data):
             slog.event("BEROOT_FAILED", str(exc))
             emit_session(session_id, f"[BeRoot] Failed: {exc}", color="#f85149")
             loop[session_id] = 0
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+                    mark_full_ai_finished(session_id)
+                except Exception:
+                    pass
             return
 
-        # Persist a local copy for the session
+        # Persist the enriched/sanitized text locally (do NOT re-download /tmp/beroot.txt
+        # afterwards — that file lacks the sudo -l enrichment we append in-process).
         ensure_runtime_dirs()
         local_filename = str(BEROOT_DOWNLOADS_DIR / f"{session_id}_beroot.txt")
+        beroot_for_ai = sanitize_beroot_for_prompt(beroot_string)
         try:
-            Path(local_filename).write_text(beroot_string, encoding="utf-8")
-            # Also try SFTP download so /tmp/beroot.txt and local stay aligned
-            try:
-                ssh_conn.download("/tmp/beroot.txt", local_filename)
-            except Exception:  # noqa: BLE001
-                pass
+            Path(local_filename).write_text(beroot_for_ai, encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
             slog.warning(f"beroot: could not write local copy: {exc}")
 
         beroots[session_id] = local_filename
         priv_esc = prompts.get(session_id)
         if priv_esc is not None:
-            priv_esc.set_BeRoot(beroot_string)
+            # Persist BeRoot findings across Full AI turns when AI checkbox is on.
+            priv_esc.set_BeRoot(beroot_for_ai, persist=with_ai)
 
-        preview = beroot_string if len(beroot_string) < 12000 else (
-            beroot_string[:6000] + "\n…[truncated]…\n" + beroot_string[-4000:]
+        preview = beroot_for_ai if len(beroot_for_ai) < 12000 else (
+            beroot_for_ai[:6000] + "\n…[truncated]…\n" + beroot_for_ai[-4000:]
         )
         emit_session(session_id, f"[BeRoot] Scan complete ({len(beroot_string)} chars):\n{preview}", color="#1E90FF")
-        slog.event("BEROOT_OK", f"Scan complete ({len(beroot_string)} chars)", local_file=local_filename)
-        debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)}")
+        slog.event(
+            "BEROOT_OK",
+            f"Scan complete ({len(beroot_string)} chars)",
+            local_file=local_filename,
+            with_ai=with_ai,
+        )
+        debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)} with_ai={with_ai}")
 
-        # Optional: ask the AI for one command informed by BeRoot findings.
+        if not with_ai:
+            loop[session_id] = 0
+            emit_session(
+                session_id,
+                "[BeRoot] Done (AI off) — findings saved for later Full AI / Guide Me.",
+                color="#8b949e",
+            )
+            return
+
         if priv_esc is None or shell is None:
             loop[session_id] = 0
-            return
-        try:
-            prompt = priv_esc.generate_prompt()
-            system = "You are an experienced pentester."
-            response = get_answer(system, prompt)
-            command = normalize_ai_command(remove_matching_quotes(priv_esc.filter_output(response)))
-            if not command:
-                emit_session(session_id, "[BeRoot] AI returned no follow-up command.", color="#8b949e")
-                loop[session_id] = 0
-                return
-            slog.ai_turn(
-                request_n=len(getattr(priv_esc, "history", []) or []) + 1,
-                system=system,
-                prompt=prompt or "",
-                raw_response=response or "",
-                filtered_command=command or "",
-                source="beroot_followup",
+            emit_session(
+                session_id,
+                "[BeRoot] Scan saved but cannot start Full AI (missing prompt or shell).",
+                color="#f85149",
             )
-            last_commands[session_id] = command
-            shell.sendline(command)
-            emit_session(session_id, f"{prompt_delim_str} {command}")
-        except Exception as exc:  # noqa: BLE001
-            slog.warning(f"beroot AI follow-up skipped: {exc}")
-            emit_session(session_id, f"[BeRoot] Scan saved; AI follow-up skipped: {exc}", color="#8b949e")
-        finally:
-            loop[session_id] = 0
+            try:
+                from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+                mark_full_ai_finished(session_id)
+            except Exception:
+                pass
+            return
+
+        # Hand off to the Full AI loop with BeRoot findings already in prompt context.
+        flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
+        flag.clear()
+        root_won_by_session[session_id] = False
+        loop[session_id] = 1
+        slog.event("BEROOT_FULL_AI", "BeRoot finished — starting Full AI loop with scanner findings")
+        emit_session(
+            session_id,
+            "[BeRoot] Handing off to Full AI with scanner findings…",
+            color="#58a6ff",
+        )
+        get_session_logger(session_id).event(
+            "FULL_AI_REQUESTED",
+            "Full AI started after BeRoot (AI checkbox)",
+            hostname=session_data.get("hostname"),
+            server=session_data.get("server"),
+            port=session_data.get("port"),
+            source="beroot",
+            provider=get_settings().ai_provider,
+            model=get_settings().active_model(),
+        )
+        socketio.start_background_task(autonomous, session_data)
 
 
 @app.route('/action3', methods=['POST', 'DELETE'])
@@ -1026,6 +1149,12 @@ def action3():
             return jsonify(error="No active SSH connection. Connect this session first."), 400
         if session_id not in ssh_ssh_conns:
             return jsonify(error="No SSH connection object for this session."), 400
+        # AI checkbox: default on. Accept ai / with_ai from the client.
+        raw_ai = request.json.get("ai", request.json.get("with_ai", True))
+        if isinstance(raw_ai, str):
+            with_ai = raw_ai.strip().lower() not in {"0", "false", "no", "off"}
+        else:
+            with_ai = bool(raw_ai)
         # Pause the interactive listener so it does not race BeRoot's helper shell.
         loop[session_id] = 1
         session_data_copy = {
@@ -1035,15 +1164,23 @@ def action3():
             "hostname": session.get("hostname"),
             "server": session.get("server"),
             "port": session.get("port"),
+            "with_ai": with_ai,
         }
         socketio.start_background_task(execute_beroot, session_data_copy)
-        emit_session(session_id, "Starting BeRoot (upload + scan)…", color="#58a6ff")
-        return jsonify(output="beroot_started", session_id=session_id), 200
+        emit_session(
+            session_id,
+            f"Starting BeRoot (upload + scan)… AI={'on' if with_ai else 'off'}",
+            color="#58a6ff",
+        )
+        return jsonify(output="beroot_started", session_id=session_id, ai=with_ai), 200
 
     elif action == "stop":
         session_id = resolve_server_session_id()
         if session_id:
-            loop[session_id] = 0
+            # Do not clear loop here — autonomous/BeRoot finally clears it so the
+            # interactive listener cannot steal prompts mid-command.
+            flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
+            flag.set()
             emit_session(session_id, "Stopping…", color="#8b949e")
         debug_logger.info(f"Action '{action}' triggered at {time_str}.")
         return jsonify(output="response"), 200
@@ -1095,13 +1232,17 @@ def action1():
             hostname=session_data.get("hostname"),
             server=session_data.get("server"),
             port=session_data.get("port"),
+            provider=get_settings().ai_provider,
+            model=get_settings().active_model(),
         )
         socketio.start_background_task(autonomous, session_data)
 
     elif action == "stop":
         flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         flag.set()
-        loop[session_id] = 0
+        # Keep loop[session_id]=1 until autonomous finally exits — otherwise the
+        # interactive shell_interaction listener wakes mid-command and steals the
+        # `$` prompt (see session 009: Stop during cat → false hang → reconnect).
         debug_logger.info(f"Action '{action}' triggered at {time_str}. Emitting 'Stopping..' message.")
         get_session_logger(session_id).event("FULL_AI_STOP_REQUESTED", "Stop Full AI requested from UI")
         emit_session(session_id, "Stopping Full AI…", color="#8b949e")
@@ -1204,116 +1345,271 @@ def shell_recvuntil_v3(shell, prompt_delimiter, drop=False, timeout=timeout_defa
     
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
+def _safe_decode(data) -> str:
+    """Decode shell bytes without crashing Full AI on binary/invalid UTF-8."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    try:
+        return bytes(data).decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return repr(data)
+
+
+def _is_shell_prompt_line(line: str) -> bool:
+    """
+    True for a real shell prompt on its own line.
+
+    Critical: never treat a lone `$`/`#` byte substring in file dumps as a prompt —
+    that desynchronizes the PTY (grep/cat of /etc containing `#` comments).
+    """
+    raw = (line or "").replace("\r", "")
+    s = _strip_ansi(raw).strip()
+    if not s or len(s) > 160:
+        return False
+    # Config / grep false positives
+    if any(
+        tok in s
+        for tok in (
+            '"',
+            "'",
+            "`",
+            "\\$",
+            "^/",
+            "NO_DEL",
+            "PATH=",
+            "Defaults",
+            "matching",
+        )
+    ):
+        return False
+    if s in {"$", "#", "%"}:
+        return True
+    if re.fullmatch(r"(?:bash|sh|zsh|ksh|dash)-[0-9.]+[#$]", s):
+        return True
+    # user@host:~/path$  or  root@host:/#
+    if s.endswith("$") or s.endswith("#"):
+        if "@" in s or "~" in s or ":/" in s or s.endswith(" $") or s.endswith(" #"):
+            return True
+        if re.search(r"\[[^\]]+\][#$]$", s):  # [root@box]#
+            return True
+    return False
+
+
+def _interrupt_shell(shell) -> None:
+    """Best-effort Ctrl-C to stop a runaway remote command."""
+    if shell is None:
+        return
+    try:
+        shell.send(b"\x03")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_default, session=None, emit_func=None):
+    """
+    Read until a real shell prompt appears as its own line.
+
+    Does NOT use bare `$` / `#` as byte delimiters — those appear constantly in
+    command output and used to desync sessions (see events 008 after grep -r /etc).
+    """
     with app.app_context():
-        shell_output_bytes = b""
-        shell_output = shell_output_bytes.decode('utf-8')
-        shell_output_lines = shell_output.split('\n')
-        shell_output_lines_string = str(shell_output_lines)
-        
-        #emit_func('message', {'data': '[Debug] shell_recvuntil_v4()', 'color': "#FF0000"}, namespace='/get')
+        wait = max(float(timeout or 0), 8.0)
+        deadline = time.time() + wait
+        buf = b""
+        session_id = None
+        if isinstance(session, dict):
+            session_id = session.get("sid")
+        stop_flag = (
+            stop_full_ai_by_session.get(session_id)
+            if session_id
+            else None
+        )
 
-        try:
-            shell_output_bytes = shell.recvuntil(prompt_delimiter, drop=drop, timeout=timeout)
-            #shell_output_bytes = shell.recv(drop=drop, timeout=timeout)
-        except TimeoutError:
-            # Handle the case where the recvuntil times out, possibly due to a sudo password prompt
-            #emit_func('message', {'data': f"[Debug] {shell_output_lines_string}", 'color': "#1E90FF"}, namespace='/get')
-            emit_func('message', {'data': '[Debug] Timeout occurred, possibly stuck at prompt', 'color': "#FF0000"}, namespace='/get')
-            return None, None, None, None
-        except Exception as e:
-            #emit_func('message', {'data': f"[Debug] {shell_output_lines_string}", 'color': "#1E90FF"}, namespace='/get')
-            debug_logger.error(f"shell_recvuntil_v4 error: {e}")
-            emit_func('message', {'data': f"[Debug] shell_recvuntil_v4 - Error: {str(e)}", 'color': "#FF0000"}, namespace='/get')
-            return None, None, None, None
-
-        shell_output = shell_output_bytes.decode('utf-8')
-        shell_output_lines = shell_output.split('\n')
-        shell_output_lines_string = str(shell_output_lines)
-
-        if len(shell_output_lines) == 1:
-            if len(shell_output_lines[0]) == 0:
-                #emit_func('message', {'data': f"[Debug] {shell_output_lines_string}", 'color': "#1E90FF"}, namespace='/get')
-                emit_func('message', {'data': '[Debug] Empty response from shell, possibly stuck at prompt', 'color': "#FF0000"}, namespace='/get')
+        while time.time() < deadline:
+            if stop_flag is not None and stop_flag.is_set():
+                # Caller is stopping Full AI — do not wait out the full timeout.
                 return None, None, None, None
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            chunk = b""
+            try:
+                chunk = shell.recv(timeout=min(0.35, remaining))
+            except EOFError:
+                break
+            except Exception:  # noqa: BLE001
+                chunk = b""
 
-        emit_func('message', {'data': f"{shell_output}"}, namespace='/get')
+            if chunk:
+                if not isinstance(chunk, (bytes, bytearray)):
+                    chunk = str(chunk).encode("utf-8", errors="replace")
+                buf += bytes(chunk)
 
-        return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
-    return None, None, None, None
+                text = _safe_decode(buf)
+                normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+                lines = normalized.split("\n")
+                last = lines[-1] if lines else ""
+                # Prompt on its own final line (with or without trailing spaces).
+                if _is_shell_prompt_line(last):
+                    shell_output = text.strip("\0")
+                    shell_output_lines = shell_output.split("\n")
+                    if emit_func is not None:
+                        try:
+                            payload = {"data": f"{shell_output}"}
+                            if session_id:
+                                payload["server_session_id"] = session_id
+                                emit_func(
+                                    "message",
+                                    payload,
+                                    namespace="/get",
+                                    to=session_id,
+                                )
+                            else:
+                                emit_func(
+                                    "message",
+                                    payload,
+                                    namespace="/get",
+                                )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return buf, shell_output_lines, str(shell_output_lines), shell_output
+
+            socketio.sleep(0.05)
+
+        # Timeout — keep noise out of the UI; hang-recovery / reconnect handles it.
+        debug_logger.debug(
+            "shell_recvuntil_v4 timeout waiting for prompt "
+            f"(buf_chars={len(buf)} session={session_id!r})"
+        )
+        return None, None, None, None
 
 def shell_interaction(shell, emit_func, session, max_retries=1000000):
+    """
+    One recv loop per session epoch. Survives shell replacement without
+    broadcasting fake UI disconnects; exits when the session is closed or
+    superseded by a newer listener.
+    """
     with app.app_context():
         session_id = session['sid']
+        epoch = session.get("listener_epoch")
         slog = get_session_logger(session_id)
-        shell = ssh_shells.get(session_id)
         priv_esc = prompts.get(session_id)
-        prompt_delimiter = prompt_delimiters.get(session_id, "$").strip()
-        emit_func('message', {'data': "[Debug] Starting shell interaction", 'color': "#1E90FF"}, namespace='/get')
-        slog.info("shell_interaction listener started")
+        if epoch is not None and shell_listener_epoch.get(session_id) == epoch:
+            slog.info(f"shell_interaction listener started (epoch={epoch})")
         io_n = 0
-        
-        retries = 0
-        
+        idle_closed = 0
+
         while True:
+            if epoch is not None and shell_listener_epoch.get(session_id) != epoch:
+                slog.info(f"shell_interaction listener exiting (stale epoch={epoch})")
+                return
             try:
                 while True:
-                    socketio.sleep(1)
-                    #emit_func('message', {'data': f"[LOOP] 1\n", 'color': "#1E90FF"}, namespace='/get')
-                    while not stop_task_flag.is_set():
-                        #emit_func('message', {'data': f"[LOOP] 2\n", 'color': "#1E90FF"}, namespace='/get')
-                        # Do not steal stdout while Full AI owns the shell.
-                        if loop.get(session_id):
-                            socketio.sleep(0.5)
-                            continue
-                        shell = ssh_shells.get(session_id)
-                        socketio.sleep(1)
+                    if epoch is not None and shell_listener_epoch.get(session_id) != epoch:
+                        return
+                    socketio.sleep(0.2)
+                    if loop.get(session_id):
+                        socketio.sleep(0.3)
+                        continue
+                    shell = ssh_shells.get(session_id)
+                    if shell is None:
+                        idle_closed += 1
+                        if idle_closed > 25:
+                            slog.info("shell_interaction: no shell — exiting")
+                            return
+                        socketio.sleep(0.2)
+                        continue
+                    idle_closed = 0
+                    try:
                         data = shell.recv(timeout=1)
-                        if data:
-                            prompt_delimiter = prompt_delimiters.get(session_id, "$").decode('utf-8').strip()
-                            decoded_data = data.decode('utf-8').strip()
-                            command = last_commands.get(session_id, "")
-                            decoded_data = priv_esc.process_command_output(command, decoded_data)
-                            priv_esc.add_history(command, decoded_data)
-                            io_n += 1
-                            slog.shell_io(
-                                request_n=io_n,
-                                command=command or "",
-                                output=decoded_data or "",
-                                note="shell_interaction listener",
-                                source="manual",
-                            )
-                            hostname = session.get("hostname")
-                            diagnosis = diagnose_root(hostname, decoded_data)
-                            # Avoid ROOT_MISS spam on every `id`/`whoami`; keep wins + interesting probes.
-                            if diagnosis.get("got_root") or ("uid=0" in (decoded_data or "")):
-                                slog.root_check(
-                                    request_n=io_n,
-                                    hostname=hostname or "",
-                                    last_line=(decoded_data.split("\n")[-1] if decoded_data else ""),
-                                    shell_output=decoded_data or "",
-                                    won=bool(diagnosis.get("got_root")),
-                                    reasons=diagnosis,
-                                )
+                    except EOFError:
+                        if epoch is not None and shell_listener_epoch.get(session_id) != epoch:
+                            return
+                        if session_id in ssh_shells and ssh_shells.get(session_id) is not shell:
+                            slog.debug("shell_interaction: shell replaced — switching")
+                            continue
+                        if session_id not in ssh_shells:
+                            slog.info("shell_interaction: shell closed — exiting")
+                            return
+                        socketio.sleep(0.2)
+                        continue
+                    if not data:
+                        continue
 
-                            emit_func('message', {'data': f"{decoded_data}\n"}, namespace='/get')
+                    priv_esc = prompts.get(session_id)
+                    decoded_data = data.decode("utf-8", errors="replace").strip()
+                    command = last_commands.get(session_id, "")
+
+                    if _looks_like_password_prompt(decoded_data) and _still_waiting_on_password(decoded_data):
+                        slog.event(
+                            "PASSWORD_PROMPT",
+                            "shell_interaction answered a password prompt",
+                            command=command,
+                        )
+                        after = _answer_password_prompt(shell, session, slog)
+                        decoded_data = (decoded_data + "\n" + (after or "")).strip()
+                        emit_func(
+                            "message",
+                            {"data": f"{decoded_data}\n", "color": "#f0b429"},
+                            namespace="/get",
+                        )
+                        io_n += 1
+                        slog.shell_io(
+                            request_n=io_n,
+                            command=command or "(password prompt)",
+                            output=decoded_data,
+                            note="auto password answer",
+                            source="manual",
+                        )
+                        if priv_esc is not None:
+                            priv_esc.add_history(
+                                command or "(password prompt)",
+                                priv_esc.process_command_output(command, decoded_data),
+                            )
+                        continue
+
+                    if priv_esc is not None:
+                        decoded_data = priv_esc.process_command_output(command, decoded_data)
+                        priv_esc.add_history(command, decoded_data)
+                    io_n += 1
+                    slog.shell_io(
+                        request_n=io_n,
+                        command=command or "",
+                        output=decoded_data or "",
+                        note="shell_interaction listener",
+                        source="manual",
+                    )
+                    hostname = session.get("hostname")
+                    diagnosis = diagnose_root(hostname, decoded_data)
+                    if diagnosis.get("got_root") or ("uid=0" in (decoded_data or "")):
+                        slog.root_check(
+                            request_n=io_n,
+                            hostname=hostname or "",
+                            last_line=(decoded_data.split("\n")[-1] if decoded_data else ""),
+                            shell_output=decoded_data or "",
+                            won=bool(diagnosis.get("got_root")),
+                            reasons=diagnosis,
+                        )
+
+                    emit_func("message", {"data": f"{decoded_data}\n"}, namespace="/get")
 
             except EOFError:
-                debug_logger.warning(f"shell_interaction EOF session_id={session_id!r}")
-                emit_func('message', {'data': "[Debug] Shell stream closed", 'color': "#FF0000"}, namespace='/get')
-                retries += 1
-                if retries < max_retries:
+                if epoch is not None and shell_listener_epoch.get(session_id) != epoch:
+                    return
+                if session_id in ssh_shells:
+                    debug_logger.debug(f"shell_interaction EOF (recoverable) session_id={session_id!r}")
+                    socketio.sleep(0.3)
                     continue
-            
+                slog.info("shell_interaction EOF — session shell gone")
+                return
             except Exception:
-                retries += 1
-                if retries < max_retries:
-                    continue
+                if epoch is not None and shell_listener_epoch.get(session_id) != epoch:
+                    return
+                socketio.sleep(0.3)
+                continue
 
-            break  # Exit loop if no exceptions are raised
-        
-        slog.info("shell_interaction listener exited")
-        emit_func('message', {'data': "[Debug] Exiting shell interaction", 'color': "#FF0000"}, namespace='/get')
 
 
 def _reconnect_shell_for_session(session_id, session_data, slog) -> bool:
@@ -1435,6 +1731,8 @@ def execute():
                 raw_response=response or "",
                 filtered_command=command or "",
                 source="execute_ai",
+                provider=get_settings().ai_provider,
+                model=get_settings().active_model(),
             )
         else:
             slog.info(f"manual command requested: {command}")
@@ -1568,6 +1866,7 @@ register_benchmark_hooks(
     close_ssh_connection=close_ssh_connection,
     start_shell_listener=start_shell_listener,
     autonomous=autonomous,
+    execute_beroot=execute_beroot,
     prompts=prompts,
     prompt_delimiters=prompt_delimiters,
     stop_full_ai_by_session=stop_full_ai_by_session,

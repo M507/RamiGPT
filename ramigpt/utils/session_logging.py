@@ -19,14 +19,19 @@ import json
 import logging
 import re
 import threading
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from ramigpt.paths import LOGS_DIR, ensure_runtime_dirs
 
 _lock = threading.RLock()
 _loggers: Dict[str, "SessionLogger"] = {}
+# Live terminal scrollback (survives browser refresh while the app is up).
+_MAX_TERMINAL_LINES = 2500
+_terminal_buffers: Dict[str, Deque[Dict[str, Any]]] = {}
+_terminal_seeded: set = set()
 
 
 def _utcnow() -> str:
@@ -266,13 +271,14 @@ class SessionLogger:
         self.block(kind_u, body, level=level)
         return payload
 
-    def ui(self, message: str) -> None:
-        """Mirror a UI-facing line into session.log (compact)."""
+    def ui(self, message: str, *, color: Optional[str] = None) -> None:
+        """Mirror a UI-facing line into session.log + terminal history."""
         text = message if isinstance(message, str) else str(message)
         if self._last_ui == text:
             return
         self._last_ui = text
         self.info(f"[UI] {text}")
+        record_terminal_line(self.session_id, text, color=color)
 
     def ai_turn(
         self,
@@ -283,11 +289,19 @@ class SessionLogger:
         raw_response: str,
         filtered_command: str,
         source: str = "full_ai",
+        model: str = "",
+        provider: str = "",
     ) -> None:
+        meta = []
+        if provider:
+            meta.append(f"provider: {provider}")
+        if model:
+            meta.append(f"model: {model}")
         self.block(
             f"AI_TURN #{request_n} ({source})",
             "\n".join(
                 [
+                    *meta,
                     f"system: {system}",
                     "",
                     "----- prompt sent to model -----",
@@ -317,6 +331,8 @@ class SessionLogger:
                 "message": f"request#{request_n}",
                 "details": {
                     "source": source,
+                    "provider": provider or None,
+                    "model": model or None,
                     "system": system,
                     "prompt": prompt_for_events,
                     "prompt_chars": len(prompt or ""),
@@ -430,6 +446,204 @@ class SessionLogger:
             **extra,
         )
         return path
+
+
+def record_terminal_line(
+    session_id: str,
+    text: str,
+    *,
+    color: Optional[str] = None,
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """Append a line to the live terminal buffer and (optionally) events.jsonl."""
+    key = session_id or "unknown"
+    _seed_terminal_buffer_from_disk(key)
+    entry = {
+        "ts": _utcnow(),
+        "text": "" if text is None else str(text),
+        "color": color or "#00ff00",
+    }
+    with _lock:
+        buf = _terminal_buffers.get(key)
+        if buf is None:
+            buf = deque(maxlen=_MAX_TERMINAL_LINES)
+            _terminal_buffers[key] = buf
+        buf.append(entry)
+    if persist:
+        try:
+            slog = get_session_logger(key)
+            if slog.events_path is not None:
+                slog._append_event(
+                    {
+                        "ts": entry["ts"],
+                        "session_id": key,
+                        "run": slog.run_id,
+                        "kind": "TERMINAL",
+                        "message": entry["text"][:200],
+                        "details": {
+                            "text": entry["text"],
+                            "color": entry["color"],
+                        },
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
+    return entry
+
+
+def clear_terminal_buffer(session_id: str) -> None:
+    with _lock:
+        key = session_id or "unknown"
+        _terminal_buffers.pop(key, None)
+        _terminal_seeded.discard(key)
+
+
+def _seed_terminal_buffer_from_disk(session_id: str) -> None:
+    """Load prior-run scrollback once so live emit does not drop older history."""
+    key = session_id or "unknown"
+    with _lock:
+        if key in _terminal_seeded:
+            return
+        disk = _load_terminal_from_events(key, _MAX_TERMINAL_LINES)
+        live = list(_terminal_buffers.get(key) or ())
+        if disk and not live:
+            _terminal_buffers[key] = deque(disk, maxlen=_MAX_TERMINAL_LINES)
+        elif disk and live:
+            _terminal_buffers[key] = deque(disk + live, maxlen=_MAX_TERMINAL_LINES)
+        _terminal_seeded.add(key)
+
+
+def _event_to_terminal_line(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Map one events.jsonl record to a terminal line (TERMINAL or legacy kinds)."""
+    kind = (ev.get("kind") or "").upper()
+    details = ev.get("details") or {}
+    if kind == "TERMINAL":
+        return {
+            "ts": ev.get("ts") or "",
+            "text": details.get("text") or ev.get("message") or "",
+            "color": details.get("color") or "#00ff00",
+        }
+    if kind == "CONNECT":
+        return {
+            "ts": ev.get("ts") or "",
+            "text": ev.get("message") or "[*] Connected",
+            "color": "#58a6ff",
+        }
+    if kind == "DISCONNECT":
+        return {
+            "ts": ev.get("ts") or "",
+            "text": ev.get("message") or "[*] Disconnected",
+            "color": "#8b949e",
+        }
+    if kind == "SHELL_IO":
+        # Handled specially (may yield two lines) — callers use _shell_io_lines.
+        return None
+    if kind in {
+        "BEROOT_START",
+        "BEROOT_OK",
+        "BEROOT_FAILED",
+        "BEROOT_FULL_AI",
+        "FULL_AI_START",
+        "FULL_AI_END",
+        "FULL_AI_STOP",
+        "BREAKAGE",
+        "RECONNECT_OK",
+        "RECONNECT_ATTEMPT",
+        "ROOT",
+        "ERROR",
+    }:
+        msg = ev.get("message") or kind
+        color = "#f85149" if kind in {"BREAKAGE", "ERROR", "BEROOT_FAILED"} else "#58a6ff"
+        if kind == "ROOT":
+            color = "#ff0000"
+            msg = "pwned!"
+        return {"ts": ev.get("ts") or "", "text": msg, "color": color}
+    return None
+
+
+def _shell_io_lines(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
+    details = ev.get("details") or {}
+    cmd = details.get("command") or ""
+    out = details.get("shell_output") or ""
+    lines: List[Dict[str, Any]] = []
+    ts = ev.get("ts") or ""
+    if cmd:
+        lines.append({"ts": ts, "text": f"$ {cmd}", "color": "#00ff00"})
+    if out:
+        lines.append({"ts": ts, "text": out, "color": "#00ff00"})
+    return lines
+
+
+def _lines_from_events_file(path: Path) -> List[Dict[str, Any]]:
+    """
+    Parse one events.jsonl into terminal lines.
+
+    If the file already has TERMINAL events, use only those (authoritative UI
+    scrollback). Otherwise rebuild from older event kinds.
+    """
+    terminal: List[Dict[str, Any]] = []
+    legacy: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    ev = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                kind = (ev.get("kind") or "").upper()
+                if kind == "TERMINAL":
+                    line = _event_to_terminal_line(ev)
+                    if line:
+                        terminal.append(line)
+                    continue
+                if kind == "SHELL_IO":
+                    legacy.extend(_shell_io_lines(ev))
+                    continue
+                line = _event_to_terminal_line(ev)
+                if line:
+                    legacy.append(line)
+    except OSError:
+        return []
+    return terminal if terminal else legacy
+
+
+def _load_terminal_from_events(session_id: str, limit: int) -> List[Dict[str, Any]]:
+    """Rebuild scrollback from all run events.jsonl files (after app restart)."""
+    session_dir = LOGS_DIR / "sessions" / _safe_session_dir_name(session_id)
+    if not session_dir.is_dir():
+        return []
+    run_dirs = sorted(
+        p
+        for p in session_dir.iterdir()
+        if p.is_dir() and re.match(r"^\d{3}_", p.name)
+    )
+    lines: List[Dict[str, Any]] = []
+    for run_dir in run_dirs:
+        events_path = run_dir / "events.jsonl"
+        if events_path.is_file():
+            lines.extend(_lines_from_events_file(events_path))
+    if limit > 0:
+        lines = lines[-limit:]
+    return lines
+
+
+def get_terminal_history(session_id: str, *, limit: int = 800) -> List[Dict[str, Any]]:
+    """
+    Return terminal scrollback for the session.
+
+    Prefers the live in-memory buffer; falls back to events.jsonl after restart.
+    """
+    key = session_id or "unknown"
+    lim = max(1, min(int(limit or 800), _MAX_TERMINAL_LINES))
+    _seed_terminal_buffer_from_disk(key)
+    with _lock:
+        buf = _terminal_buffers.get(key)
+        if buf:
+            return list(buf)[-lim:]
+    return []
 
 
 def get_session_logger(session_id: str) -> SessionLogger:

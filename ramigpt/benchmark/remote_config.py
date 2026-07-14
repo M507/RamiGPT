@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from ramigpt.paths import BENCHMARK_REMOTE_CONFIG, ensure_runtime_dirs
 from ramigpt.utils import debug_logger
+from ramigpt.benchmark.tools import normalize_tools
 
 DEFAULT_REMOTE: Dict[str, Any] = {
     "mode": "remote",
@@ -18,6 +19,8 @@ DEFAULT_REMOTE: Dict[str, Any] = {
     "password": "",
     "timeout_seconds": 60,
     "notes": "",
+    # Tools run before Full AI on each target (AI always on for benchmark tools path).
+    "tools": {"beroot": True},
 }
 
 
@@ -57,6 +60,10 @@ def load_remote_config() -> Dict[str, Any]:
     except (TypeError, ValueError):
         cfg["timeout_seconds"] = 60
     cfg["notes"] = str(raw.get("notes") or "")
+    if "tools" in raw:
+        cfg["tools"] = normalize_tools(raw.get("tools"))
+    else:
+        cfg["tools"] = normalize_tools(None)
     return cfg
 
 

@@ -11,6 +11,8 @@ def normalize_ai_command(command):
     """
     Normalize a model-suggested shell command before execution.
     Strips prompt markers the model copies from history ($ / #) and wrapping quotes.
+    Rewrites interactive shell drops (e.g. awk system("/bin/sh")) into non-interactive
+    identity probes so the runner can detect root without losing the PTY.
     """
     if command is None:
         return None
@@ -35,6 +37,21 @@ def normalize_ai_command(command):
         break
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"', "`"):
         s = s[1:-1].strip()
+
+    # Interactive priv-esc recipes hang the runner (nested shell, no returning `$`).
+    # Rewrite to prove uid=0 with `id` instead of dropping to /bin/sh|/bin/bash.
+    s = re.sub(
+        r"""system\s*\(\s*(['"])/(?:bin|usr/bin)/(?:ba)?sh\1\s*\)""",
+        r'system("id")',
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"""exe(?:cute)?\s*\(\s*(['"])/(?:bin|usr/bin)/(?:ba)?sh\1\s*\)""",
+        r'exe("id")',
+        s,
+        flags=re.IGNORECASE,
+    )
     return s
 
 
@@ -60,6 +77,7 @@ class PrivEscPrompt:
         self.system = system
         self.target_user = target_user
         self.BeRoot = None
+        self._beroot_persist = False
         self.capabilities = []  # This will now be a list of dictionaries
         self.history = []
         self.facts = []  # List to store multiple facts
@@ -70,10 +88,11 @@ class PrivEscPrompt:
         # Adds a new capability to the list
         self.capabilities.append({"name": name, "description": description})
     
-    def set_BeRoot(self, BeRoot):
-        # Capabilities are expected to be a list of dictionaries with 'name' and 'description'
+    def set_BeRoot(self, BeRoot, *, persist: bool = False):
+        """Attach BeRoot scanner output. If persist=True, keep it across Full AI turns."""
         self.BeRoot = BeRoot
-    
+        self._beroot_persist = bool(persist) and BeRoot is not None
+
     def get_BeRoot(self, capabilities):
         # Capabilities are expected to be a list of dictionaries with 'name' and 'description'
         return self.BeRoot
@@ -294,7 +313,9 @@ class PrivEscPrompt:
             report += "The following output is from BeRoot scanner:\n\n"
             report += f"{self.BeRoot}\n"
             report += f"\n"
-            self.set_BeRoot(None)
+            # One-shot by default (saves tokens). Persist when Full AI should keep using findings.
+            if not getattr(self, "_beroot_persist", False):
+                self.set_BeRoot(None)
 
         report += (
             "State your next command only. Focus on enumeration and privilege escalation. "

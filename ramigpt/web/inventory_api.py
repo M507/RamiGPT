@@ -16,7 +16,11 @@ from ramigpt.services.runtime_status import (
 )
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
-from ramigpt.utils.session_logging import get_session_logger, start_session_log_run
+from ramigpt.utils.session_logging import (
+    get_session_logger,
+    get_terminal_history,
+    start_session_log_run,
+)
 
 
 def register_inventory_routes(
@@ -202,6 +206,25 @@ def register_inventory_routes(
             return jsonify(success=True, status="disconnected"), 200
         except Exception as exc:
             return jsonify(success=False, error=str(exc)), 500
+
+    @app.route("/api/sessions/<session_id>/terminal", methods=["GET"])
+    def api_session_terminal(session_id: str):
+        """Scrollback for the workspace terminal (survives page refresh)."""
+        try:
+            store.get_session(session_id)
+        except KeyError:
+            return jsonify(error="Session not found"), 404
+        try:
+            limit = int(request.args.get("limit") or 800)
+        except (TypeError, ValueError):
+            limit = 800
+        lines = get_terminal_history(session_id, limit=limit)
+        return jsonify(
+            session_id=session_id,
+            lines=lines,
+            count=len(lines),
+            connected=session_id in ssh_shells,
+        ), 200
 
     @app.route("/api/sessions/<session_id>/prompt-context", methods=["GET"])
     def api_get_prompt_context(session_id: str):

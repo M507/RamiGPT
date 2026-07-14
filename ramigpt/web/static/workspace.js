@@ -2,13 +2,15 @@
  * RamiGPT multi-session workspace.
  */
 (function () {
-  const state = {
+    const state = {
     inventory: { groups: [], sessions: [], recent_ids: [] },
     selectedId: null,
     filter: "",
     socket: null,
     joinedRooms: new Set(),
     fullAiRunningBySession: {},
+    terminalLoadToken: 0,
+    _socketHadDisconnect: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -59,10 +61,32 @@
     state.socket = io.connect(
       location.protocol + "//" + document.domain + ":" + location.port + "/get"
     );
+    state.socket.on("connect", () => {
+      // Rooms are dropped on reconnect; re-subscribe so emit_session reaches us again.
+      const rooms = new Set(state.joinedRooms);
+      if (state.selectedId) rooms.add(state.selectedId);
+      state.joinedRooms.clear();
+      rooms.forEach((id) => joinSessionRoom(id));
+      // Catch up any lines missed while the socket was down (e.g. long AI waits).
+      if (state.selectedId && state._socketHadDisconnect) {
+        loadTerminalHistory(state.selectedId);
+      }
+      state._socketHadDisconnect = false;
+    });
+    state.socket.on("disconnect", () => {
+      // Force joinSessionRoom to emit again after the next connect.
+      state.joinedRooms.clear();
+      state._socketHadDisconnect = true;
+    });
     state.socket.on("message", (data) => {
       const sid = data.server_session_id;
       if (sid && state.selectedId && sid !== state.selectedId) return;
-      addTerminalOutput(data.data, data.color || "#00ff00");
+      const text = data.data == null ? "" : String(data.data);
+      if (sid && /^\[Full AI\] finished\b/i.test(text)) {
+        state.fullAiRunningBySession[sid] = false;
+        updateFullAiButton();
+      }
+      addTerminalOutput(text, data.color || "#00ff00");
     });
     return state.socket;
   }
@@ -80,15 +104,91 @@
     if (!terminal) return;
     const div = document.createElement("div");
     div.className = "output";
-    div.style.color = color;
-    div.textContent = text;
+    const baseColor = color || "#00ff00";
+    // Highlight "pwned!" in red so root wins are obvious in the scrollback.
+    const parts = String(text ?? "").split(/(pwned!)/i);
+    if (parts.length === 1) {
+      div.style.color = baseColor;
+      div.textContent = text;
+    } else {
+      parts.forEach((part) => {
+        if (!part) return;
+        const span = document.createElement("span");
+        if (part.toLowerCase() === "pwned!") {
+          span.style.color = "#ff0000";
+          span.style.fontWeight = "700";
+          span.style.fontSize = "1.25em";
+        } else {
+          span.style.color = baseColor;
+        }
+        span.textContent = part;
+        div.appendChild(span);
+      });
+    }
     terminal.appendChild(div);
     terminal.scrollTop = terminal.scrollHeight;
   }
 
-  function clearTerminal() {
+  function clearTerminal(placeholder) {
     const terminal = $("terminal");
-    if (terminal) terminal.innerHTML = "";
+    if (!terminal) return;
+    terminal.innerHTML = "";
+    if (placeholder !== false) {
+      const div = document.createElement("div");
+      div.className = "output muted";
+      div.textContent =
+        typeof placeholder === "string"
+          ? placeholder
+          : "* Awaiting connection. Output streams here.";
+      terminal.appendChild(div);
+    }
+  }
+
+  async function loadTerminalHistory(sessionId) {
+    if (!sessionId) {
+      clearTerminal();
+      return;
+    }
+    const token = (state.terminalLoadToken = (state.terminalLoadToken || 0) + 1);
+    try {
+      const data = await api(`/api/sessions/${sessionId}/terminal?limit=800`);
+      // Ignore stale responses (e.g. parallel selectSession / reconnect races).
+      if (token !== state.terminalLoadToken || sessionId !== state.selectedId) return;
+      const lines = data.lines || [];
+      clearTerminal(false);
+      if (!lines.length) {
+        const sess = selected();
+        const connected = sess && sess.status === "connected";
+        clearTerminal(
+          connected
+            ? "[*] Connected — no prior scrollback in this run yet."
+            : "* Awaiting connection. Output streams here."
+        );
+        return;
+      }
+      lines.forEach((line) => {
+        addTerminalOutput(line.text, line.color || "#00ff00");
+      });
+    } catch (_) {
+      if (token === state.terminalLoadToken && sessionId === state.selectedId) {
+        clearTerminal();
+      }
+    }
+  }
+
+  function persistSelectedSession(id) {
+    try {
+      if (id) localStorage.setItem("ramigpt.selectedSessionId", id);
+      else localStorage.removeItem("ramigpt.selectedSessionId");
+    } catch (_) {}
+  }
+
+  function readPersistedSessionId() {
+    try {
+      return localStorage.getItem("ramigpt.selectedSessionId");
+    } catch (_) {
+      return null;
+    }
   }
 
   function sessionPayloadExtras() {
@@ -101,7 +201,7 @@
     renderLandingLists();
     if (state.selectedId) {
       const still = state.inventory.sessions.find((s) => s.id === state.selectedId);
-      if (still) selectSession(still.id, { skipLoad: true });
+      if (still) selectSession(still.id, { skipTerminalReload: true });
       else showLanding();
     }
   }
@@ -222,8 +322,10 @@
 
   function showLanding() {
     state.selectedId = null;
+    persistSelectedSession(null);
     $("pane-landing").classList.remove("hidden");
     $("pane-session").classList.add("hidden");
+    clearTerminal();
     renderSidebar();
   }
 
@@ -232,6 +334,7 @@
     const sess = selected();
     if (!sess) return showLanding();
 
+    persistSelectedSession(id);
     $("pane-landing").classList.add("hidden");
     $("pane-session").classList.remove("hidden");
     renderSidebar();
@@ -252,6 +355,9 @@
 
     joinSessionRoom(id);
     loadPromptContext(id);
+    if (!opts.skipTerminalReload) {
+      loadTerminalHistory(id);
+    }
   }
 
   function updateFullAiButton() {
@@ -443,8 +549,6 @@
       if (passwordOverride) body.password = passwordOverride;
       const res = await api(`/api/sessions/${sess.id}/connect`, { method: "POST", body });
       joinSessionRoom(sess.id);
-      clearTerminal();
-      addTerminalOutput(`[*] Connected to ${sess.name}`, "#00ff00");
       await refreshInventory();
       selectSession(sess.id);
       switchTab("terminal");
@@ -468,8 +572,7 @@
     if (!sess) return;
     await api(`/api/sessions/${sess.id}/disconnect`, { method: "POST", body: {} });
     await refreshInventory();
-    selectSession(sess.id, { skipLoad: true });
-    addTerminalOutput("[*] Disconnected", "#8b949e");
+    selectSession(sess.id);
   }
 
   async function reconnectSelected() {
@@ -478,10 +581,8 @@
     try {
       await api(`/api/sessions/${sess.id}/reconnect`, { method: "POST", body: {} });
       joinSessionRoom(sess.id);
-      clearTerminal();
-      addTerminalOutput("[*] Reconnected", "#00ff00");
       await refreshInventory();
-      selectSession(sess.id, { skipLoad: true });
+      selectSession(sess.id);
       $("command-field").disabled = false;
     } catch (err) {
       alert(err.message);
@@ -562,12 +663,21 @@
   async function runTool() {
     if (!requireConnectedSession()) return;
     const tool = $("toolSelector").value;
+    const withAi = !($("toolAiCheckbox") && !$("toolAiCheckbox").checked);
     if (tool === "beRoot") {
       try {
         await api("/action3", {
           method: "POST",
-          body: { action: "start", ...sessionPayloadExtras() },
+          body: {
+            action: "start",
+            ai: withAi,
+            ...sessionPayloadExtras(),
+          },
         });
+        if (withAi && state.selectedId) {
+          state.fullAiRunningBySession[state.selectedId] = true;
+          updateFullAiButton();
+        }
       } catch (err) {
         alert(err.message);
       }
@@ -738,7 +848,16 @@
 
     try {
       await refreshInventory();
-      showLanding();
+      const savedId = readPersistedSessionId();
+      const stillThere =
+        savedId &&
+        state.inventory.sessions.some((s) => s.id === savedId);
+      if (stillThere) {
+        selectSession(savedId);
+        switchTab("terminal");
+      } else {
+        showLanding();
+      }
     } catch (err) {
       console.error(err);
       addTerminalOutput?.("[!] Failed to load inventory: " + err.message);

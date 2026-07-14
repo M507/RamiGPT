@@ -9,8 +9,8 @@
 
     <div class="bench-body">
       <p class="muted small">
-        Spins up misconfigured sudo targets (vim / awk) over SSH, runs <strong>Full AI</strong> on each,
-        and records pass/fail. Default timeout is 60 seconds per target.
+        Deploys sudo-misconfig targets (vim / awk), optionally runs selected <strong>tools</strong>
+        first (BeRoot + AI), then Full AI until root. Timeout covers tools + AI per target.
       </p>
 
       <section class="bench-section">
@@ -56,11 +56,26 @@
         <h3>2. Run options</h3>
         <div class="form-row">
           <label>Per-target timeout (seconds)
-            <input type="number" id="bench-timeout" value="60" min="10" max="600">
+            <input type="number" id="bench-timeout" value="180" min="10" max="3600">
           </label>
           <label>AI Settings
             <button type="button" class="btn btn-secondary" onclick="openSettings()">Configure AI</button>
           </label>
+        </div>
+        <div class="bench-tools">
+          <div class="bench-tools-head">
+            <strong>Tools</strong>
+            <span class="muted small">Run before Full AI (AI on). Checked by default.</span>
+          </div>
+          <div class="bench-tool-list" id="bench-tool-list">
+            <label class="bench-tool-check">
+              <input type="checkbox" data-tool-id="beroot" checked>
+              <span>
+                <strong>BeRoot</strong>
+                <small>Scan first, then Full AI uses findings until root</small>
+              </span>
+            </label>
+          </div>
         </div>
         <div class="bench-creds muted small">
           Target SSH: <code id="bench-cred-user">zeus</code> / <code id="bench-cred-pass">benchmark</code>

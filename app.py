@@ -57,6 +57,47 @@ def _extra_watch_files() -> list[str]:
     return files
 
 
+def _silence_eventlet_ssl_noise() -> None:
+    """Drop SSL handshake traceback spam from eventlet's hub / WSGI server.
+
+    Happens when a client speaks plain HTTP (or broken TLS) to the HTTPS port —
+    not actionable; eventlet otherwise dumps a full stack + 'Removing descriptor'.
+    """
+    import ssl
+
+    try:
+        from eventlet.hubs.hub import BaseHub
+        from eventlet import wsgi as eventlet_wsgi
+    except ImportError:
+        return
+
+    _orig_squelch = BaseHub.squelch_exception
+
+    def _quiet_squelch(self, fileno, exc_info):  # noqa: ANN001
+        if isinstance(exc_info[1], ssl.SSLError):
+            try:
+                self.remove_descriptor(fileno)
+            except Exception:
+                pass
+            return
+        return _orig_squelch(self, fileno, exc_info)
+
+    BaseHub.squelch_exception = _quiet_squelch
+
+    _orig_process = eventlet_wsgi.Server.process_request
+
+    def _quiet_process_request(self, conn_state):  # noqa: ANN001
+        try:
+            return _orig_process(self, conn_state)
+        except ssl.SSLError:
+            try:
+                conn_state[1].close()
+            except Exception:
+                pass
+
+    eventlet_wsgi.Server.process_request = _quiet_process_request
+
+
 if __name__ == "__main__":
     # Default on for local development; set APP_RELOAD=0 to disable.
     use_reloader = _env_flag("APP_RELOAD", "1")
@@ -67,6 +108,7 @@ if __name__ == "__main__":
             flush=True,
         )
 
+    _silence_eventlet_ssl_noise()
     socketio.run(
         app,
         host=APP_HOST,

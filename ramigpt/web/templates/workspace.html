@@ -90,7 +90,7 @@
               <ul>
                 <li>Credentials are remembered per <code>user@host:port</code>.</li>
                 <li>Connect a session, then use the Terminal tab for RamiGPT AI tools.</li>
-                <li>Use <strong>Benchmark</strong> to deploy sudo-misconfig targets (vim/awk) and auto-run Full AI.</li>
+                <li>Use <strong>Benchmark</strong> to deploy targets, run BeRoot + Full AI, and record pass/fail.</li>
                 <li>Drag sessions between groups in the sidebar.</li>
               </ul>
             </div>
@@ -156,13 +156,17 @@
                     <input type="text" id="queue3-input" placeholder="Add avoid — Enter">
                     <table class="queue-table" id="queue3"><tbody></tbody></table>
                   </div>
-                  <div class="ai-actions">
+                    <div class="ai-actions">
                     <button type="button" class="btn btn-primary" id="action1">Full AI</button>
                     <button type="button" class="btn btn-secondary" onclick="Workspace.guideMe()">Guide Me</button>
                     <div class="tool-row">
                       <select id="toolSelector">
                         <option value="beRoot">BeRoot</option>
                       </select>
+                      <label class="tool-ai-check" title="After the scan, run Full AI using tool findings">
+                        <input type="checkbox" id="toolAiCheckbox" checked>
+                        <span>AI</span>
+                      </label>
                       <button type="button" class="btn btn-secondary" onclick="Workspace.runTool()">Run</button>
                     </div>
                     <div class="tool-row">

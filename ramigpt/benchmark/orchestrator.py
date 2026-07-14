@@ -27,6 +27,7 @@ from ramigpt.benchmark.targets import (
     TARGETS,
     BenchmarkTarget,
 )
+from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
 from ramigpt.domain import PrivEscPrompt
 from ramigpt.services.runtime_status import set_status
 from ramigpt.services.session_store import get_session_store
@@ -69,6 +70,8 @@ class BenchmarkRun:
     phase: str = "queued"  # queued|deploying|running|stopping|done|error
     host: str = ""
     remote: Optional[Dict[str, Any]] = None
+    # tool_id -> enabled (BeRoot default on). Enabled tools run before Full AI with AI on.
+    tools: Dict[str, bool] = field(default_factory=default_tools)
     targets: List[TargetRunResult] = field(default_factory=list)
     log: List[str] = field(default_factory=list)
     started_at: str = field(default_factory=_utcnow)
@@ -123,7 +126,9 @@ def get_status() -> Dict[str, Any]:
                 "username": BENCH_USERNAME,
                 "password": BENCH_PASSWORD,
                 "ports": [t.port for t in TARGETS],
+                "tools": remote_cfg.get("tools") or default_tools(),
             },
+            "available_tools": AVAILABLE_TOOLS,
             "remote_preset": remote_cfg,
             "history": list(_history[-10:]),
         }
@@ -281,7 +286,7 @@ def _start_full_ai(session_id: str) -> None:
     session_data = {
         "sid": session_id,
         "username": saved.username if saved else BENCH_USERNAME,
-        "password": BENCH_PASSWORD,
+        "password": (store.resolve_password(saved) if saved else None) or BENCH_PASSWORD,
         "hostname": saved.hostname if saved else "pehost",
         "server": saved.host if saved else "127.0.0.1",
         "port": saved.port if saved else 22,
@@ -297,12 +302,68 @@ def _start_full_ai(session_id: str) -> None:
     socketio.start_background_task(_runner)
 
 
+def _session_data(session_id: str) -> Dict[str, Any]:
+    store = get_session_store()
+    saved = store.get_session(session_id)
+    return {
+        "sid": session_id,
+        "username": saved.username if saved else BENCH_USERNAME,
+        "password": (store.resolve_password(saved) if saved else None) or BENCH_PASSWORD,
+        "hostname": saved.hostname if saved else "pehost",
+        "server": saved.host if saved else "127.0.0.1",
+        "port": saved.port if saved else 22,
+    }
+
+
+def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
+    """
+    Run enabled tools first (BeRoot with AI on → Full AI loop), or plain Full AI
+    when no tools are selected.
+    """
+    enabled = enabled_tool_ids(run.tools)
+    root_won_by_session[session_id] = False
+    full_ai_finished_by_session[session_id] = False
+    stop_flags = _hooks["stop_full_ai_by_session"]
+    flag = stop_flags.setdefault(session_id, threading.Event())
+    flag.clear()
+    loop = _hooks["loop"]
+    loop[session_id] = 1
+
+    session_data = _session_data(session_id)
+
+    if "beroot" in enabled:
+        execute_beroot = _hooks.get("execute_beroot")
+        if not callable(execute_beroot):
+            raise RuntimeError("execute_beroot hook not registered")
+        _log(run, "Running BeRoot (AI on) — scan then Full AI until root")
+        session_data["with_ai"] = True
+        # Blocking: scan completes here; Full AI continues in a background task.
+        try:
+            execute_beroot(session_data)
+        except Exception as exc:  # noqa: BLE001
+            mark_full_ai_finished(session_id)
+            raise
+        # If BeRoot path did not hand off to Full AI, avoid hanging the wait loop.
+        if not full_ai_finished_by_session.get(session_id) and loop.get(session_id) == 0:
+            # Scan-only / failed handoff — mark finished so the target exits cleanly.
+            if not root_won_by_session.get(session_id):
+                mark_full_ai_finished(session_id)
+        return
+
+    if enabled:
+        unknown = ", ".join(enabled)
+        _log(run, f"Unknown tools {unknown!r} — falling back to Full AI only")
+
+    _log(run, "Starting Full AI (no pre-tools)")
+    _start_full_ai(session_id)
+
+
 def _stop_full_ai(session_id: str) -> None:
     stop_flags = _hooks["stop_full_ai_by_session"]
-    loop = _hooks["loop"]
     flag = stop_flags.setdefault(session_id, threading.Event())
     flag.set()
-    loop[session_id] = 0
+    # Leave loop[session_id]=1 until autonomous finally clears it so the
+    # interactive listener cannot steal the prompt mid-drain.
 
 
 def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarget) -> None:
@@ -315,8 +376,16 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
         session_id = _upsert_session_for_target(target, run.host)
         item.session_id = session_id
         _connect_session(session_id)
-        _log(run, f"Starting Full AI on {target.name} (timeout {run.timeout_seconds}s)")
-        _start_full_ai(session_id)
+        tool_ids = enabled_tool_ids(run.tools)
+        if tool_ids:
+            _log(
+                run,
+                f"Target {target.name}: tools={','.join(tool_ids)} → Full AI "
+                f"(timeout {run.timeout_seconds}s)",
+            )
+        else:
+            _log(run, f"Starting Full AI on {target.name} (timeout {run.timeout_seconds}s)")
+        _start_tools_then_full_ai(run, session_id)
 
         deadline = started + run.timeout_seconds
         while time.monotonic() < deadline:
@@ -424,6 +493,7 @@ def start_run(
     mode: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     remote: Optional[Dict[str, Any]] = None,
+    tools: Optional[Any] = None,
 ) -> BenchmarkRun:
     global _current
 
@@ -434,6 +504,12 @@ def start_run(
 
     if timeout_seconds is None:
         timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
+
+    # UI tools override JSON tools when provided; else JSON / defaults (BeRoot on).
+    if tools is None:
+        tools_cfg = normalize_tools(preset.get("tools"))
+    else:
+        tools_cfg = normalize_tools(tools)
 
     merged_remote: Optional[Dict[str, Any]] = None
     if mode == "remote":
@@ -451,6 +527,7 @@ def start_run(
         "close_ssh_connection",
         "start_shell_listener",
         "autonomous",
+        "execute_beroot",
         "prompts",
         "prompt_delimiters",
         "stop_full_ai_by_session",
@@ -469,6 +546,7 @@ def start_run(
             mode=mode,
             timeout_seconds=max(10, int(timeout_seconds or DEFAULT_TIMEOUT_SECONDS)),
             remote=merged_remote,
+            tools=tools_cfg,
             targets=[
                 TargetRunResult(
                     target_id=t.id,
@@ -479,6 +557,13 @@ def start_run(
             ],
         )
         _current = run
+
+    enabled = enabled_tool_ids(tools_cfg)
+    _log(
+        run,
+        f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
+        f"timeout={run.timeout_seconds}s)",
+    )
 
     thread = threading.Thread(target=_worker, args=(run,), name=f"benchmark-{run.id[:8]}", daemon=True)
     thread.start()
