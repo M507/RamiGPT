@@ -18,6 +18,7 @@ SESSION_HOSTS_DIR = SESSIONS_DIR / "hosts"
 SESSION_META_PATH = SESSIONS_DIR / "meta.json"
 BENCHMARK_DIR = DATA_DIR / "benchmark"
 BENCHMARK_REMOTE_CONFIG = BENCHMARK_DIR / "remote.json"
+BENCHMARK_RESULTS_DIR = BENCHMARK_DIR / "results"
 SESSION_LOGS_DIR = LOGS_DIR / "sessions"
 BENCHMARK_SESSION_LOGS_DIR = SESSION_LOGS_DIR / "benchmarks"
 DOCS_DIR = PROJECT_ROOT / "docs"
@@ -39,6 +40,7 @@ def ensure_runtime_dirs() -> None:
         SESSIONS_DIR,
         SESSION_HOSTS_DIR,
         BENCHMARK_DIR,
+        BENCHMARK_RESULTS_DIR,
         BEROOT_DOWNLOADS_DIR,
         CERTS_DIR,
     ):

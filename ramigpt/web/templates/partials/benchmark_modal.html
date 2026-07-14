@@ -58,8 +58,16 @@
           <label>Per-target timeout (seconds)
             <input type="number" id="bench-timeout" value="180" min="10" max="3600">
           </label>
+          <label>Run times
+            <input type="number" id="bench-runs" value="1" min="1" max="50" title="How many times to run the full suite">
+          </label>
+        </div>
+        <div class="form-row">
           <label>AI Settings
             <button type="button" class="btn btn-secondary" onclick="openSettings()">Configure AI</button>
+          </label>
+          <label class="muted small" style="justify-content:flex-end">
+            Results saved under <code>data/benchmark/results/</code>
           </label>
         </div>
         <div class="bench-tools">
@@ -101,6 +109,9 @@
     <p class="form-status" id="bench-status"></p>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" data-bench-close>Close</button>
+      <button type="button" class="btn btn-secondary" id="bench-clean-logs" title="Delete all session and benchmark logs under data/logs/sessions">
+        Clean logs
+      </button>
       <button type="button" class="btn btn-secondary" id="bench-stop" disabled>Stop</button>
       <button type="button" class="btn btn-primary" id="bench-start">
         <i class="fas fa-flag-checkered"></i> Start Benchmark

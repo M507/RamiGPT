@@ -9,6 +9,7 @@ from ramigpt.benchmark.orchestrator import get_status, request_stop, start_run
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.benchmark.targets import DEFAULT_TIMEOUT_SECONDS, list_targets
 from ramigpt.utils import debug_logger
+from ramigpt.utils.session_logging import clear_all_session_logs
 
 
 def register_benchmark_routes(app: Flask) -> None:
@@ -59,12 +60,19 @@ def register_benchmark_routes(app: Flask) -> None:
         timeout = body.get("timeout_seconds", preset.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         remote = body.get("remote") or None
         tools = body.get("tools", preset.get("tools"))
+        repetitions = body.get("repetitions", body.get("runs", body.get("run_times", 1)))
         try:
             timeout_i = int(timeout)
         except (TypeError, ValueError):
             return jsonify(error="timeout_seconds must be an integer"), 400
         try:
-            run = start_run(mode=mode, timeout_seconds=timeout_i, remote=remote, tools=tools)
+            run = start_run(
+                mode=mode,
+                timeout_seconds=timeout_i,
+                remote=remote,
+                tools=tools,
+                repetitions=repetitions,
+            )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except RuntimeError as exc:
@@ -79,3 +87,18 @@ def register_benchmark_routes(app: Flask) -> None:
         result = request_stop()
         code = 200 if result.get("ok") else 409
         return jsonify(result), code
+
+    @app.route("/api/benchmark/clean-logs", methods=["POST"])
+    def api_benchmark_clean_logs():
+        status = get_status()
+        if status.get("running"):
+            return jsonify(
+                ok=False,
+                error="Stop the active benchmark before cleaning logs",
+            ), 409
+        try:
+            result = clear_all_session_logs()
+            return jsonify(ok=True, **result), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to clean session logs")
+            return jsonify(ok=False, error=str(exc)), 500

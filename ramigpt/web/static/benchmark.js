@@ -143,7 +143,7 @@
     return phase || "idle";
   }
 
-  function renderRun(run, running) {
+  function renderRun(run, running, batch) {
     const phaseEl = $("bench-phase");
     const results = $("bench-results");
     const logEl = $("bench-log");
@@ -151,25 +151,47 @@
     const stopBtn = $("bench-stop");
 
     if (phaseEl) {
-      phaseEl.className = "status-pill " + (run ? run.phase : "idle");
-      phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? run.phase : "Idle")}`;
+      const phase = run ? run.phase : "idle";
+      const reps = (batch && batch.repetitions) || (run && run.repetitions) || 1;
+      const rep = (batch && batch.repetition) || (run && run.repetition) || 1;
+      const repLabel = reps > 1 ? ` · run ${rep}/${reps}` : "";
+      phaseEl.className = "status-pill " + (run ? phase : "idle");
+      phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? phase : "Idle")}${escapeHtml(repLabel)}`;
     }
 
     if (results) {
       if (!run || !(run.targets || []).length) {
         results.innerHTML = `<div class="muted small">No run yet. Configure AI, pick local/remote, then Start.</div>`;
       } else {
-        results.innerHTML = run.targets
-          .map((t) => {
-            const klass = t.status || "pending";
-            const elapsed = t.elapsed_seconds != null ? `${t.elapsed_seconds}s` : "—";
-            return `<div class="bench-result-row status-${escapeHtml(klass)}">
+        const modelLabel =
+          run.provider || run.model
+            ? `<div class="muted small">Model: ${escapeHtml(run.provider || "?")}/${escapeHtml(run.model || "?")}</div>`
+            : "";
+        const resultDir = run.result_dir
+          ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
+          : "";
+        results.innerHTML =
+          modelLabel +
+          resultDir +
+          run.targets
+            .map((t) => {
+              const klass = t.status || "pending";
+              const elapsed = t.elapsed_seconds != null ? `${t.elapsed_seconds}s` : "—";
+              const cmds =
+                t.ai_requests != null ? `${t.ai_requests} cmds` : "";
+              const tools = (t.tools_used || []).length
+                ? `tools=${(t.tools_used || []).join(",")}`
+                : "";
+              const meta = [elapsed, cmds, tools, t.message || ""]
+                .filter(Boolean)
+                .join(" · ");
+              return `<div class="bench-result-row status-${escapeHtml(klass)}">
               <span class="bench-result-name">${escapeHtml(t.name)} <span class="muted">:${t.port}</span></span>
               <span class="bench-result-status">${escapeHtml(klass)}</span>
-              <span class="bench-result-meta muted">${escapeHtml(elapsed)} ${escapeHtml(t.message || "")}</span>
+              <span class="bench-result-meta muted">${escapeHtml(meta)}</span>
             </div>`;
-          })
-          .join("");
+            })
+            .join("");
       }
     }
 
@@ -181,6 +203,8 @@
 
     if (startBtn) startBtn.disabled = !!running;
     if (stopBtn) stopBtn.disabled = !running;
+    const cleanBtn = $("bench-clean-logs");
+    if (cleanBtn) cleanBtn.disabled = !!running;
 
     if (run && run.error) setStatus(run.error, true);
   }
@@ -192,7 +216,7 @@
       renderTools(data.available_tools, data.defaults);
     }
     applyRemotePreset(data.remote_preset);
-    renderRun(data.run, data.running);
+    renderRun(data.run, data.running, data.batch);
     if (data.defaults && $("bench-timeout") && !data.running) {
       const field = $("bench-timeout");
       const presetTimeout =
@@ -201,6 +225,12 @@
         180;
       if (document.activeElement !== field && !field.dataset.touched) {
         field.value = presetTimeout;
+      }
+    }
+    if (data.defaults && $("bench-runs") && !data.running) {
+      const runsField = $("bench-runs");
+      if (document.activeElement !== runsField && !runsField.dataset.touched) {
+        runsField.value = data.defaults.repetitions || 1;
       }
     }
     return data;
@@ -261,6 +291,7 @@
     const payload = {
       mode: mode(),
       timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
+      repetitions: Math.max(1, Math.min(50, parseInt($("bench-runs")?.value, 10) || 1)),
       tools: selectedTools(),
     };
     if (payload.mode === "remote") {
@@ -296,6 +327,24 @@
     }
   }
 
+  async function cleanLogs() {
+    const ok = window.confirm(
+      "Delete all session logs under data/logs/sessions?\n\nThis removes normal session logs and benchmark suite logs. Benchmark results under data/benchmark/results are kept."
+    );
+    if (!ok) return;
+    setStatus("Cleaning logs…");
+    try {
+      const data = await api("/api/benchmark/clean-logs", { method: "POST", body: {} });
+      const removed = data.removed != null ? data.removed : "?";
+      setStatus(`Cleaned session logs (${removed} items removed).`);
+      if (window.Workspace && typeof window.Workspace.refreshInventory === "function") {
+        window.Workspace.refreshInventory();
+      }
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -320,6 +369,12 @@
         timeout.dataset.touched = "1";
       });
     }
+    const runs = $("bench-runs");
+    if (runs) {
+      runs.addEventListener("input", () => {
+        runs.dataset.touched = "1";
+      });
+    }
     const toolList = $("bench-tool-list");
     if (toolList) {
       toolList.addEventListener("change", () => {
@@ -328,10 +383,12 @@
     }
     const start = $("bench-start");
     const stop = $("bench-stop");
+    const cleanBtn = $("bench-clean-logs");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
+    if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
   }

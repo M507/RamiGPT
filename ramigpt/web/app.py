@@ -1014,7 +1014,14 @@ def autonomous(session_data):
         )
         try:
             from ramigpt.benchmark.orchestrator import mark_full_ai_finished
-            mark_full_ai_finished(session_id)
+            mark_full_ai_finished(
+                session_id,
+                requests_run=i,
+                got_root=just_got_root,
+                provider=get_settings().ai_provider,
+                model=get_settings().active_model(),
+                stop_reason=stop_reason,
+            )
         except Exception:
             pass
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 import uuid
@@ -29,8 +30,11 @@ from ramigpt.benchmark.targets import (
     TARGETS,
     BenchmarkTarget,
 )
+from ramigpt.benchmark.results import write_batch_summary, write_benchmark_result
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
+from ramigpt.config import get_settings
 from ramigpt.domain import PrivEscPrompt
+from ramigpt.paths import BENCHMARK_RESULTS_DIR
 from ramigpt.services.runtime_status import set_status
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
@@ -75,6 +79,11 @@ class TargetRunResult:
     message: str = ""
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    ai_requests: Optional[int] = None
+    tools_used: List[str] = field(default_factory=list)
+    provider: str = ""
+    model: str = ""
+    got_root: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -98,6 +107,13 @@ class BenchmarkRun:
     stop_requested: bool = False
     # On-disk suite folder: data/logs/sessions/benchmarks/<id>/
     log_dir: Optional[str] = None
+    # Multi-run batch metadata (repetition of N)
+    batch_id: Optional[str] = None
+    repetition: int = 1
+    repetitions: int = 1
+    provider: str = ""
+    model: str = ""
+    result_dir: Optional[str] = None
 
     def to_public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -116,14 +132,63 @@ _history: List[Dict[str, Any]] = []
 # session_id -> True when Full AI / autonomous detects root
 root_won_by_session: Dict[str, bool] = {}
 full_ai_finished_by_session: Dict[str, bool] = {}
+# Multi-run batch state (active until all repetitions finish)
+_batch: Dict[str, Any] = {
+    "active": False,
+    "id": None,
+    "repetition": 0,
+    "repetitions": 1,
+    "stop": False,
+}
 
 
 def mark_root_won(session_id: str) -> None:
     root_won_by_session[session_id] = True
+    with _lock:
+        run = _current
+        if not run:
+            return
+        for item in run.targets:
+            if item.session_id == session_id:
+                item.got_root = True
+                break
 
 
-def mark_full_ai_finished(session_id: str) -> None:
+def mark_full_ai_finished(
+    session_id: str,
+    *,
+    requests_run: Optional[int] = None,
+    got_root: Optional[bool] = None,
+    provider: str = "",
+    model: str = "",
+    stop_reason: str = "",
+) -> None:
     full_ai_finished_by_session[session_id] = True
+    with _lock:
+        run = _current
+        if not run:
+            return
+        if provider:
+            run.provider = run.provider or provider
+        if model:
+            run.model = run.model or model
+        for item in run.targets:
+            if item.session_id != session_id:
+                continue
+            if requests_run is not None:
+                try:
+                    item.ai_requests = int(requests_run)
+                except (TypeError, ValueError):
+                    pass
+            if got_root is not None:
+                item.got_root = bool(got_root)
+            if provider:
+                item.provider = provider
+            if model:
+                item.model = model
+            if stop_reason and not item.message and item.status == "running":
+                item.message = stop_reason
+            break
 
 
 def get_current_run() -> Optional[BenchmarkRun]:
@@ -135,14 +200,23 @@ def get_status() -> Dict[str, Any]:
     with _lock:
         run = _current
         remote_cfg = public_remote_config()
+        batch_active = bool(_batch.get("active"))
+        running = batch_active or bool(run and run.phase not in {"done", "error"})
         return {
-            "running": bool(run and run.phase not in {"done", "error"}),
+            "running": running,
             "run": run.to_public_dict() if run else None,
+            "batch": {
+                "active": batch_active,
+                "id": _batch.get("id"),
+                "repetition": _batch.get("repetition"),
+                "repetitions": _batch.get("repetitions"),
+            },
             "targets": [t.to_dict() for t in TARGETS],
             "defaults": {
                 "timeout_seconds": int(
                     remote_cfg.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS
                 ),
+                "repetitions": 1,
                 "username": BENCH_USERNAME,
                 "password": BENCH_PASSWORD,
                 "ports": [t.port for t in TARGETS],
@@ -156,7 +230,10 @@ def get_status() -> Dict[str, Any]:
 
 def request_stop() -> Dict[str, Any]:
     with _lock:
+        _batch["stop"] = True
         if not _current or _current.phase in {"done", "error"}:
+            if _batch.get("active"):
+                return {"ok": True, "run": _current.to_public_dict() if _current else None}
             return {"ok": False, "error": "No active benchmark run"}
         _current.stop_requested = True
         _current.phase = "stopping"
@@ -376,6 +453,11 @@ def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
         # this benchmark worker never executes under eventlet.
         session_data["from_benchmark"] = True
         session_data["use_os_thread"] = True
+        # Record tool usage on the matching target.
+        with _lock:
+            for item in run.targets:
+                if item.session_id == session_id and "beroot" not in item.tools_used:
+                    item.tools_used.append("beroot")
         try:
             execute_beroot(session_data)
         except Exception as exc:  # noqa: BLE001
@@ -517,6 +599,10 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
                 pass
 
 
+# Optional batch results folder for multi-run suites (set by batch worker).
+run_batch_dir: Optional[str] = None
+
+
 def _worker(run: BenchmarkRun) -> None:
     try:
         def log_fn(msg: str) -> None:
@@ -576,6 +662,13 @@ def _worker(run: BenchmarkRun) -> None:
         _log(run, f"Benchmark failed: {exc}")
     finally:
         run.finished_at = _utcnow()
+        # Snapshot settings used for this run (provider/model).
+        try:
+            settings = get_settings()
+            run.provider = run.provider or settings.ai_provider
+            run.model = run.model or settings.active_model()
+        except Exception:  # noqa: BLE001
+            pass
         with _lock:
             _history.append(deepcopy(run.to_public_dict()))
         if run.log_dir:
@@ -594,7 +687,67 @@ def _worker(run: BenchmarkRun) -> None:
                 f"[benchmark] suite finished — full details in {run.log_dir}/ "
                 f"(run.json, run.log, per-target events.jsonl)"
             )
+        try:
+            result_path = write_benchmark_result(
+                run.to_public_dict(),
+                settings={"provider": run.provider, "model": run.model},
+                batch_dir=Path(run_batch_dir) if run_batch_dir else None,
+            )
+            run.result_dir = str(result_path.parent)
+            _log(run, f"Results written → {result_path}")
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception(f"[benchmark] failed to write results: {exc}")
+            _log(run, f"Failed to write results: {exc}")
         _log(run, f"Benchmark finished (phase={run.phase})")
+
+
+def _make_run(
+    *,
+    mode: str,
+    timeout_seconds: int,
+    tools_cfg: Dict[str, bool],
+    merged_remote: Optional[Dict[str, Any]],
+    batch_id: str,
+    repetition: int,
+    repetitions: int,
+) -> BenchmarkRun:
+    settings = get_settings()
+    run = BenchmarkRun(
+        id=str(uuid.uuid4()),
+        mode=mode,
+        timeout_seconds=max(10, int(timeout_seconds or DEFAULT_TIMEOUT_SECONDS)),
+        remote=merged_remote,
+        tools=tools_cfg,
+        targets=[
+            TargetRunResult(
+                target_id=t.id,
+                name=t.name,
+                port=t.port,
+            )
+            for t in TARGETS
+        ],
+        batch_id=batch_id,
+        repetition=repetition,
+        repetitions=repetitions,
+        provider=settings.ai_provider,
+        model=settings.active_model(),
+    )
+    suite_dir = begin_benchmark_suite_logs(
+        run.id,
+        mode=mode,
+        meta={
+            "timeout_seconds": run.timeout_seconds,
+            "tools": tools_cfg,
+            "targets": [t.id for t in TARGETS],
+            "batch_id": batch_id,
+            "repetition": repetition,
+            "repetitions": repetitions,
+            "provider": run.provider,
+            "model": run.model,
+        },
+    )
+    run.log_dir = str(suite_dir)
+    return run
 
 
 def start_run(
@@ -603,8 +756,9 @@ def start_run(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     remote: Optional[Dict[str, Any]] = None,
     tools: Optional[Any] = None,
+    repetitions: int = 1,
 ) -> BenchmarkRun:
-    global _current
+    global _current, run_batch_dir
 
     preset = load_remote_config()
     mode = (mode or preset.get("mode") or "local").strip().lower()
@@ -613,6 +767,12 @@ def start_run(
 
     if timeout_seconds is None:
         timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
+
+    try:
+        reps = int(repetitions or 1)
+    except (TypeError, ValueError):
+        raise ValueError("repetitions must be an integer") from None
+    reps = max(1, min(reps, 50))
 
     # UI tools override JSON tools when provided; else JSON / defaults (BeRoot on).
     if tools is None:
@@ -648,46 +808,117 @@ def start_run(
         raise RuntimeError(f"Benchmark hooks not registered: {', '.join(missing)}")
 
     with _lock:
-        if _current and _current.phase not in {"done", "error"}:
+        if _batch.get("active") or (_current and _current.phase not in {"done", "error"}):
             raise RuntimeError("A benchmark run is already in progress")
-        run = BenchmarkRun(
-            id=str(uuid.uuid4()),
-            mode=mode,
-            timeout_seconds=max(10, int(timeout_seconds or DEFAULT_TIMEOUT_SECONDS)),
-            remote=merged_remote,
-            tools=tools_cfg,
-            targets=[
-                TargetRunResult(
-                    target_id=t.id,
-                    name=t.name,
-                    port=t.port,
-                )
-                for t in TARGETS
-            ],
+        batch_id = str(uuid.uuid4())
+        _batch.update(
+            {
+                "active": True,
+                "id": batch_id,
+                "repetition": 1,
+                "repetitions": reps,
+                "stop": False,
+            }
         )
-        suite_dir = begin_benchmark_suite_logs(
-            run.id,
+        first = _make_run(
             mode=mode,
-            meta={
-                "timeout_seconds": run.timeout_seconds,
-                "tools": tools_cfg,
-                "targets": [t.id for t in TARGETS],
-            },
+            timeout_seconds=timeout_seconds,
+            tools_cfg=tools_cfg,
+            merged_remote=merged_remote,
+            batch_id=batch_id,
+            repetition=1,
+            repetitions=reps,
         )
-        run.log_dir = str(suite_dir)
-        _current = run
+        _current = first
 
     enabled = enabled_tool_ids(tools_cfg)
     debug_logger.info(
-        f"[benchmark] suite logs → {run.log_dir}/ "
-        f"(run.log + per-target events under <target_id>/)"
+        f"[benchmark] suite logs → {first.log_dir}/ "
+        f"(run.log + per-target events under <target_id>/) "
+        f"repetitions={reps} batch={batch_id[:8]}"
     )
     _log(
-        run,
+        first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
-        f"timeout={run.timeout_seconds}s, logs={run.log_dir})",
+        f"timeout={first.timeout_seconds}s, run={1}/{reps}, logs={first.log_dir})",
     )
 
-    thread = threading.Thread(target=_worker, args=(run,), name=f"benchmark-{run.id[:8]}", daemon=True)
+    def _batch_worker() -> None:
+        global _current, run_batch_dir
+        batch_folder: Optional[Path] = None
+        completed_docs: List[Dict[str, Any]] = []
+        try:
+            if reps > 1:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                batch_folder = BENCHMARK_RESULTS_DIR / f"batch_{stamp}_{batch_id[:8]}"
+                batch_folder.mkdir(parents=True, exist_ok=True)
+                run_batch_dir = str(batch_folder)
+            else:
+                run_batch_dir = None
+
+            for rep in range(1, reps + 1):
+                with _lock:
+                    if _batch.get("stop"):
+                        break
+                    _batch["repetition"] = rep
+                    if rep == 1:
+                        run = first
+                    else:
+                        run = _make_run(
+                            mode=mode,
+                            timeout_seconds=timeout_seconds,
+                            tools_cfg=tools_cfg,
+                            merged_remote=merged_remote,
+                            batch_id=batch_id,
+                            repetition=rep,
+                            repetitions=reps,
+                        )
+                        _current = run
+                        _log(
+                            run,
+                            f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
+                            f"timeout={run.timeout_seconds}s, run={rep}/{reps}, logs={run.log_dir})",
+                        )
+                debug_logger.info(
+                    f"[benchmark] starting repetition {rep}/{reps} run_id={run.id}"
+                )
+                _worker(run)
+                # Capture result document path from run
+                if run.result_dir:
+                    try:
+                        result_json = Path(run.result_dir) / "result.json"
+                        if result_json.is_file():
+                            completed_docs.append(
+                                json.loads(result_json.read_text(encoding="utf-8"))
+                            )
+                    except Exception:  # noqa: BLE001
+                        completed_docs.append(run.to_public_dict())
+                else:
+                    completed_docs.append(run.to_public_dict())
+                with _lock:
+                    if _batch.get("stop"):
+                        break
+        finally:
+            if batch_folder is not None and completed_docs:
+                try:
+                    write_batch_summary(
+                        batch_folder, batch_id=batch_id, runs=completed_docs
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    debug_logger.warning(f"[benchmark] batch summary failed: {exc}")
+            with _lock:
+                _batch["active"] = False
+                _batch["stop"] = False
+            run_batch_dir = None
+            debug_logger.info(
+                f"[benchmark] batch finished id={batch_id[:8]} "
+                f"completed={len(completed_docs)}/{reps}"
+            )
+
+    thread = threading.Thread(
+        target=_batch_worker,
+        name=f"benchmark-batch-{batch_id[:8]}",
+        daemon=True,
+    )
     thread.start()
-    return run
+    return first

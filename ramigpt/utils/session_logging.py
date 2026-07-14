@@ -29,13 +29,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import threading
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
-from ramigpt.paths import BENCHMARK_SESSION_LOGS_DIR, LOGS_DIR, ensure_runtime_dirs
+from ramigpt.paths import (
+    BENCHMARK_SESSION_LOGS_DIR,
+    LOGS_DIR,
+    SESSION_LOGS_DIR,
+    ensure_runtime_dirs,
+)
 
 _lock = threading.RLock()
 _loggers: Dict[str, "SessionLogger"] = {}
@@ -688,6 +694,49 @@ def get_session_logger(session_id: str) -> SessionLogger:
         if key not in _loggers:
             _loggers[key] = SessionLogger(key)
         return _loggers[key]
+
+
+def clear_all_session_logs() -> Dict[str, Any]:
+    """
+    Delete everything under data/logs/sessions/ (normal + benchmark suite logs).
+
+    Closes in-memory session log handlers first, recreates empty dirs afterward.
+    Does not touch data/benchmark/results or data/logs/debug.log.
+    """
+    root = SESSION_LOGS_DIR.resolve()
+    removed = 0
+    errors: List[str] = []
+
+    with _lock:
+        for slog in list(_loggers.values()):
+            try:
+                slog._close_handlers()
+            except Exception:  # noqa: BLE001
+                pass
+        _loggers.clear()
+        _terminal_buffers.clear()
+        _terminal_seeded.clear()
+
+    if root.is_dir():
+        for child in list(root.iterdir()):
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+                removed += 1
+            except OSError as exc:
+                errors.append(f"{child.name}: {exc}")
+
+    ensure_runtime_dirs()
+    SESSION_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    BENCHMARK_SESSION_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "removed": removed,
+        "path": str(root),
+        "errors": errors,
+    }
 
 
 def rebind_session_log_dir(session_id: str, session_dir: Path) -> SessionLogger:
