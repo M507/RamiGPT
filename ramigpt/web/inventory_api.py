@@ -17,6 +17,7 @@ from ramigpt.services.runtime_status import (
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
 from ramigpt.utils.session_logging import (
+    clear_terminal_buffer,
     get_session_logger,
     get_terminal_history,
     start_session_log_run,
@@ -225,6 +226,16 @@ def register_inventory_routes(
             count=len(lines),
             connected=session_id in ssh_shells,
         ), 200
+
+    @app.route("/api/sessions/<session_id>/terminal", methods=["DELETE"])
+    def api_clear_session_terminal(session_id: str):
+        """Clear the live terminal scrollback for this session (UI clear)."""
+        try:
+            store.get_session(session_id)
+        except KeyError:
+            return jsonify(error="Session not found"), 404
+        clear_terminal_buffer(session_id)
+        return jsonify(success=True, session_id=session_id), 200
 
     @app.route("/api/sessions/<session_id>/prompt-context", methods=["GET"])
     def api_get_prompt_context(session_id: str):

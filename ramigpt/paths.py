@@ -19,6 +19,7 @@ SESSION_META_PATH = SESSIONS_DIR / "meta.json"
 BENCHMARK_DIR = DATA_DIR / "benchmark"
 BENCHMARK_REMOTE_CONFIG = BENCHMARK_DIR / "remote.json"
 SESSION_LOGS_DIR = LOGS_DIR / "sessions"
+BENCHMARK_SESSION_LOGS_DIR = SESSION_LOGS_DIR / "benchmarks"
 DOCS_DIR = PROJECT_ROOT / "docs"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -34,6 +35,7 @@ def ensure_runtime_dirs() -> None:
     for path in (
         LOGS_DIR,
         SESSION_LOGS_DIR,
+        BENCHMARK_SESSION_LOGS_DIR,
         SESSIONS_DIR,
         SESSION_HOSTS_DIR,
         BENCHMARK_DIR,

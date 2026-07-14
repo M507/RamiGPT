@@ -227,3 +227,9 @@ def check_target_ports(host: str, log: LogFn = _default_log) -> List[dict]:
         results.append({"id": target.id, "host": host, "port": target.port, "open": open_})
         log(f"Port check {host}:{target.port} → {'open' if open_ else 'closed'}")
     return results
+
+
+def all_target_ports_open(host: str, log: LogFn = _default_log) -> bool:
+    """True when every benchmark target SSH port already accepts connections."""
+    results = check_target_ports(host, log=log)
+    return bool(results) and all(p["open"] for p in results)

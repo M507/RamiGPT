@@ -660,6 +660,19 @@
     }
   }
 
+  async function clearChat() {
+    if (!requireSelectedSession()) return;
+    const sessionId = state.selectedId;
+    // Invalidate any in-flight history load so it cannot refill after clear.
+    state.terminalLoadToken = (state.terminalLoadToken || 0) + 1;
+    clearTerminal(false);
+    try {
+      await api(`/api/sessions/${sessionId}/terminal`, { method: "DELETE" });
+    } catch (err) {
+      addTerminalOutput("[!] Clear failed: " + err.message, "#f85149");
+    }
+  }
+
   async function runTool() {
     if (!requireConnectedSession()) return;
     const tool = $("toolSelector").value;
@@ -869,6 +882,7 @@
     selectSession,
     refreshInventory,
     guideMe,
+    clearChat,
     runTool,
     importConfig,
     importConfigFile,

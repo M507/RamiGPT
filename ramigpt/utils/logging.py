@@ -7,14 +7,20 @@ Roles — keep these separate from per-session run logs:
       Application / process diagnostics: HTTP handlers, SSH connect plumbing,
       benchmark deploy, unexpected exceptions. Compact, NO full AI prompts,
       shell transcripts, or root-diagnosis dumps (those belong under
-      data/logs/sessions/<id>/<run>/).
+      data/logs/sessions/<id>/<run>/ or
+      data/logs/sessions/benchmarks/<run_id>/<target>/).
+      Benchmark lines include the concrete suite / events.jsonl path.
 
   data/logs/times.log
       Wall-clock metrics only (Full AI runs, benchmarks). One readable block
       per completed timing span — not a chat transcript.
 
   data/logs/sessions/<session_id>/<run>/
-      The conversation itself: AI turns, shell I/O, root checks, breakages.
+      Workspace conversation logs: AI turns, shell I/O, root checks, breakages.
+
+  data/logs/sessions/benchmarks/<benchmark_run_id>/
+      One folder per benchmark suite. run.json + run.log at the suite root;
+      each target has its own <target_id>/<run>/events.jsonl tree.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Per-session logging so hang/breakage analysis is isolated from global debug.log.
 
-Layout (one folder per connect / reconnect so debugging stays easy):
+Layout (workspace sessions):
 
   data/logs/sessions/<session_id>/
     runs.index                 — chronologic index of runs
@@ -9,8 +9,19 @@ Layout (one folder per connect / reconnect so debugging stays easy):
       session.log
       events.jsonl
       breakages/
-    002_20260714T145512Z_reconnect/
-      ...
+
+Layout (benchmark suite — one folder per BenchmarkRun.id):
+
+  data/logs/sessions/benchmarks/<benchmark_run_id>/
+    run.json                   — suite snapshot (targets, phase, timings)
+    run.log                    — suite timeline (same lines as [benchmark] in debug.log)
+    <target_id>/               — e.g. sudo-vim, sudo-awk
+      runs.index
+      latest
+      001_<stamp>_benchmark/
+        session.log
+        events.jsonl
+        breakages/
 """
 
 from __future__ import annotations
@@ -24,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
-from ramigpt.paths import LOGS_DIR, ensure_runtime_dirs
+from ramigpt.paths import BENCHMARK_SESSION_LOGS_DIR, LOGS_DIR, ensure_runtime_dirs
 
 _lock = threading.RLock()
 _loggers: Dict[str, "SessionLogger"] = {}
@@ -58,10 +69,19 @@ class SessionLogger:
     connect / reconnect so every conversation gets a fresh pair of files.
     """
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        *,
+        session_dir: Optional[Path] = None,
+    ) -> None:
         ensure_runtime_dirs()
         self.session_id = session_id
-        self.session_dir = LOGS_DIR / "sessions" / _safe_session_dir_name(session_id)
+        self.session_dir = Path(
+            session_dir
+            if session_dir is not None
+            else LOGS_DIR / "sessions" / _safe_session_dir_name(session_id)
+        )
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
         self.run_dir: Optional[Path] = None
@@ -73,7 +93,7 @@ class SessionLogger:
         self._run_index = 0
 
         self._logger = logging.getLogger(
-            f"SessionLogger.{_safe_session_dir_name(session_id)}"
+            f"SessionLogger.{_safe_session_dir_name(str(self.session_dir))}"
         )
         self._logger.setLevel(logging.DEBUG)
         self._logger.propagate = False
@@ -492,10 +512,15 @@ def record_terminal_line(
 
 
 def clear_terminal_buffer(session_id: str) -> None:
+    """Clear live scrollback (like a terminal clear).
+
+    Leaves an empty *seeded* buffer so prior events.jsonl history is not
+    re-loaded on the next GET / refresh. New emits still append normally.
+    """
     with _lock:
         key = session_id or "unknown"
-        _terminal_buffers.pop(key, None)
-        _terminal_seeded.discard(key)
+        _terminal_buffers[key] = deque(maxlen=_MAX_TERMINAL_LINES)
+        _terminal_seeded.add(key)
 
 
 def _seed_terminal_buffer_from_disk(session_id: str) -> None:
@@ -612,7 +637,7 @@ def _lines_from_events_file(path: Path) -> List[Dict[str, Any]]:
 
 def _load_terminal_from_events(session_id: str, limit: int) -> List[Dict[str, Any]]:
     """Rebuild scrollback from all run events.jsonl files (after app restart)."""
-    session_dir = LOGS_DIR / "sessions" / _safe_session_dir_name(session_id)
+    session_dir = _session_log_root(session_id)
     if not session_dir.is_dir():
         return []
     run_dirs = sorted(
@@ -628,6 +653,16 @@ def _load_terminal_from_events(session_id: str, limit: int) -> List[Dict[str, An
     if limit > 0:
         lines = lines[-limit:]
     return lines
+
+
+def _session_log_root(session_id: str) -> Path:
+    """Directory that currently stores run folders for this inventory session_id."""
+    key = session_id or "unknown"
+    with _lock:
+        slog = _loggers.get(key)
+        if slog is not None:
+            return slog.session_dir
+    return LOGS_DIR / "sessions" / _safe_session_dir_name(key)
 
 
 def get_terminal_history(session_id: str, *, limit: int = 800) -> List[Dict[str, Any]]:
@@ -655,6 +690,37 @@ def get_session_logger(session_id: str) -> SessionLogger:
         return _loggers[key]
 
 
+def rebind_session_log_dir(session_id: str, session_dir: Path) -> SessionLogger:
+    """
+    Point this inventory session_id at an alternate log directory.
+
+    Used so a benchmark target writes under
+    data/logs/sessions/benchmarks/<run_id>/<target_id>/ instead of the flat
+    workspace UUID folder.
+    """
+    key = session_id or "unknown"
+    root = Path(session_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    with _lock:
+        old = _loggers.pop(key, None)
+        if old is not None:
+            try:
+                old._close_handlers()
+            except Exception:  # noqa: BLE001
+                pass
+        slog = SessionLogger(key, session_dir=root)
+        _loggers[key] = slog
+        return slog
+
+
+def reset_session_log_dir(session_id: str) -> SessionLogger:
+    """Restore the default data/logs/sessions/<session_id>/ layout."""
+    key = session_id or "unknown"
+    return rebind_session_log_dir(
+        key, LOGS_DIR / "sessions" / _safe_session_dir_name(key)
+    )
+
+
 def start_session_log_run(session_id: str, reason: str = "connect") -> SessionLogger:
     """
     Open a brand-new log run directory for this session_id.
@@ -662,3 +728,108 @@ def start_session_log_run(session_id: str, reason: str = "connect") -> SessionLo
     """
     slog = get_session_logger(session_id)
     return slog.begin_run(reason)
+
+
+def begin_benchmark_suite_logs(run_id: str, *, mode: str = "", meta: Optional[Dict[str, Any]] = None) -> Path:
+    """
+    Create data/logs/sessions/benchmarks/<run_id>/ for one BenchmarkRun.
+
+    Returns the suite directory. Writes an initial run.json stub.
+    """
+    ensure_runtime_dirs()
+    safe_id = _safe_session_dir_name(run_id)
+    suite_dir = BENCHMARK_SESSION_LOGS_DIR / safe_id
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    snapshot = {
+        "ts": _utcnow(),
+        "benchmark_run_id": run_id,
+        "mode": mode,
+        "phase": "queued",
+        "suite_dir": str(suite_dir),
+        **(meta or {}),
+    }
+    (suite_dir / "run.json").write_text(
+        json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (suite_dir / "run.log").touch(exist_ok=True)
+    # Pointer for humans browsing the sessions tree.
+    latest = BENCHMARK_SESSION_LOGS_DIR / "latest"
+    try:
+        latest.write_text(safe_id + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return suite_dir
+
+
+def append_benchmark_suite_log(suite_dir: Path, line: str) -> None:
+    """Append one suite timeline line to run.log under the benchmark folder."""
+    try:
+        path = Path(suite_dir) / "run.log"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line.rstrip("\n") + "\n")
+    except OSError:
+        pass
+
+
+def write_benchmark_suite_snapshot(suite_dir: Path, payload: Dict[str, Any]) -> Path:
+    path = Path(suite_dir) / "run.json"
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def begin_benchmark_target_logs(
+    *,
+    suite_dir: Path,
+    run_id: str,
+    target_id: str,
+    target_name: str,
+    session_id: str,
+    host: str = "",
+    port: int = 0,
+) -> SessionLogger:
+    """
+    Start a fresh events/session.log tree for one target inside a benchmark suite.
+    """
+    target_dir = Path(suite_dir) / _safe_reason(target_id)
+    slog = rebind_session_log_dir(session_id, target_dir)
+    slog.begin_run("benchmark")
+    slog.event(
+        "BENCHMARK_TARGET",
+        f"Benchmark target {target_name} ({target_id})",
+        benchmark_run_id=run_id,
+        target_id=target_id,
+        target_name=target_name,
+        host=host,
+        port=port,
+        suite_dir=str(suite_dir),
+        events_path=str(slog.events_path) if slog.events_path else "",
+        session_log=str(slog.run_dir / "session.log") if slog.run_dir else "",
+    )
+    # Leave a breadcrumb next to the inventorial UUID folder.
+    try:
+        link_dir = LOGS_DIR / "sessions" / _safe_session_dir_name(session_id)
+        link_dir.mkdir(parents=True, exist_ok=True)
+        index = link_dir / "benchmark_links.jsonl"
+        with index.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "ts": _utcnow(),
+                        "benchmark_run_id": run_id,
+                        "target_id": target_id,
+                        "suite_dir": str(suite_dir),
+                        "target_dir": str(target_dir),
+                        "run_dir": str(slog.run_dir) if slog.run_dir else "",
+                        "events_path": str(slog.events_path) if slog.events_path else "",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except OSError:
+        pass
+    return slog

@@ -8,12 +8,14 @@ import uuid
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from flask import Flask
 
 from ramigpt.benchmark.deploy import (
     RemoteDeployConfig,
+    all_target_ports_open,
     check_target_ports,
     deploy_local,
     deploy_remote,
@@ -32,6 +34,13 @@ from ramigpt.domain import PrivEscPrompt
 from ramigpt.services.runtime_status import set_status
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
+from ramigpt.utils.session_logging import (
+    append_benchmark_suite_log,
+    begin_benchmark_suite_logs,
+    begin_benchmark_target_logs,
+    reset_session_log_dir,
+    write_benchmark_suite_snapshot,
+)
 
 # Filled by web layer so the orchestrator can reuse live SSH / Full AI primitives.
 _hooks: Dict[str, Any] = {}
@@ -78,6 +87,8 @@ class BenchmarkRun:
     finished_at: Optional[str] = None
     error: Optional[str] = None
     stop_requested: bool = False
+    # On-disk suite folder: data/logs/sessions/benchmarks/<id>/
+    log_dir: Optional[str] = None
 
     def to_public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -152,6 +163,8 @@ def _log(run: BenchmarkRun, message: str) -> None:
     line = f"[{_utcnow()}] {message}"
     run.log.append(line)
     debug_logger.info(f"[benchmark] {message}")
+    if run.log_dir:
+        append_benchmark_suite_log(Path(run.log_dir), line)
     emit = _hooks.get("emit_benchmark")
     if callable(emit):
         try:
@@ -372,9 +385,34 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
     started = time.monotonic()
     _log(run, f"Target {target.name} ({run.host}:{target.port}) — connecting")
 
+    session_id: Optional[str] = None
     try:
         session_id = _upsert_session_for_target(target, run.host)
         item.session_id = session_id
+
+        if run.log_dir:
+            slog = begin_benchmark_target_logs(
+                suite_dir=Path(run.log_dir),
+                run_id=run.id,
+                target_id=target.id,
+                target_name=target.name,
+                session_id=session_id,
+                host=run.host,
+                port=target.port,
+            )
+            events = str(slog.events_path) if slog.events_path else ""
+            session_log = (
+                str(slog.run_dir / "session.log") if slog.run_dir else ""
+            )
+            debug_logger.info(
+                f"[benchmark] target={target.id} session_id={session_id} "
+                f"session details → events={events} session_log={session_log}"
+            )
+            _log(
+                run,
+                f"Target {target.name} session details → {events}",
+            )
+
         _connect_session(session_id)
         tool_ids = enabled_tool_ids(run.tools)
         if tool_ids:
@@ -430,40 +468,70 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
                 _disconnect_session(item.session_id)
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                reset_session_log_dir(item.session_id)
+            except Exception:  # noqa: BLE001
+                pass
         item.elapsed_seconds = round(time.monotonic() - started, 3)
         item.finished_at = _utcnow()
         _log(
             run,
             f"Target {target.name} → {item.status} ({item.elapsed_seconds}s) {item.message}",
         )
+        if run.log_dir:
+            try:
+                write_benchmark_suite_snapshot(
+                    Path(run.log_dir),
+                    {
+                        **run.to_public_dict(),
+                        "suite_dir": run.log_dir,
+                        "updated_at": _utcnow(),
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _worker(run: BenchmarkRun) -> None:
     try:
-        run.phase = "deploying"
-        _log(run, f"Deploying benchmark targets ({run.mode})")
-
         def log_fn(msg: str) -> None:
             _log(run, msg)
 
+        # Resolve where targets should live before deploying anything.
         if run.mode == "local":
-            run.host = deploy_local(log=log_fn)
+            expected_host = "127.0.0.1"
         else:
             assert run.remote
-            run.host = deploy_remote(
-                RemoteDeployConfig(
-                    host=run.remote["host"],
-                    username=run.remote["username"],
-                    password=run.remote["password"],
-                    port=int(run.remote.get("port") or 22),
-                ),
-                log=log_fn,
-            )
+            expected_host = str(run.remote["host"])
 
-        ports = check_target_ports(run.host, log=log_fn)
-        if not all(p["open"] for p in ports):
-            missing = [f"{p['port']}" for p in ports if not p["open"]]
-            raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
+        run.phase = "deploying"
+        _log(run, f"Checking whether benchmark ports are already up on {expected_host}")
+        if all_target_ports_open(expected_host, log=log_fn):
+            run.host = expected_host
+            _log(
+                run,
+                f"All target ports open on {run.host} — skipping "
+                f"{'Ansible' if run.mode == 'remote' else 'docker compose'} deploy",
+            )
+        else:
+            _log(run, f"Ports not ready — deploying benchmark targets ({run.mode})")
+            if run.mode == "local":
+                run.host = deploy_local(log=log_fn)
+            else:
+                assert run.remote
+                run.host = deploy_remote(
+                    RemoteDeployConfig(
+                        host=run.remote["host"],
+                        username=run.remote["username"],
+                        password=run.remote["password"],
+                        port=int(run.remote.get("port") or 22),
+                    ),
+                    log=log_fn,
+                )
+            ports = check_target_ports(run.host, log=log_fn)
+            if not all(p["open"] for p in ports):
+                missing = [f"{p['port']}" for p in ports if not p["open"]]
+                raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
 
         run.phase = "running"
         target_by_id = {t.id: t for t in TARGETS}
@@ -485,6 +553,22 @@ def _worker(run: BenchmarkRun) -> None:
         run.finished_at = _utcnow()
         with _lock:
             _history.append(deepcopy(run.to_public_dict()))
+        if run.log_dir:
+            try:
+                write_benchmark_suite_snapshot(
+                    Path(run.log_dir),
+                    {
+                        **run.to_public_dict(),
+                        "suite_dir": run.log_dir,
+                        "finished_at": run.finished_at,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                debug_logger.warning(f"[benchmark] failed to write run.json: {exc}")
+            debug_logger.info(
+                f"[benchmark] suite finished — full details in {run.log_dir}/ "
+                f"(run.json, run.log, per-target events.jsonl)"
+            )
         _log(run, f"Benchmark finished (phase={run.phase})")
 
 
@@ -556,13 +640,27 @@ def start_run(
                 for t in TARGETS
             ],
         )
+        suite_dir = begin_benchmark_suite_logs(
+            run.id,
+            mode=mode,
+            meta={
+                "timeout_seconds": run.timeout_seconds,
+                "tools": tools_cfg,
+                "targets": [t.id for t in TARGETS],
+            },
+        )
+        run.log_dir = str(suite_dir)
         _current = run
 
     enabled = enabled_tool_ids(tools_cfg)
+    debug_logger.info(
+        f"[benchmark] suite logs → {run.log_dir}/ "
+        f"(run.log + per-target events under <target_id>/)"
+    )
     _log(
         run,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
-        f"timeout={run.timeout_seconds}s)",
+        f"timeout={run.timeout_seconds}s, logs={run.log_dir})",
     )
 
     thread = threading.Thread(target=_worker, args=(run,), name=f"benchmark-{run.id[:8]}", daemon=True)
