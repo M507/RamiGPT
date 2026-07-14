@@ -60,6 +60,10 @@ PUBLIC_ENDPOINTS = frozenset({
     "api_credentials_lookup",
     "api_get_prompt_context",
     "api_put_prompt_context",
+    "api_benchmark_targets",
+    "api_benchmark_status",
+    "api_benchmark_start",
+    "api_benchmark_stop",
 })
 
 
@@ -102,6 +106,8 @@ prompts = {}
 loop = {}
 beroots = {}
 last_commands = {}
+# session_id -> True when Full AI detects root (benchmark + UI)
+root_won_by_session = {}
 timeout_default = 6
 prompt_delimiter = b"$ "  # Assuming the prompt ends with $ and a space
 shell_recvuntil_v4_list = []
@@ -506,17 +512,27 @@ def autonomous(session_data):
                     # prompt_delimiters[session_id] = last_line
                     socketio.emit('message', {'data': f'{shell_output}\npwned!'}, namespace='/get')
                     just_got_root = True
+                    root_won_by_session[session_id] = True
+                    try:
+                        from ramigpt.benchmark.orchestrator import mark_root_won
+                        mark_root_won(session_id)
+                    except Exception:
+                        pass
                     summary = priv_esc.generate_summary()
                     color = "#1E90FF"  # Determine the color based on your logic or data
                     socketio.emit('message', {'data': f'{summary}\n', 'color': color}, namespace='/get')
-                    
-                #output = command + "\n" + shell_output + "\n"
-                #socketio.emit('message', {'data': output}, namespace='/get')
+                    break
             except Exception as e:
                 debug_logger.exception("Failed to execute command.")
                 socketio.emit('message', {'data': f"Error: {str(e)}"}, namespace='/get')
                 output = ""
-                return 
+                break
+        try:
+            from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+            mark_full_ai_finished(session_id)
+        except Exception:
+            pass
+
 
 def execute_beroot(session):
     """Background task for a specific session using passed session data."""
@@ -645,6 +661,7 @@ def action1():
     if action == "start":
         flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         flag.clear()
+        root_won_by_session[session_id] = False
         loop[session_id] = 1
         socketio.start_background_task(autonomous, session_data)
 
@@ -1037,6 +1054,24 @@ register_inventory_routes(
     emit_session=emit_session,
     start_shell_listener=start_shell_listener,
 )
+
+from ramigpt.benchmark.api import register_benchmark_routes
+from ramigpt.benchmark.orchestrator import register_benchmark_hooks
+
+register_benchmark_hooks(
+    flask_app=app,
+    socketio=socketio,
+    open_ssh_connection=get_or_create_ssh_shell,
+    close_ssh_connection=close_ssh_connection,
+    start_shell_listener=start_shell_listener,
+    autonomous=autonomous,
+    prompts=prompts,
+    prompt_delimiters=prompt_delimiters,
+    stop_full_ai_by_session=stop_full_ai_by_session,
+    loop=loop,
+    emit_session=emit_session,
+)
+register_benchmark_routes(app)
 
 
 @app.route('/api/settings', methods=['GET'])

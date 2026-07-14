@@ -1,0 +1,241 @@
+/**
+ * Privilege-escalation benchmark UI.
+ */
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let pollTimer = null;
+
+  async function api(path, options = {}) {
+    const opts = {
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+    };
+    if (opts.body && typeof opts.body === "object") {
+      opts.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(path, opts);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = null;
+    }
+    if (!res.ok) {
+      const err = new Error((data && data.error) || res.statusText || "Request failed");
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
+  function setStatus(msg, isError) {
+    const el = $("bench-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.style.color = isError ? "var(--danger)" : "var(--muted)";
+  }
+
+  function mode() {
+    const checked = document.querySelector('input[name="bench-mode"]:checked');
+    return checked ? checked.value : "local";
+  }
+
+  function syncModeUI() {
+    const remote = $("bench-remote-fields");
+    if (remote) remote.hidden = mode() !== "remote";
+  }
+
+  function openModal() {
+    const modal = $("benchmark-modal");
+    if (!modal) return;
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    syncModeUI();
+    refresh().catch((e) => setStatus(e.message, true));
+    startPolling();
+  }
+
+  function closeModal() {
+    const modal = $("benchmark-modal");
+    if (!modal) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    stopPolling();
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(() => {
+      refresh().catch(() => {});
+    }, 1500);
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function renderTargets(targets, defaults) {
+    const list = $("bench-target-list");
+    if (!list) return;
+    list.innerHTML = (targets || [])
+      .map(
+        (t) => `<li>
+          <strong>${escapeHtml(t.name)}</strong>
+          <span class="muted">SSH :${t.port} · sudo ${escapeHtml(t.sudo_binary)}</span>
+          <div class="muted small">${escapeHtml(t.description || "")}</div>
+        </li>`
+      )
+      .join("");
+    if (defaults) {
+      if ($("bench-cred-user")) $("bench-cred-user").textContent = defaults.username || "zeus";
+      if ($("bench-cred-pass")) $("bench-cred-pass").textContent = defaults.password || "benchmark";
+      if ($("bench-cred-ports"))
+        $("bench-cred-ports").textContent = (defaults.ports || []).join(", ");
+      if ($("bench-timeout") && !document.activeElement?.id?.startsWith("bench-")) {
+        // only set default when idle field not focused
+      }
+    }
+  }
+
+  function phaseLabel(phase) {
+    return phase || "idle";
+  }
+
+  function renderRun(run, running) {
+    const phaseEl = $("bench-phase");
+    const results = $("bench-results");
+    const logEl = $("bench-log");
+    const startBtn = $("bench-start");
+    const stopBtn = $("bench-stop");
+
+    if (phaseEl) {
+      phaseEl.className = "status-pill " + (run ? run.phase : "idle");
+      phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? run.phase : "Idle")}`;
+    }
+
+    if (results) {
+      if (!run || !(run.targets || []).length) {
+        results.innerHTML = `<div class="muted small">No run yet. Configure AI, pick local/remote, then Start.</div>`;
+      } else {
+        results.innerHTML = run.targets
+          .map((t) => {
+            const klass = t.status || "pending";
+            const elapsed = t.elapsed_seconds != null ? `${t.elapsed_seconds}s` : "—";
+            return `<div class="bench-result-row status-${escapeHtml(klass)}">
+              <span class="bench-result-name">${escapeHtml(t.name)} <span class="muted">:${t.port}</span></span>
+              <span class="bench-result-status">${escapeHtml(klass)}</span>
+              <span class="bench-result-meta muted">${escapeHtml(elapsed)} ${escapeHtml(t.message || "")}</span>
+            </div>`;
+          })
+          .join("");
+      }
+    }
+
+    if (logEl) {
+      const lines = (run && run.log) || [];
+      logEl.textContent = lines.slice(-80).join("\n");
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    if (startBtn) startBtn.disabled = !!running;
+    if (stopBtn) stopBtn.disabled = !running;
+
+    if (run && run.error) setStatus(run.error, true);
+  }
+
+  async function refresh() {
+    const data = await api("/api/benchmark/status");
+    renderTargets(data.targets, data.defaults);
+    renderRun(data.run, data.running);
+    if (data.defaults && $("bench-timeout") && !data.running) {
+      const field = $("bench-timeout");
+      if (document.activeElement !== field && !field.dataset.touched) {
+        field.value = data.defaults.timeout_seconds || 60;
+      }
+    }
+    return data;
+  }
+
+  async function startBenchmark() {
+    setStatus("");
+    const payload = {
+      mode: mode(),
+      timeout_seconds: parseInt($("bench-timeout").value, 10) || 60,
+    };
+    if (payload.mode === "remote") {
+      payload.remote = {
+        host: ($("bench-remote-host").value || "").trim(),
+        port: parseInt($("bench-remote-port").value, 10) || 22,
+        username: ($("bench-remote-user").value || "").trim(),
+        password: $("bench-remote-pass").value || "",
+      };
+      if (!payload.remote.host || !payload.remote.username || !payload.remote.password) {
+        setStatus("Remote host, username, and password are required.", true);
+        return;
+      }
+    }
+    try {
+      $("bench-start").disabled = true;
+      await api("/api/benchmark/start", { method: "POST", body: payload });
+      setStatus("Benchmark started…");
+      await refresh();
+      if (window.Workspace && typeof window.Workspace.refreshInventory === "function") {
+        window.Workspace.refreshInventory();
+      }
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+      $("bench-start").disabled = false;
+    }
+  }
+
+  async function stopBenchmark() {
+    try {
+      await api("/api/benchmark/stop", { method: "POST", body: {} });
+      setStatus("Stop requested…");
+      await refresh();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function bind() {
+    document.querySelectorAll("[data-bench-close]").forEach((el) => {
+      el.addEventListener("click", closeModal);
+    });
+    document.querySelectorAll('input[name="bench-mode"]').forEach((el) => {
+      el.addEventListener("change", syncModeUI);
+    });
+    const timeout = $("bench-timeout");
+    if (timeout) {
+      timeout.addEventListener("input", () => {
+        timeout.dataset.touched = "1";
+      });
+    }
+    const start = $("bench-start");
+    const stop = $("bench-stop");
+    const openBtn = $("btn-benchmark");
+    if (start) start.addEventListener("click", startBenchmark);
+    if (stop) stop.addEventListener("click", stopBenchmark);
+    if (openBtn) openBtn.addEventListener("click", openModal);
+  }
+
+  window.BenchmarkUI = { open: openModal, close: closeModal, refresh };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bind);
+  } else {
+    bind();
+  }
+})();

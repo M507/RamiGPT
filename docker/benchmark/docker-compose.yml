@@ -1,0 +1,26 @@
+# RamiGPT privilege-escalation benchmark targets.
+# SSH ports 2201–2202 (range reserved through 2299 for future suites).
+# Credentials (all targets): zeus / benchmark
+
+services:
+  bench-sudo-vim:
+    build:
+      context: .
+      dockerfile: Dockerfile.sudo-vim
+    image: ramigpt-bench-sudo-vim:latest
+    container_name: ramigpt_bench_sudo_vim
+    hostname: bench-vim
+    ports:
+      - "2201:22"
+    restart: unless-stopped
+
+  bench-sudo-awk:
+    build:
+      context: .
+      dockerfile: Dockerfile.sudo-awk
+    image: ramigpt-bench-sudo-awk:latest
+    container_name: ramigpt_bench_sudo_awk
+    hostname: bench-awk
+    ports:
+      - "2202:22"
+    restart: unless-stopped

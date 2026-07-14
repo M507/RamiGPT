@@ -1,0 +1,89 @@
+<!-- Privilege-escalation benchmark modal -->
+<div id="benchmark-modal" class="modal" aria-hidden="true">
+  <div class="modal-backdrop" data-bench-close></div>
+  <div class="modal-panel benchmark-panel" role="dialog" aria-labelledby="benchmark-modal-title">
+    <div class="modal-head">
+      <h2 id="benchmark-modal-title">Privilege Escalation Benchmark</h2>
+      <button type="button" class="icon-btn" data-bench-close title="Close">&times;</button>
+    </div>
+
+    <div class="bench-body">
+      <p class="muted small">
+        Spins up misconfigured sudo targets (vim / awk) over SSH, runs <strong>Full AI</strong> on each,
+        and records pass/fail. Default timeout is 60 seconds per target.
+      </p>
+
+      <section class="bench-section">
+        <h3>1. Deploy mode</h3>
+        <div class="bench-mode-row">
+          <label class="bench-mode">
+            <input type="radio" name="bench-mode" value="local" checked>
+            <span>
+              <strong>Local</strong>
+              <small>docker compose up on this machine (ports 2201–2202)</small>
+            </span>
+          </label>
+          <label class="bench-mode">
+            <input type="radio" name="bench-mode" value="remote">
+            <span>
+              <strong>Remote host</strong>
+              <small>Ansible installs Docker, deploys compose, verifies SSH ports</small>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section class="bench-section" id="bench-remote-fields" hidden>
+        <h3>Remote SSH (Ansible controller → host)</h3>
+        <div class="form-row">
+          <label>Host / IP<input type="text" id="bench-remote-host" placeholder="10.10.1.50"></label>
+          <label>SSH port<input type="number" id="bench-remote-port" value="22"></label>
+        </div>
+        <div class="form-row">
+          <label>Username<input type="text" id="bench-remote-user" placeholder="ubuntu"></label>
+          <label>Password<input type="password" id="bench-remote-pass" placeholder="sudo / SSH password"></label>
+        </div>
+        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers still use <code>zeus / benchmark</code> on ports 2201–2202.</p>
+      </section>
+
+      <section class="bench-section">
+        <h3>2. Run options</h3>
+        <div class="form-row">
+          <label>Per-target timeout (seconds)
+            <input type="number" id="bench-timeout" value="60" min="10" max="600">
+          </label>
+          <label>AI Settings
+            <button type="button" class="btn btn-secondary" onclick="openSettings()">Configure AI</button>
+          </label>
+        </div>
+        <div class="bench-creds muted small">
+          Target SSH: <code id="bench-cred-user">zeus</code> / <code id="bench-cred-pass">benchmark</code>
+          · Ports: <code id="bench-cred-ports">2201, 2202</code>
+        </div>
+      </section>
+
+      <section class="bench-section">
+        <h3>3. Targets</h3>
+        <ul class="bench-target-list" id="bench-target-list"></ul>
+      </section>
+
+      <section class="bench-section">
+        <div class="bench-run-head">
+          <h3>Run status</h3>
+          <span class="status-pill" id="bench-phase"><i class="dot"></i> Idle</span>
+        </div>
+        <div class="bench-results" id="bench-results"></div>
+        <pre class="bench-log" id="bench-log"></pre>
+      </section>
+    </div>
+
+    <p class="form-status" id="bench-status"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" data-bench-close>Close</button>
+      <button type="button" class="btn btn-secondary" id="bench-stop" disabled>Stop</button>
+      <button type="button" class="btn btn-primary" id="bench-start">
+        <i class="fas fa-flag-checkered"></i> Start Benchmark
+      </button>
+    </div>
+  </div>
+</div>

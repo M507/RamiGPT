@@ -6,6 +6,7 @@
   <title>RamiGPT</title>
   <link rel="stylesheet" href="/static/workspace.css">
   <link rel="stylesheet" href="/static/settings.css">
+  <link rel="stylesheet" href="/static/benchmark.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 </head>
@@ -21,6 +22,9 @@
         <input type="search" id="session-search" placeholder="Search sessions…" autocomplete="off">
       </div>
       <div class="topbar-actions">
+        <button type="button" class="btn btn-secondary" id="btn-benchmark" title="Privilege escalation benchmark">
+          <i class="fas fa-flag-checkered"></i> Benchmark
+        </button>
         <button type="button" class="btn btn-primary" id="btn-new-session">
           <i class="fas fa-plus"></i> New Session
         </button>
@@ -67,6 +71,9 @@
               <button type="button" class="btn btn-secondary" id="btn-landing-ai" onclick="openSettings()">
                 <i class="fas fa-robot"></i> AI Settings
               </button>
+              <button type="button" class="btn btn-secondary" id="btn-landing-bench" onclick="BenchmarkUI.open()">
+                <i class="fas fa-flag-checkered"></i> Benchmark
+              </button>
             </div>
           </div>
           <div class="landing-grid">
@@ -83,6 +90,7 @@
               <ul>
                 <li>Credentials are remembered per <code>user@host:port</code>.</li>
                 <li>Connect a session, then use the Terminal tab for RamiGPT AI tools.</li>
+                <li>Use <strong>Benchmark</strong> to deploy sudo-misconfig targets (vim/awk) and auto-run Full AI.</li>
                 <li>Drag sessions between groups in the sidebar.</li>
               </ul>
             </div>
@@ -254,8 +262,10 @@
   </div>
 
   {% include 'partials/settings_modal.html' %}
+  {% include 'partials/benchmark_modal.html' %}
 
   <script src="/static/settings.js"></script>
+  <script src="/static/benchmark.js"></script>
   <script src="/static/workspace.js"></script>
 </body>
 </html>

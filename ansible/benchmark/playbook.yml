@@ -1,0 +1,114 @@
+---
+# Deploy RamiGPT benchmark SSH targets on a remote host.
+# Expected vars (extra-vars or inventory):
+#   ansible_user, ansible_password, ansible_port (optional)
+#   project_root can be set; compose files are copied from controller by default.
+
+- name: Deploy RamiGPT privilege-escalation benchmark targets
+  hosts: benchmark_hosts
+  become: true
+  gather_facts: true
+  vars:
+    bench_remote_dir: /opt/ramigpt-benchmark
+    bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
+    bench_ssh_ports:
+      - 2201
+      - 2202
+    bench_wait_timeout: 120
+
+  tasks:
+    - name: Ensure apt cache is fresh
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check if Docker is already installed
+      ansible.builtin.command: docker --version
+      register: docker_version_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Docker Engine (official convenience script when missing)
+      ansible.builtin.shell: |
+        set -e
+        curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+      when: docker_version_check.rc != 0
+
+    - name: Ensure Docker service is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Ensure Docker Compose plugin is available
+      ansible.builtin.shell: docker compose version
+      register: compose_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if Docker Compose plugin is missing
+      ansible.builtin.fail:
+        msg: "docker compose plugin is required on the remote host"
+      when: compose_check.rc != 0
+
+    - name: Create benchmark directory on remote host
+      ansible.builtin.file:
+        path: "{{ bench_remote_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync benchmark Docker assets to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ bench_remote_dir }}/{{ item | basename }}"
+        mode: preserve
+      loop:
+        - "{{ bench_compose_src }}/docker-compose.yml"
+        - "{{ bench_compose_src }}/Dockerfile.sudo-vim"
+        - "{{ bench_compose_src }}/Dockerfile.sudo-awk"
+        - "{{ bench_compose_src }}/entrypoint.sh"
+
+    - name: Ensure entrypoint is executable
+      ansible.builtin.file:
+        path: "{{ bench_remote_dir }}/entrypoint.sh"
+        mode: "0755"
+
+    - name: Build and start benchmark containers
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml up -d --build
+        chdir: "{{ bench_remote_dir }}"
+      register: compose_up
+      changed_when: "'Started' in compose_up.stdout or 'Creating' in compose_up.stdout or 'Built' in compose_up.stdout or compose_up.rc == 0"
+
+    - name: Wait for benchmark SSH ports to accept connections
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ item }}"
+        timeout: "{{ bench_wait_timeout }}"
+        state: started
+      loop: "{{ bench_ssh_ports }}"
+
+    - name: Summarize running benchmark containers
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml ps
+        chdir: "{{ bench_remote_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Show compose ps output
+      ansible.builtin.debug:
+        var: compose_ps.stdout_lines

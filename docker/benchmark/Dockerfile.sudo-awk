@@ -1,0 +1,30 @@
+# Benchmark target: low-priv user with NOPASSWD sudo for /usr/bin/awk (GTFOBins).
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV BENCH_USER=zeus
+ENV BENCH_PASS=benchmark
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        openssh-server \
+        sudo \
+        gawk \
+        ca-certificates \
+        python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/run/sshd \
+    && useradd -m -s /bin/bash "${BENCH_USER}" \
+    && echo "${BENCH_USER}:${BENCH_PASS}" | chpasswd \
+    && printf '%s\n' \
+         'Cmnd_Alias BENCH_AWK = /usr/bin/awk, /usr/bin/gawk, /bin/awk' \
+         "${BENCH_USER} ALL=(root) NOPASSWD: BENCH_AWK" \
+         > /etc/sudoers.d/99-awk \
+    && chmod 440 /etc/sudoers.d/99-awk \
+    && visudo -cf /etc/sudoers.d/99-awk
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 22
+CMD ["/entrypoint.sh"]

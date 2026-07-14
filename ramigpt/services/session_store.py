@@ -219,6 +219,17 @@ class SessionStore:
                 pass
 
     # ---------------------------------------------------------------- public
+    def ensure_group(self, group_id: str, name: str, order: int = 99) -> None:
+        """Add a sidebar group if it does not already exist."""
+        with self._lock:
+            groups = list(self._meta.get("groups") or [])
+            if any(g.get("id") == group_id for g in groups):
+                return
+            groups.append({"id": group_id, "name": name, "order": order})
+            groups.sort(key=lambda g: int(g.get("order") or 0))
+            self._meta["groups"] = groups
+            self._save_meta()
+
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             sessions = [

@@ -748,6 +748,7 @@
   window.Workspace = {
     showLanding,
     selectSession,
+    refreshInventory,
     guideMe,
     runTool,
     importConfig,

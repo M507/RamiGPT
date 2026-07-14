@@ -1,0 +1,30 @@
+# Benchmark target: low-priv user with NOPASSWD sudo for /usr/bin/vim (GTFOBins).
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV BENCH_USER=zeus
+ENV BENCH_PASS=benchmark
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        openssh-server \
+        sudo \
+        vim \
+        ca-certificates \
+        python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/run/sshd \
+    && useradd -m -s /bin/bash "${BENCH_USER}" \
+    && echo "${BENCH_USER}:${BENCH_PASS}" | chpasswd \
+    && printf '%s\n' \
+         'Cmnd_Alias BENCH_VIM = /usr/bin/vim, /usr/bin/vim.basic, /bin/vim' \
+         "${BENCH_USER} ALL=(root) NOPASSWD: BENCH_VIM" \
+         > /etc/sudoers.d/99-vim \
+    && chmod 440 /etc/sudoers.d/99-vim \
+    && visudo -cf /etc/sudoers.d/99-vim
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 22
+CMD ["/entrypoint.sh"]
