@@ -24,36 +24,62 @@
 
 ---
 
-![image info](screenshots/execution_flow.svg)
+![image info](docs/screenshots/execution_flow.svg)
 
 ---
 
 ## GUI:
 
->![alt text](screenshots/poc_pwn.gif)
+>![alt text](docs/screenshots/poc_pwn.gif)
 
 
-## Configuration: Setting Up Your OpenAI API Key
+## Configuration: AI Providers
 
-To use RamiGPT's capabilities, you'll need an OpenAI API key. Follow these steps to obtain and configure your key:
+RamiGPT supports multiple AI backends. Configure them via the **Settings** button in the UI, or by editing the `.env` file.
+
+### Supported providers
+
+| Provider | `AI_PROVIDER` value | Notes |
+|----------|---------------------|-------|
+| OpenAI | `openai` (default) | Official OpenAI Chat Completions API |
+| Open WebUI | `openwebui` | OpenAI-compatible API at `/api/chat/completions` |
+
+### Quick setup
+
+1. **Copy the example env file:**
+   ```sh
+   cp .env.example .env
+   ```
+
+2. **OpenAI** — set your key (and optionally the model):
+   ```
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=your_api_key_here
+   OPENAI_MODEL=gpt-5-mini
+   ```
+
+3. **Open WebUI** — point at your instance:
+   ```
+   AI_PROVIDER=openwebui
+   OPENWEBUI_BASE_URL=http://localhost:3000
+   OPENWEBUI_API_KEY=your_openwebui_token
+   OPENWEBUI_MODEL=llama3.1
+   ```
+
+4. In the running app, click **Settings** to change provider, model, keys, and max AI requests. Saving writes back to `.env`. Use **Reload from .env** after editing the file by hand.
 
 ### Obtaining an OpenAI API Key
 
-1. **Create an Account:** Visit [OpenAI](https://www.openai.com/) and sign up for an account if you don't already have one.
-2. **Apply for API Access:** Navigate to the API section and apply for access. You might need to provide details about your intended use case.
-3. **Get Your API Key:** Once approved, you will receive an API key. 
+1. Visit [OpenAI](https://www.openai.com/) and sign up / log in.
+2. Create an API key in the API dashboard.
+3. Put it in `.env` as `OPENAI_API_KEY`, or paste it in the Settings window.
 
-### Configuring the API Key in Your Environment
+### Open WebUI notes
 
-1. **Copy the `.env.example` File:** In the root directory of the RamiGPT project, copy the file `.env.example` and name it `.env`.
-   ```
-   cp .env.example .env
-   ```
-2. **Add Your API Key:** Open the `.env` file and add the following line:
-   ```
-   OPENAI_API_KEY=your_api_key_here
-   ```
-   Replace `your_api_key_here` with the API key you obtained from OpenAI.
+- Create an API key in Open WebUI under **Settings → Account**.
+- Use the model ID exactly as it appears in Open WebUI (Ollama, OpenAI, or custom models).
+- Base URL should be the Open WebUI origin (e.g. `http://localhost:3000`); RamiGPT appends `/api` for the compatible completions endpoint.
+
 
 ## Run with Docker
 
@@ -72,10 +98,10 @@ Clone the repository and launch the Docker containers:
 ```sh
 git clone https://github.com/M507/RamiGPT.git
 cd RamiGPT
-docker compose up -d
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-Access the application at: [https://127.0.0.1:5001](https://127.0.0.1:5001)
+Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
 
 ## Run Locally
 
@@ -84,20 +110,28 @@ Access the application at: [https://127.0.0.1:5001](https://127.0.0.1:5001)
 Ensure the following are installed:
 
 - Python 3 and pip
-- OpenAI key
+- OpenAI key (or Open WebUI)
 
 ### Setup
 
 Clone the repository and prepare the environment:
 
 ```sh
-chmod +x ./generate_certs.sh
-./generate_certs.sh
-pip3 install -r requirements.txt
-python3 app.py
+git clone https://github.com/M507/RamiGPT.git
+cd RamiGPT
+
+python3 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+
+chmod +x ./scripts/generate_certs.sh
+./scripts/generate_certs.sh
+pip install -r requirements.txt
+python app.py
 ```
 
-Access the application at: [https://127.0.0.1:5000](https://127.0.0.1:5000)
+The app listens on `127.0.0.1:8443` by default (override with `APP_HOST` / `APP_PORT`).
+
+Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
 
 ## Integrated Tools
 
@@ -108,18 +142,39 @@ RamiGPT integrates several tools for privilege escalation enumeration, including
 
 These tools are automatically employed or recommended by RamiGPT depending on the target environment.
 
+## Project layout
+
+Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (entrypoint), `requirements.txt`, and `docker/`.
+
+| Path | Role |
+|------|------|
+| `ramigpt/web/` | Flask/Socket.IO UI, templates, static assets |
+| `ramigpt/ai/` | AI provider interface (OpenAI, Open WebUI) |
+| `ramigpt/domain/` | Privilege-escalation prompt + root detection |
+| `ramigpt/config/` | Settings loaded/persisted via `.env` |
+| `ramigpt/utils/` | Shared helpers and logging |
+| `tools/` | Bundled priv-esc tooling (BeRoot, LinPEAS) |
+| `scripts/` | Ops helpers (TLS cert generation) |
+| `docs/` | Screenshots and documentation assets |
+| `tests/` | Automated tests |
+| `data/` | Runtime logs and sessions (gitignored) |
+| `certs/` | TLS certificates (gitignored) |
 
 ## Features
+
+### AI provider settings
+
+Switch between **OpenAI** and **Open WebUI** from the **Settings** button in the terminal UI, or by editing `.env` (`AI_PROVIDER`, keys, models, base URL).
 
 ### Import and export instructions
 
 For example, to capture a flag:
->![alt text](screenshots/poc_flag.gif)
+>![alt text](docs/screenshots/poc_flag.gif)
 
 ### Use external tools for enumerations
 
 For example, executing BeRoot and feeding the results to the AI:
->![alt text](screenshots/proof_of_concept_beroot.gif)
+>![alt text](docs/screenshots/proof_of_concept_beroot.gif)
 
 
 ## Disclaimer

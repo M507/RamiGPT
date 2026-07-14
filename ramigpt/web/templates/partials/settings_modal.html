@@ -1,0 +1,73 @@
+<!-- Shared AI settings modal (login + terminal) -->
+<div id="settings-modal" class="settings-modal" aria-hidden="true">
+    <div id="settings-backdrop" class="settings-backdrop"></div>
+    <div class="settings-panel" role="dialog" aria-labelledby="settings-title">
+        <div class="settings-header">
+            <h2 id="settings-title">AI Settings</h2>
+            <button type="button" id="settings-close" class="settings-close" aria-label="Close">&times;</button>
+        </div>
+        <p class="settings-help">
+            Configure the AI provider before connecting. Changes save to <code>.env</code>.
+            Use <strong>Test connection</strong> to verify the selected provider.
+        </p>
+
+        <label class="settings-field">
+            <span>Provider</span>
+            <select id="settings-provider" class="settings-input">
+                <option value="openai">OpenAI</option>
+                <option value="openwebui">Open WebUI</option>
+            </select>
+        </label>
+
+        <div data-provider-group="openai">
+            <label class="settings-field">
+                <span>OpenAI API Key</span>
+                <input type="password" id="settings-openai-api-key" class="settings-input" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>OpenAI Model</span>
+                <input type="text" id="settings-openai-model" class="settings-input" placeholder="gpt-5-mini">
+            </label>
+            <label class="settings-field">
+                <span>OpenAI Base URL <em>(optional)</em></span>
+                <input type="text" id="settings-openai-base-url" class="settings-input" placeholder="https://api.openai.com/v1">
+            </label>
+        </div>
+
+        <div data-provider-group="openwebui" style="display:none;">
+            <label class="settings-field">
+                <span>Open WebUI Base URL</span>
+                <input type="text" id="settings-openwebui-base-url" class="settings-input" placeholder="http://localhost:3000">
+            </label>
+            <label class="settings-field">
+                <span>Open WebUI API Key</span>
+                <input type="password" id="settings-openwebui-api-key" class="settings-input" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>Open WebUI Model</span>
+                <input type="text" id="settings-openwebui-model" class="settings-input" placeholder="llama3.1">
+            </label>
+        </div>
+
+        <label class="settings-field">
+            <span>Max AI requests (Full AI loop)</span>
+            <input type="number" id="settings-max-reqs" class="settings-input" min="1" max="200">
+        </label>
+
+        <label class="settings-field">
+            <span>Debug</span>
+            <select id="settings-debug" class="settings-input">
+                <option value="0">Off</option>
+                <option value="1">On</option>
+            </select>
+        </label>
+
+        <p id="settings-status" class="settings-status"></p>
+
+        <div class="settings-actions">
+            <button type="button" id="settings-reload" class="settings-btn secondary">Reload from .env</button>
+            <button type="button" id="settings-test" class="settings-btn secondary">Test connection</button>
+            <button type="button" id="settings-save" class="settings-btn">Save</button>
+        </div>
+    </div>
+</div>

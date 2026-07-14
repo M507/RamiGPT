@@ -2,7 +2,8 @@
 <html>
 <head>
     <title>Hacker Terminal</title>
-    <link href='static/styles.css' rel='stylesheet'>
+    <link href='/static/styles.css' rel='stylesheet'>
+    <link href='/static/settings.css' rel='stylesheet'>
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 </head>
 <body>
@@ -24,6 +25,7 @@
                 <span id="current-dir">/home/user</span>
                 <span id="status">SECURE</span>
                 <span id="time"></span>
+                <button class="logout-button" type="button" onclick="openSettings()">Settings</button>
                 <button class="logout-button" onclick="logout()">Logout</button>
                 <button class="logout-button" onclick="goham()">Go Ham</button>
             </div>
@@ -91,11 +93,14 @@
         </div>
         
 
-    </div>    
+    </div>
+
+    {% include 'partials/settings_modal.html' %}
 
     
-    <script type="text/javascript" src="static/queue.js"></script>
-    <script type="text/javascript" src="static/common.js"></script>
+    <script type="text/javascript" src="/static/queue.js"></script>
+    <script type="text/javascript" src="/static/common.js"></script>
+    <script type="text/javascript" src="/static/settings.js"></script>
     <script>
 function runSelectedTool() {
     var tool = document.getElementById('toolSelector').value;
@@ -396,6 +401,6 @@ function runSelectedTool() {
             //commandField.focus();
         });
     </script>
-    <script src="static/socket.js"></script>
+    <script src="/static/socket.js"></script>
 </body>
 </html>

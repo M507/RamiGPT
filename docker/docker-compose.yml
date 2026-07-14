@@ -5,14 +5,19 @@ services:
     image: python:3.9-slim
     container_name: flask_app
     ports:
-      - "5001:5000"
+      - "127.0.0.1:8443:8443"
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8443"
     volumes:
-      - .:/app               # Mounts the entire project directory to /app in the container
-      - ./debug.log:/app/debug.log  # Mounts the debug.log file for direct access
+      - ..:/app
+      - ../data/logs:/app/data/logs
     working_dir: /app
     env_file:
-      - .env                 # Loads environment variables from .env file located in the project directory
+      - ../.env
     command: >
-      sh -c "chmod +x ./generate_certs.sh; ./generate_certs.sh && 
-            pip install -r requirements.txt && 
-            flask run --host=0.0.0.0 --port=5000 --cert=cert.pem --key=key.pem"
+      sh -c "apt-get update && apt-get install -y --no-install-recommends openssl
+             && chmod +x ./scripts/generate_certs.sh
+             && ./scripts/generate_certs.sh
+             && pip install -r requirements.txt
+             && python app.py"

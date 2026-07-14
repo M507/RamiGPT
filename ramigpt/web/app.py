@@ -2,7 +2,14 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_session import Session
 from flask_socketio import SocketIO, emit
 from functools import wraps
-import os, logging, time
+import logging
+import os
+import time
+import warnings
+
+warnings.filterwarnings("ignore")
+os.environ.setdefault("PWNLIB_NOTERM", "1")
+logging.getLogger("pwnlib").setLevel(logging.ERROR)
 
 import threading
 # Shared variable accessible to the background task and main application
@@ -10,20 +17,53 @@ stop_task_flag = threading.Event()
 stop_full_ai = threading.Event()
 
 from pwn import *
-from ai import *
-from PrivEscPrompt import *
-from root_detection import *
-from common import *
-from setup_logger import *
+context.log_level = "error"
+from ramigpt.ai import get_answer
+from ramigpt.ai.factory import create_provider
+from ramigpt.domain import PrivEscPrompt, got_root
+from ramigpt.utils import remove_matching_quotes, read_file_to_string, debug_logger, GlobalTimer
+from ramigpt.config import get_settings, get_settings_manager
+from ramigpt.paths import (
+    BEROOT_DIR,
+    BEROOT_DOWNLOADS_DIR,
+    CERTS_DIR,
+    SESSIONS_DIR,
+    STATIC_DIR,
+    TEMPLATES_DIR,
+    ensure_runtime_dirs,
+)
 
-FLASK_TEMPLATES_FOLDER = os.getenv("FLASK_TEMPLATES_FOLDER", "templates")
-FLASK_STATIC_FILES_FOLDER = os.getenv("FLASK_STATIC_FILES_FOLDER", "static")
-OPENAI_MAX_NUM_OF_REQS = int(os.getenv("OPENAI_MAX_NUM_OF_REQS", 10))
-DEBUG = int(os.getenv("DEBUG", 0))
+ensure_runtime_dirs()
 
-app = Flask(__name__, template_folder=FLASK_TEMPLATES_FOLDER, static_folder=FLASK_STATIC_FILES_FOLDER)
-app.config['SECRET_KEY'] = 'your_secret_key'
-app.config['SESSION_TYPE'] = 'filesystem'
+# Endpoints reachable before SSH login (local setup / AI config).
+PUBLIC_ENDPOINTS = frozenset({
+    "login",
+    "connect",
+    "get_ai_settings",
+    "update_ai_settings",
+    "reload_ai_settings",
+    "test_ai_settings",
+    "static",
+})
+
+
+def _max_ai_requests() -> int:
+    return get_settings().openai_max_num_of_reqs
+
+
+def _debug_enabled() -> int:
+    return get_settings().debug
+
+
+app = Flask(
+    __name__,
+    template_folder=str(TEMPLATES_DIR),
+    static_folder=str(STATIC_DIR),
+    static_url_path="/static",
+)
+app.config["SECRET_KEY"] = "your_secret_key"
+app.config["SESSION_TYPE"] = "filesystem"
+app.config["SESSION_FILE_DIR"] = str(SESSIONS_DIR / "flask_session")
 Session(app)
 
 ENTRY_TYPES = {
@@ -33,7 +73,9 @@ ENTRY_TYPES = {
     "demo": {"add": "add_demo", "remove": "remove_demo"}
 }
 
-socketio = SocketIO(app, ssl_context=('cert.pem', 'key.pem'))  # Add SSL certs
+_CERT_FILE = str(CERTS_DIR / "cert.pem")
+_KEY_FILE = str(CERTS_DIR / "key.pem")
+socketio = SocketIO(app, ssl_context=(_CERT_FILE, _KEY_FILE))
 
 
 # Dictionary to hold SSH shells
@@ -90,7 +132,7 @@ def login():
 
 def upload_beroot(ssh_conn):
     # Directory to be copied and destination
-    local_path = 'external_tools/BeRoot-master/Linux'
+    local_path = str(BEROOT_DIR)
     remote_path = '/tmp/'
 
     # Copy directory to server
@@ -157,9 +199,9 @@ def get_or_create_ssh_shell(session_id, create_new=False):
 
 @app.before_request
 def check_authentication():
-    # Allow unauthenticated access only to login and connect endpoints
-    if 'logged_in' not in session and request.endpoint not in ['connect', 'login']:
-        return redirect(url_for('login'))
+    # Allow login, connect, and settings/setup APIs before SSH session exists.
+    if "logged_in" not in session and request.endpoint not in PUBLIC_ENDPOINTS:
+        return redirect(url_for("login"))
 
 @app.route('/connect', methods=['POST'])
 def connect():
@@ -262,7 +304,8 @@ def autonomous(session_data):
 
     with app.app_context():
         """Background task for a specific session using passed session data."""
-        socketio.emit('message', {'data': f'Giving AI full freedom to send {OPENAI_MAX_NUM_OF_REQS} commands', 'color': "#1E90FF"}, namespace='/get')
+        max_reqs = _max_ai_requests()
+        socketio.emit('message', {'data': f'Giving AI full freedom to send {max_reqs} commands', 'color': "#1E90FF"}, namespace='/get')
         session_id = session_data['sid']
         debug_logger.info(f"Starting autonomous loop for session: {session_id}")
         i = 0
@@ -276,7 +319,7 @@ def autonomous(session_data):
         # Debug initial state of the session-specific objects
         debug_logger.debug(f"autonomous(): Initial setup for session {session_id}: prompt_delimiter={prompt_delimiter}, shell={shell}, priv_esc={priv_esc}")
         
-        while i < OPENAI_MAX_NUM_OF_REQS:  # Ensure the loop runs only if it's enabled
+        while i < max_reqs:  # Ensure the loop runs only if it's enabled
             if stop_full_ai.is_set():
                 break
             socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
@@ -287,15 +330,14 @@ def autonomous(session_data):
                 
                 # Create a prompt
                 prompt = priv_esc.generate_prompt()
-                if DEBUG:
+                if _debug_enabled():
                     socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
                 
                 debug_logger.debug(f"[DEBUG] About to send prompt:\n{prompt}")
 
                 GlobalTimer.start()
-                client = OpenAIClient()
                 system = "You are an experienced pentester."
-                response = get_answer(client, system, prompt)
+                response = get_answer(system, prompt)
                 trimmed_ai_command = priv_esc.filter_output(response)
                 command = remove_matching_quotes(trimmed_ai_command)
                 
@@ -336,7 +378,7 @@ def autonomous(session_data):
 
                         socketio.emit('message', {'data': shell_output}, namespace='/get')
                         socketio.emit('message', {'data': "Start interacting with the shell again", 'color': "#1E90FF"}, namespace='/get')
-                        i = OPENAI_MAX_NUM_OF_REQS
+                        i = max_reqs
 
                     last_line = shell_output_lines[-1]
                 
@@ -374,13 +416,13 @@ def execute_beroot(session):
     prompt_delimiter = prompt_delimiters.get(session_id, "$").decode('utf-8').strip()
 
     # Downloading the beroot.txt file
-    local_filename = f"external_tools/BeRoot-master/Linux/downloaded/{session_id}_beroot.txt"
+    local_filename = str(BEROOT_DOWNLOADS_DIR / f"{session_id}_beroot.txt")
     ssh_conn.download('/tmp/beroot.txt', local_filename)
     socketio.sleep(1)  # Non-blocking sleep for better SocketIO handling
     
     # Logging successful download
     debug_logger.info(f"beroot.txt file downloaded successfully as {local_filename}")
-    if DEBUG:
+    if _debug_enabled():
         socketio.emit('message', {'data': f"beroot.txt file downloaded successfully as {local_filename}"}, namespace='/get')
     
     beroots[session_id] = local_filename
@@ -395,12 +437,11 @@ def execute_beroot(session):
 
     # Create a prompt
     prompt = priv_esc.generate_prompt()
-    if DEBUG:
+    if _debug_enabled():
         socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
-     
-    client = OpenAIClient()
+
     system = "You are an experienced pentester."
-    response = get_answer(client, system, prompt)
+    response = get_answer(system, prompt)
     trimmed_ai_command = priv_esc.filter_output(response)
     command = remove_matching_quotes(trimmed_ai_command)
     #socketio.emit('message', {'data': f"[DEBUG] About to execute command:\n{command}"}, namespace='/get')
@@ -555,18 +596,18 @@ def shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_defa
     shell_output_lines_string = str(shell_output_lines)
     if f"Password:" in shell_output:
         if emit_func != None:
-            if DEBUG:
+            if _debug_enabled():
                 emit_func('message', {'data': f"[Debug] Password:"}, namespace='/get')
         debug_logger.info(f"if Password: in line:{line}")
         shell.sendline(session.get('password'))  # Send the sudo password
     if f"password for {session.get('username')}" in shell_output:
         if emit_func != None:
-            if DEBUG:
+            if _debug_enabled():
                 emit_func('message', {'data': f"[Debug] Password:"}, namespace='/get')
         debug_logger.info(f"Sudo password required: {shell_output}")
         shell.sendline(session.get('password'))
     if emit_func != None:
-        if DEBUG:
+        if _debug_enabled():
             emit_func('message', {'data': f"[Debug] shell_recvuntil_v2:{shell_output_lines_string}"}, namespace='/get')
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
@@ -588,7 +629,7 @@ def shell_recvuntil_v3(shell, prompt_delimiter, drop=False, timeout=timeout_defa
 
     # Additional logging for debug information
     if emit_func:
-        if DEBUG:
+        if _debug_enabled():
             emit_func('message', {'data': f"[Debug] shell_recvuntil_v2:{shell_output_lines_string}"}, namespace='/get')
     
     # Logging the output for debugging
@@ -748,10 +789,9 @@ def execute():
             return recreate_shell(socketio.emit, session_id)
 
         if len(command) < 1:
-            client = OpenAIClient()
             system = "You are an experienced pentester."
             #socketio.emit('message', {'data': f"[DEBUG] About to send prompt:\n{prompt}"}, namespace='/get')
-            response = get_answer(client, system, prompt)
+            response = get_answer(system, prompt)
             trimmed_ai_command = priv_esc.filter_output(response)
             trimmed_ai_command = remove_matching_quotes(trimmed_ai_command)
             command = trimmed_ai_command
@@ -828,6 +868,114 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+
+@app.route('/api/settings', methods=['GET'])
+def get_ai_settings():
+    """Return current AI / app settings for the settings UI."""
+    return jsonify(get_settings().to_public_dict()), 200
+
+
+@app.route('/api/settings', methods=['PUT', 'POST'])
+def update_ai_settings():
+    """Update AI settings in memory and persist them to .env."""
+    if not request.is_json:
+        return jsonify(error="Invalid request format."), 400
+
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "ai_provider",
+        "openai_api_key",
+        "openai_model",
+        "openai_base_url",
+        "openwebui_base_url",
+        "openwebui_api_key",
+        "openwebui_model",
+        "openai_max_num_of_reqs",
+        "debug",
+    }
+    updates = {key: payload[key] for key in allowed if key in payload}
+    persist = bool(payload.get("persist", True))
+
+    try:
+        settings = get_settings_manager().update(updates, persist=persist)
+        return jsonify(success=True, settings=settings.to_public_dict()), 200
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        debug_logger.exception("Failed to update settings.")
+        return jsonify(error=str(exc)), 500
+
+
+@app.route('/api/settings/reload', methods=['POST'])
+def reload_ai_settings():
+    """Reload settings from the .env file (useful after manual edits)."""
+    settings = get_settings_manager().reload()
+    return jsonify(success=True, settings=settings.to_public_dict()), 200
+
+
+@app.route('/api/settings/test', methods=['POST'])
+def test_ai_settings():
+    """
+    Apply optional form settings (without requiring Save) and probe the provider
+    with a tiny completion request.
+    """
+    payload = request.get_json(silent=True) or {}
+    allowed = {
+        "ai_provider",
+        "openai_api_key",
+        "openai_model",
+        "openai_base_url",
+        "openwebui_base_url",
+        "openwebui_api_key",
+        "openwebui_model",
+        "openai_max_num_of_reqs",
+        "debug",
+    }
+    updates = {key: payload[key] for key in allowed if key in payload}
+
+    try:
+        # Use form values for the probe; do not write .env unless Save was used.
+        if updates:
+            get_settings_manager().update(updates, persist=False)
+
+        settings = get_settings()
+        provider = create_provider(settings)
+        reply = provider.create_completion(
+            [
+                {"role": "system", "content": "Reply with exactly: ok"},
+                {"role": "user", "content": "ping"},
+            ]
+        )
+        preview = (reply or "").strip().replace("\n", " ")
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        return jsonify(
+            success=True,
+            provider=settings.ai_provider,
+            model=settings.active_model(),
+            preview=preview,
+        ), 200
+    except Exception as exc:
+        debug_logger.exception("AI connection test failed.")
+        return jsonify(
+            success=False,
+            error=str(exc),
+            provider=get_settings().ai_provider,
+            model=get_settings().active_model(),
+        ), 400
+
+
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, keyfile='key.pem', certfile='cert.pem')
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "8443"))
+    socketio.run(
+        app,
+        host=host,
+        port=port,
+        debug=False,
+        keyfile=_KEY_FILE,
+        certfile=_CERT_FILE,
+        allow_unsafe_werkzeug=True,
+        log_output=False,
+    )
 
