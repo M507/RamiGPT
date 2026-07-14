@@ -13,14 +13,17 @@ from ramigpt.config import Settings
 def _normalize_openwebui_base_url(base_url: str) -> str:
     """
     OpenAI SDK appends `/chat/completions` to base_url.
-    Open WebUI exposes completions at `{host}/api/chat/completions`,
-    so the SDK base_url must end with `/api`.
+
+    - Open WebUI completions: `{host}/api/chat/completions` → base_url ends with `/api`
+    - Ollama OpenAI-compat: `{host}/v1/chat/completions` → base_url ends with `/v1`
+      (port 11434, or an explicit `/v1` suffix)
     """
     url = (base_url or "").rstrip("/")
-    if url.endswith("/v1"):
+    if url.endswith("/v1") or url.endswith("/api"):
         return url
-    if url.endswith("/api"):
-        return url
+    # Native Ollama listens on 11434 and speaks OpenAI API under /v1.
+    if url.rstrip("/").endswith(":11434") or ":11434/" in url:
+        return f"{url}/v1"
     return f"{url}/api"
 
 
