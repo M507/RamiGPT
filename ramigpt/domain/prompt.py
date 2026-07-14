@@ -1,9 +1,62 @@
 import re
 
+# Keep model context usable: huge dumps (ls --help, find, …) otherwise dominate the prompt
+# and send the model into redundant / nonsensical loops.
+_MAX_HISTORY_OUTPUT_CHARS = 1800
+_MAX_HISTORY_ENTRIES = 40
+_MAX_PROMPT_HISTORY_CHARS = 14000
+
+
+def normalize_ai_command(command):
+    """
+    Normalize a model-suggested shell command before execution.
+    Strips prompt markers the model copies from history ($ / #) and wrapping quotes.
+    """
+    if command is None:
+        return None
+    s = str(command).strip()
+    if not s:
+        return s
+    # Drop accidental code-fence leftovers if filter missed them.
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:bash|sh)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+        s = s.strip()
+    # Models often echo history and return "$ id" / "# id".
+    while True:
+        stripped = s.lstrip()
+        if stripped.startswith("$"):
+            s = stripped[1:].lstrip()
+            continue
+        # Only strip a root-style prompt "# " (hash + whitespace), not shell comments.
+        if stripped.startswith("#") and len(stripped) > 1 and stripped[1].isspace():
+            s = stripped[1:].lstrip()
+            continue
+        break
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"', "`"):
+        s = s[1:-1].strip()
+    return s
+
+
+def truncate_output(output, limit=_MAX_HISTORY_OUTPUT_CHARS):
+    text = "" if output is None else str(output)
+    if len(text) <= limit:
+        return text
+    head = limit // 2
+    tail = limit - head - 40
+    if tail < 0:
+        return text[:limit] + "\n…[truncated]…"
+    return (
+        text[:head]
+        + f"\n…[truncated {len(text) - head - max(tail, 0)} chars]…\n"
+        + text[-max(tail, 0) :]
+    )
+
+
 class PrivEscPrompt:
     def __init__(self, username, password, system, target_user):
         self.username = username
-        self.password = password
+        self.password = password  # used for auto-sudo; never put in model prompts
         self.system = system
         self.target_user = target_user
         self.BeRoot = None
@@ -29,10 +82,28 @@ class PrivEscPrompt:
         # Capabilities are expected to be a list of dictionaries with 'name' and 'description'
         self.capabilities = capabilities
 
+    @staticmethod
+    def _history_command_key(command):
+        return normalize_ai_command(command) or (command or "").strip()
+
     def add_history(self, command, output=""):
-        # Prevent duplicates
-        if not any(entry["output"] == output for entry in self.history):
-            self.history.append({"command": command, "output": output})
+        """
+        Record a command attempt. Dedupes by command (not by output — empty outputs
+        used to collide and drop later attempts). Caps entry count and output size
+        so one `ls --help` cannot blow up the next model prompt.
+        """
+        cmd = self._history_command_key(command)
+        if not cmd:
+            return
+        clipped = truncate_output(output)
+        for i, entry in enumerate(self.history):
+            if self._history_command_key(entry.get("command")) == cmd:
+                self.history[i] = {"command": cmd, "output": clipped}
+                break
+        else:
+            self.history.append({"command": cmd, "output": clipped})
+        if len(self.history) > _MAX_HISTORY_ENTRIES:
+            self.history = self.history[-_MAX_HISTORY_ENTRIES:]
 
     # Generic add function to prevent duplicates
     def add_entry(self, entry_list, entry):
@@ -75,70 +146,42 @@ class PrivEscPrompt:
         return self.remove_entry(self.demos, demo)
     
     def process_command_output(self, command, output):
-        # Debug print: Initial command and output
-        print(f"Debug: Received command: '{command}'")
-        print(f"Debug: Received output: '{output}'")
-
-        # Remove leading and trailing whitespace
-        trimmed_command = command.strip()
-        trimmed_output = output.strip()
-
-        # Find the length of the shortest string to avoid index errors
-        min_length = min(len(trimmed_command), len(trimmed_output))
-
-        # Determine the number of matching characters at the start
-        match_length = 0
-        for i in range(min_length):
-            if trimmed_command[i] == trimmed_output[i]:
-                match_length += 1
-            else:
-                break
-
-        # Debug print: Matching characters length
-        print(f"Debug: Number of matching characters at the start: {match_length}")
-
-        # Remove the matching characters from the output
-        if match_length > 0:
-            # Calculate new starting index after removing matching chars and an additional two chars
-            new_start_index = match_length + 2
-            # Ensure the new start index does not exceed the length of the output
-            if new_start_index < len(trimmed_output):
-                modified_output = trimmed_output[new_start_index:]
-            else:
-                modified_output = ""  # If index exceeds, set output to empty
-        else:
-            modified_output = trimmed_output
-
-        # Debug print: Modified output
-        print("Debug: Modified output after removing matching characters and additional two characters:")
-        print(modified_output)
-
-        return modified_output
+        """
+        Clean shell output for history. Previously this did character-by-character
+        prefix matching against the command, which corrupted real listings
+        (e.g. `ls …` turned `lrwxrwxrwx` into `xrwxrwx`).
+        """
+        if output is None:
+            return ""
+        text = str(output).strip("\r")
+        if not text.strip():
+            return ""
+        cmd = (normalize_ai_command(command) or (command or "")).strip()
+        lines = text.split("\n")
+        # Drop a single echoed command line if present.
+        if cmd and lines:
+            first = lines[0].strip()
+            if first in {cmd, f"$ {cmd}", f"# {cmd}"}:
+                lines = lines[1:]
+            elif first.endswith(cmd) and first[:2] in {"$ ", "# "}:
+                lines = lines[1:]
+        return "\n".join(lines).strip()
 
     def remove_last_line(self, s):
-        # Split the string into a list of lines
-        lines = s.split('\n')
-        
-        # Remove the last line if there is more than one line
+        if s is None:
+            return ""
+        lines = str(s).split("\n")
         if len(lines) > 1:
-            # Re-join the lines without the last one
-            modified_string = '\n'.join(lines[:-1])
-        else:
-            # If there's only one line or none, return an empty string
-            modified_string = ''
-        
-        # Debug print: Output the modified string
-        print("Debug: Modified string after removing the last line:")
-        print(modified_string)
-        
-        return modified_string
-
+            return "\n".join(lines[:-1])
+        return ""
 
     def filter_output(self, input_string):
         """
         Extracts the command from the provided input string by applying regex patterns to various input formats,
         including plain commands.
         """
+        if not input_string:
+            return None
         pattern = (
             r"```(?:bash\s)?(.*?)```|"  # Triple backtick code block
             r"`(?:bash\s)?(.*?)`|"      # Single backtick code block
@@ -155,14 +198,7 @@ class PrivEscPrompt:
 
         # Return the first command found, or None if no command was found
         command = commands[0] if commands else None
-
-        # Attempt to strip the command and handle exceptions with debug print
-        try:
-            command = command.strip()
-        except:
-            print("Test")  # Debug print statement if an error occurs
-
-        return command
+        return normalize_ai_command(command)
 
     def generate_summary(self):
         print("Starting to generate summary report.")
@@ -182,20 +218,59 @@ class PrivEscPrompt:
         print("Summary report generated.")
         return report
 
+    def _history_block(self):
+        """Build history section; prefer recent entries if the block would grow too large."""
+        if not self.history:
+            return ""
+        lines = []
+        for entry in self.history:
+            lines.append(entry["command"])
+            if entry.get("output"):
+                lines.append(entry["output"])
+        block = "\n".join(lines)
+        if len(block) <= _MAX_PROMPT_HISTORY_CHARS:
+            entries = self.history
+        else:
+            # Keep newest commands until under budget.
+            entries = []
+            size = 0
+            for entry in reversed(self.history):
+                piece = entry["command"] + ("\n" + entry["output"] if entry.get("output") else "")
+                if entries and size + len(piece) > _MAX_PROMPT_HISTORY_CHARS:
+                    break
+                entries.append(entry)
+                size += len(piece)
+            entries.reverse()
+
+        report = "You already tried the following commands:\n\n~~~ bash\n"
+        for entry in entries:
+            report += f"{entry['command']}\n"
+            if entry.get("output"):
+                report += f"{entry['output']}\n"
+        report += (
+            "~~~\n\n"
+            "Do not repeat already tried commands. Prefer a different enumeration "
+            "or privilege-escalation approach. Do not prefix the command with `$` or `#`.\n\n"
+        )
+        return report
+
     def generate_prompt(self):
-        report = f"You are a low-privilege user '{self.username}' with password '{self.password}' on a {self.system} system and your goal is to become the user '{self.target_user}' by abusing commands and misconfiguration on the tested system.\n\n"
+        # Intentionally omit the account password from the model prompt:
+        # including it caused the model to search for the password string itself
+        # and leaked secrets into session logs.
+        report = (
+            f"You are a low-privilege user '{self.username}' on a {self.system} system "
+            f"and your goal is to become the user '{self.target_user}' by abusing commands "
+            f"and misconfiguration on the tested system.\n\n"
+            "Commands must be non-interactive and safe to run in /bin/sh. "
+            "If a tool prompts for this account's password, the runner supplies it "
+            "automatically — never print or echo the password.\n\n"
+        )
         if self.capabilities:
-            #report += "You have the following capabilities:\n"
             for capability in self.capabilities:
                 report += f"Name: {capability['name']} Command \nDescribe: {capability['description']}\n\n"
 
-        if self.history:
-            report += "You already tried the following commands:\n\n~~~ bash\n"
-            for entry in self.history:
-                report += f"{entry['command']}\n"
-                if entry['output']:
-                    report += f"{entry['output']}\n"
-            report += "~~~\n\nDo not repeat already tried escalation attacks.\n\n"
+        report += self._history_block()
 
         if self.facts:
             report += "You currently know the following about the target system:\n\n"
@@ -221,16 +296,10 @@ class PrivEscPrompt:
             report += f"\n"
             self.set_BeRoot(None)
 
-        report += "State your command. You should focus upon enumeration and privilege escalation. Do not add any explanation or add an initial `$` or any code blocks. JUST A COMMAND."
-        #report += "Generate Linux shell commands that focus upon enumeration and privilege escalation and are directly executable. The output should consist only of commands, suitable for input into /bin/sh."
-#         report += """Instructions:
-# - Command Format: Output each command in one line. Don't use multiple commands. 
-# - Clarity: Do not include any explanations, questions, or additional text. The output must consist solely of the commands.
-# - Execution Context: Assume each command is to be executed in a Linux environment. Ensure compatibility with common Linux distributions and avoid any commands that are specific to non-Linux systems.
-# - Usability: Treat the output as if it will be piped directly into a shell. Commands should be ready to execute without any modification or clarification.
-# - Code Blocks: Do not format commands as code blocks or include any markup or special formatting characters like backticks (`).
-# - Scope: Focus on tasks related to enumeration and privilege escalation. Ensure that the commands are relevant to these areas without straying into unrelated commands or utilities."""
-        # - Command Format: Output each command in one line. Don't use multiple commands are needed, they should be presented on the same line separated by a semicolon (;).
+        report += (
+            "State your next command only. Focus on enumeration and privilege escalation. "
+            "No explanation, no markdown, no `$` prompt prefix — JUST ONE COMMAND."
+        )
         return report
 
 
@@ -246,3 +315,7 @@ if __name__ == "__main__":
     priv_esc.add_hint("Try escalating privileges via scheduled tasks.")
 
     print(priv_esc.generate_prompt())
+    assert "pass123" not in priv_esc.generate_prompt()
+    assert normalize_ai_command("$ id") == "id"
+    assert priv_esc.process_command_output("ls -l /bin", "lrwxrwxrwx 1 root root 7 Jul 13 00:00 /bin -> usr/bin") == \
+        "lrwxrwxrwx 1 root root 7 Jul 13 00:00 /bin -> usr/bin"

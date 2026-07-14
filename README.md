@@ -21,6 +21,7 @@
 | Dina: 1.0.1 | https://www.vulnhub.com/entry/dina-101,200/ | 09.685389 | gpt-3.5-turbo |
 | Autonomous - Hostname:pehost, Server:None, Username:zeus | Link | 10.363169 | gpt-3.5-turbo |
 | Autonomous - Hostname:pehost, Server:None, Username:zeus | Link | 09.944443 | gpt-3.5-turbo |
+| Autonomous - Hostname:bench-vim, Server:127.0.0.1, Username:zeus | Link | 2026-07-14 17:29:31.446745 | 2026-07-14 17:29:31.779035 | 0:00:00.332290 |
 
 ---
 

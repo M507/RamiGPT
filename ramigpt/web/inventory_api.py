@@ -16,7 +16,7 @@ from ramigpt.services.runtime_status import (
 )
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
-from ramigpt.utils.session_logging import get_session_logger
+from ramigpt.utils.session_logging import get_session_logger, start_session_log_run
 
 
 def register_inventory_routes(
@@ -156,7 +156,8 @@ def register_inventory_routes(
             set_status(session_id, "connected")
             store.touch_recent(session_id)
             start_shell_listener(session_id)
-            get_session_logger(session_id).event(
+            slog = start_session_log_run(session_id, "connect")
+            slog.event(
                 "CONNECT",
                 f"Connected to {saved.host}:{saved.port}",
                 username=saved.username,
