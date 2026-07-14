@@ -473,7 +473,7 @@ def autonomous(session_data):
                     shell_output_lines_string, \
                     shell_output = shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=1, session = session, emit_func = socketio.emit)
                     
-                    # If it hangs
+                    # If it hangs (common after interactive priv-esc like vim/awk shells)
                     if shell_output == None:
                         socketio.emit('message', {'data': '[Debug] Autonomous() - timeout occurred, possibly stuck at prompt', 'color': "#FF0000"}, namespace='/get')
                         shell_output_bytes = recv_for_duration(shell, 4)
@@ -481,22 +481,42 @@ def autonomous(session_data):
                         shell_output        = shell_output_bytes.decode('utf-8').strip()
                         shell_output_lines_string = str(shell_output_lines)
                         socketio.emit('message', {'data': shell_output}, namespace='/get')
-                        
+
+                        # Nudge interactive editors / nested shells, then probe identity.
                         shell.sendline("!/bin/sh")
-                        priv_esc.add_history("!/bin/sh", shell_output)
+                        socketio.sleep(0.5)
                         shell.sendline("id")
-                        priv_esc.add_history("id", shell_output)
+                        socketio.sleep(0.5)
+                        shell.sendline("id")
 
                         shell_output_bytes = recv_for_duration(shell, 4)
                         shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
                         shell_output        = shell_output_bytes.decode('utf-8').strip()
                         shell_output_lines_string = str(shell_output_lines)
+                        if not shell_output_lines or shell_output_lines == ['']:
+                            shell_output_lines = [shell_output]
 
                         socketio.emit('message', {'data': shell_output}, namespace='/get')
                         socketio.emit('message', {'data': "Start interacting with the shell again", 'color': "#1E90FF"}, namespace='/get')
+
+                        hostname = session_data.get('hostname')
+                        if got_root(hostname, shell_output) or any(got_root(hostname, ln) for ln in shell_output_lines):
+                            last_line = shell_output_lines[-1] if shell_output_lines else shell_output
+                            GlobalTimer.stop(f"""Autonomous - Hostname:{hostname}, Server:{session_data.get('server')}, Username:{session_data.get('username')}""".strip('\n'))
+                            socketio.emit('message', {'data': f'{shell_output}\npwned!'}, namespace='/get')
+                            just_got_root = True
+                            root_won_by_session[session_id] = True
+                            try:
+                                from ramigpt.benchmark.orchestrator import mark_root_won
+                                mark_root_won(session_id)
+                            except Exception:
+                                pass
+                            summary = priv_esc.generate_summary()
+                            socketio.emit('message', {'data': f'{summary}\n', 'color': "#1E90FF"}, namespace='/get')
+                            break
                         i = max_reqs
 
-                    last_line = shell_output_lines[-1]
+                    last_line = shell_output_lines[-1] if shell_output_lines else ""
                 
                 debug_logger.debug(f"[Debug] shell_output: {shell_output}")
                 shell_output = priv_esc.remove_last_line(shell_output)
@@ -506,9 +526,13 @@ def autonomous(session_data):
                 
                 prompt = priv_esc.generate_prompt()
 
+                hostname = session_data.get('hostname')
+                won = got_root(hostname, last_line) or got_root(hostname, shell_output)
+                if not won and shell_output_lines:
+                    won = any(got_root(hostname, ln) for ln in shell_output_lines)
 
-                if got_root(session_data.get('hostname'), last_line):
-                    GlobalTimer.stop(f"""Autonomous - Hostname:{session_data.get('hostname')}, Server:{session_data.get('server')}, Username:{session_data.get('username')}""".strip('\n'))
+                if won:
+                    GlobalTimer.stop(f"""Autonomous - Hostname:{hostname}, Server:{session_data.get('server')}, Username:{session_data.get('username')}""".strip('\n'))
                     # prompt_delimiters[session_id] = last_line
                     socketio.emit('message', {'data': f'{shell_output}\npwned!'}, namespace='/get')
                     just_got_root = True
@@ -835,6 +859,10 @@ def shell_interaction(shell, emit_func, session, max_retries=1000000):
                     #emit_func('message', {'data': f"[LOOP] 1\n", 'color': "#1E90FF"}, namespace='/get')
                     while not stop_task_flag.is_set():
                         #emit_func('message', {'data': f"[LOOP] 2\n", 'color': "#1E90FF"}, namespace='/get')
+                        # Do not steal stdout while Full AI owns the shell.
+                        if loop.get(session_id):
+                            socketio.sleep(0.5)
+                            continue
                         shell = ssh_shells.get(session_id)
                         socketio.sleep(1)
                         data = shell.recv(timeout=1)

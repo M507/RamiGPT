@@ -37,7 +37,9 @@ Separate from the containers. Pre-filled local config (gitignored):
 
 That file holds the **physical/lab SSH host** used to deploy the containers (not `zeus` / `benchmark`).
 
-## Code defaults
+## Full AI rules
+
+Benchmark sessions are created with **empty** `facts`, `hints`, and `avoids` (and no spoiler notes) so the model is tested cold.
 
 Canonical constants live in `ramigpt/benchmark/targets.py`:
 

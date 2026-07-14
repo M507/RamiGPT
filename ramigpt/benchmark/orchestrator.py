@@ -185,12 +185,9 @@ def _upsert_session_for_target(target: BenchmarkTarget, host: str) -> str:
         "environment": "benchmark",
         "favorite": False,
         "remember_credentials": True,
-        "notes": target.description,
+        "notes": "",
         "facts": [],
-        "hints": [
-            "Check sudo -l for allowed binaries.",
-            f"GTFOBins-style abuse of sudo {target.sudo_binary} may yield a root shell.",
-        ],
+        "hints": [],
         "avoids": [],
     }
     if existing:
