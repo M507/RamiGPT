@@ -11,6 +11,7 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
         sudo \
         openssh-server \
+        openssh-client \
         ca-certificates \
         python3 \
         libcap2-bin \

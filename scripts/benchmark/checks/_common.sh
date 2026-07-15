@@ -24,6 +24,7 @@ fi
 SSH_BASE=(
   sshpass -p "${BENCH_PASS}"
   ssh
+  -4
   -n
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null

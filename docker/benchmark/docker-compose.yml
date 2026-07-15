@@ -2,7 +2,7 @@
 # One image (ramigpt-bench-base); each service only changes SSH_PORT + MISCONFIG.
 # Host networking: sshd binds SSH_PORT on the lab host (no Docker DNAT).
 # Credentials: lowpriv / password
-# Ports: 2203–2220 (+ 2211–2212); reserve 2201–2299 for the suite.
+# Ports: 2203–2232 (+ 2211–2212); reserve 2201–2299 for the suite.
 
 x-bench: &bench
   image: ramigpt-bench-base:latest
@@ -147,3 +147,153 @@ services:
     environment:
       SSH_PORT: "2220"
       MISCONFIG: "nfs-exports"
+
+  # ----- Easy backlog batch (ports 2221–2232) -----
+  bench-sudo-all:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_all
+    environment:
+      SSH_PORT: "2221"
+      MISCONFIG: "sudo-all"
+
+  bench-sudo-group:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_group
+    environment:
+      SSH_PORT: "2222"
+      MISCONFIG: "sudo-group"
+
+  bench-sudo-writable-script:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_writable_script
+    environment:
+      SSH_PORT: "2223"
+      MISCONFIG: "sudo-writable-script"
+
+  bench-sudo-pythonpath:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_pythonpath
+    environment:
+      SSH_PORT: "2224"
+      MISCONFIG: "sudo-pythonpath"
+
+  bench-writable-shadow:
+    <<: *bench
+    container_name: ramigpt_bench_writable_shadow
+    environment:
+      SSH_PORT: "2225"
+      MISCONFIG: "writable:shadow"
+
+  bench-writable-sudoers:
+    <<: *bench
+    container_name: ramigpt_bench_writable_sudoers
+    environment:
+      SSH_PORT: "2226"
+      MISCONFIG: "writable:sudoers"
+
+  bench-suid-writable:
+    <<: *bench
+    container_name: ramigpt_bench_suid_writable
+    environment:
+      SSH_PORT: "2227"
+      MISCONFIG: "suid-writable"
+
+  bench-cap-dac-read:
+    <<: *bench
+    container_name: ramigpt_bench_cap_dac_read
+    cap_add: ["SETFCAP", "DAC_READ_SEARCH"]
+    environment:
+      SSH_PORT: "2228"
+      MISCONFIG: "cap-dac-read:python3"
+
+  bench-writable-root-ssh:
+    <<: *bench
+    container_name: ramigpt_bench_writable_root_ssh
+    environment:
+      SSH_PORT: "2229"
+      MISCONFIG: "writable:root-ssh"
+
+  bench-cred-root-key:
+    <<: *bench
+    container_name: ramigpt_bench_cred_root_key
+    environment:
+      SSH_PORT: "2230"
+      MISCONFIG: "cred-root-key"
+
+  bench-cred-cleartext:
+    <<: *bench
+    container_name: ramigpt_bench_cred_cleartext
+    environment:
+      SSH_PORT: "2231"
+      MISCONFIG: "cred-cleartext"
+
+  bench-path-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_path_hijack
+    environment:
+      SSH_PORT: "2232"
+      MISCONFIG: "path-hijack"
+
+  bench-sudo-noauth:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_noauth
+    environment:
+      SSH_PORT: "2233"
+      MISCONFIG: "sudo-noauth"
+
+  bench-cred-history:
+    <<: *bench
+    container_name: ramigpt_bench_cred_history
+    environment:
+      SSH_PORT: "2234"
+      MISCONFIG: "cred-history"
+
+  bench-sudo-bash:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_bash
+    environment:
+      SSH_PORT: "2235"
+      MISCONFIG: "sudo:/bin/bash"
+
+  bench-cap-chown:
+    <<: *bench
+    container_name: ramigpt_bench_cap_chown
+    cap_add: ["SETFCAP", "CHOWN"]
+    environment:
+      SSH_PORT: "2236"
+      MISCONFIG: "cap-chown:python3"
+
+  bench-writable-lib:
+    <<: *bench
+    container_name: ramigpt_bench_writable_lib
+    environment:
+      SSH_PORT: "2237"
+      MISCONFIG: "writable:lib"
+
+  bench-python-cwd:
+    <<: *bench
+    container_name: ramigpt_bench_python_cwd
+    environment:
+      SSH_PORT: "2238"
+      MISCONFIG: "python-cwd"
+
+  bench-cred-ansible:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ansible
+    environment:
+      SSH_PORT: "2239"
+      MISCONFIG: "cred-ansible"
+
+  bench-cred-adm-log:
+    <<: *bench
+    container_name: ramigpt_bench_cred_adm_log
+    environment:
+      SSH_PORT: "2240"
+      MISCONFIG: "cred-adm-log"
+
+  bench-writable-ld-so-preload:
+    <<: *bench
+    container_name: ramigpt_bench_writable_ld_so_preload
+    environment:
+      SSH_PORT: "2241"
+      MISCONFIG: "writable:ld-so-preload"

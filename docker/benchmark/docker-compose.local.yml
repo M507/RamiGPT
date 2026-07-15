@@ -174,3 +174,194 @@ services:
       SSH_PORT: "22"
       MISCONFIG: "nfs-exports"
     ports: ["2220:22"]
+
+  bench-sudo-all:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_all
+    hostname: bench-sudo-all
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-all"
+    ports: ["2221:22"]
+
+  bench-sudo-group:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_group
+    hostname: bench-sudo-group
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-group"
+    ports: ["2222:22"]
+
+  bench-sudo-writable-script:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_writable_script
+    hostname: bench-sudo-writable-script
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-writable-script"
+    ports: ["2223:22"]
+
+  bench-sudo-pythonpath:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_pythonpath
+    hostname: bench-sudo-pythonpath
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-pythonpath"
+    ports: ["2224:22"]
+
+  bench-writable-shadow:
+    <<: *bench
+    container_name: ramigpt_bench_writable_shadow
+    hostname: bench-writable-shadow
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:shadow"
+    ports: ["2225:22"]
+
+  bench-writable-sudoers:
+    <<: *bench
+    container_name: ramigpt_bench_writable_sudoers
+    hostname: bench-writable-sudoers
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:sudoers"
+    ports: ["2226:22"]
+
+  bench-suid-writable:
+    <<: *bench
+    container_name: ramigpt_bench_suid_writable
+    hostname: bench-suid-writable
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "suid-writable"
+    ports: ["2227:22"]
+
+  bench-cap-dac-read:
+    <<: *bench
+    container_name: ramigpt_bench_cap_dac_read
+    hostname: bench-cap-dac-read
+    cap_add: ["SETFCAP", "DAC_READ_SEARCH"]
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cap-dac-read:python3"
+    ports: ["2228:22"]
+
+  bench-writable-root-ssh:
+    <<: *bench
+    container_name: ramigpt_bench_writable_root_ssh
+    hostname: bench-writable-root-ssh
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:root-ssh"
+    ports: ["2229:22"]
+
+  bench-cred-root-key:
+    <<: *bench
+    container_name: ramigpt_bench_cred_root_key
+    hostname: bench-cred-root-key
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cred-root-key"
+    ports: ["2230:22"]
+
+  bench-cred-cleartext:
+    <<: *bench
+    container_name: ramigpt_bench_cred_cleartext
+    hostname: bench-cred-cleartext
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cred-cleartext"
+    ports: ["2231:22"]
+
+  bench-path-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_path_hijack
+    hostname: bench-path-hijack
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "path-hijack"
+    ports: ["2232:22"]
+
+  bench-sudo-noauth:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_noauth
+    hostname: bench-sudo-noauth
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-noauth"
+    ports: ["2233:22"]
+
+  bench-cred-history:
+    <<: *bench
+    container_name: ramigpt_bench_cred_history
+    hostname: bench-cred-history
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cred-history"
+    ports: ["2234:22"]
+
+  bench-sudo-bash:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_bash
+    hostname: bench-sudo-bash
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo:/bin/bash"
+    ports: ["2235:22"]
+
+  bench-cap-chown:
+    <<: *bench
+    container_name: ramigpt_bench_cap_chown
+    hostname: bench-cap-chown
+    cap_add: ["SETFCAP", "CHOWN"]
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cap-chown:python3"
+    ports: ["2236:22"]
+
+  bench-writable-lib:
+    <<: *bench
+    container_name: ramigpt_bench_writable_lib
+    hostname: bench-writable-lib
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:lib"
+    ports: ["2237:22"]
+
+  bench-python-cwd:
+    <<: *bench
+    container_name: ramigpt_bench_python_cwd
+    hostname: bench-python-cwd
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "python-cwd"
+    ports: ["2238:22"]
+
+  bench-cred-ansible:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ansible
+    hostname: bench-cred-ansible
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cred-ansible"
+    ports: ["2239:22"]
+
+  bench-cred-adm-log:
+    <<: *bench
+    container_name: ramigpt_bench_cred_adm_log
+    hostname: bench-cred-adm-log
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cred-adm-log"
+    ports: ["2240:22"]
+
+  bench-writable-ld-so-preload:
+    <<: *bench
+    container_name: ramigpt_bench_writable_ld_so_preload
+    hostname: bench-writable-ld-so-preload
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:ld-so-preload"
+    ports: ["2241:22"]

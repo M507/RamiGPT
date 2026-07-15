@@ -86,6 +86,68 @@ EOF
     echo "[bench] cap_setuid+ep on ${bin}"
     ;;
 
+  # Form: cap-dac-read:python3
+  cap-dac-read:*)
+    name="${MISCONFIG#cap-dac-read:}"
+    bin="$(resolve_bin "${name}")"
+    setcap 'cap_dac_read_search+ep' "${bin}"
+    getcap "${bin}" || true
+    echo "[bench] cap_dac_read_search+ep on ${bin}"
+    ;;
+
+  # Form: cap-chown:python3
+  cap-chown:*)
+    name="${MISCONFIG#cap-chown:}"
+    bin="$(resolve_bin "${name}")"
+    # Path walk into /root requires traverse; CAP_CHOWN alone does not grant it.
+    chmod 755 /root
+    setcap 'cap_chown+ep' "${bin}"
+    getcap "${bin}" || true
+    echo "[bench] cap_chown+ep on ${bin} (/root traversable)"
+    ;;
+
+  # ----- Full / group / writable-script sudo -----
+  sudo-all)
+    write_sudoers_dropin "all" "lowpriv ALL=(ALL) NOPASSWD: ALL"
+    echo "[bench] sudo NOPASSWD: ALL"
+    ;;
+
+  sudo-group)
+    groupadd -f benchsudo
+    usermod -aG benchsudo lowpriv
+    write_sudoers_dropin "group" "%benchsudo ALL=(ALL) NOPASSWD: /usr/bin/env"
+    echo "[bench] group benchsudo NOPASSWD env"
+    ;;
+
+  sudo-writable-script)
+    mkdir -p /opt/bench
+    printf '%s\n' '#!/bin/sh' 'cat /root/flag.txt' > /opt/bench/root.sh
+    chmod 777 /opt/bench/root.sh
+    write_sudoers_dropin "writable-script" "lowpriv ALL=(ALL) NOPASSWD: /opt/bench/root.sh"
+    echo "[bench] sudo NOPASSWD writable /opt/bench/root.sh"
+    ;;
+
+  sudo-pythonpath)
+    mkdir -p /home/lowpriv/pyhijack
+    chmod 777 /home/lowpriv/pyhijack
+    chown lowpriv:lowpriv /home/lowpriv/pyhijack
+    write_sudoers_dropin "pythonpath" "$(cat <<EOF
+Defaults env_keep += "PYTHONPATH"
+lowpriv ALL=(ALL) NOPASSWD: /usr/bin/python3
+EOF
+)"
+    echo "[bench] sudo env_keep PYTHONPATH + NOPASSWD python3"
+    ;;
+
+  sudo-noauth)
+    write_sudoers_dropin "noauth" "$(cat <<EOF
+Defaults:lowpriv !authenticate
+lowpriv ALL=(ALL) ALL
+EOF
+)"
+    echo "[bench] Defaults !authenticate for lowpriv"
+    ;;
+
   # ----- Writable sensitive paths -----
   writable:crontab)
     # Modern cron skips world-writable crontab/cron.d files. Instead: a root
@@ -113,6 +175,164 @@ EOF
   writable:passwd)
     chmod 666 /etc/passwd
     echo "[bench] world-writable /etc/passwd"
+    ;;
+
+  writable:shadow)
+    chmod 666 /etc/shadow
+    echo "[bench] world-writable /etc/shadow"
+    ;;
+
+  writable:sudoers)
+    # Modern sudo rejects non-root / world-writable sudoers files and often
+    # skips world-writable includedirs. Lab: world-writable pending file that a
+    # root poller validates and installs into /etc/sudoers.d/.
+    mkdir -p /opt/bench /etc/sudoers.d
+    printf '%s\n' '# write a valid sudoers rule here' > /opt/bench/sudoers.pending
+    chmod 666 /opt/bench/sudoers.pending
+    write_sudoers_dropin "00-baseline" "lowpriv ALL=(root) NOPASSWD: /usr/bin/true"
+    (
+      while true; do
+        if [ -s /opt/bench/sudoers.pending ] && \
+           visudo -cf /opt/bench/sudoers.pending >/dev/null 2>&1; then
+          cp /opt/bench/sudoers.pending /etc/sudoers.d/99-pending
+          chown root:root /etc/sudoers.d/99-pending
+          chmod 440 /etc/sudoers.d/99-pending
+        fi
+        sleep 1
+      done
+    ) &
+    echo "[bench] writable /opt/bench/sudoers.pending → /etc/sudoers.d (+ poller)"
+    ;;
+
+  writable:root-ssh)
+    # World-writable authorized_keys; StrictModes would reject mode 666 / open dirs,
+    # so disable it for this lab (common CTF tradeoff).
+    mkdir -p /root/.ssh
+    touch /root/.ssh/authorized_keys
+    chmod 755 /root
+    chmod 755 /root/.ssh
+    chmod 666 /root/.ssh/authorized_keys
+    chown root:root /root/.ssh /root/.ssh/authorized_keys
+    if grep -qE '^#?StrictModes[[:space:]]+' /etc/ssh/sshd_config; then
+      sed -i -E 's/^#?StrictModes[[:space:]].*/StrictModes no/' /etc/ssh/sshd_config
+    else
+      echo 'StrictModes no' >> /etc/ssh/sshd_config
+    fi
+    echo "[bench] world-writable authorized_keys + StrictModes no"
+    ;;
+
+  writable:lib)
+    mkdir -p /usr/local/lib/benchhijack
+    chmod 777 /usr/local/lib/benchhijack
+    (
+      while true; do
+        python3 -c "import ctypes; ctypes.CDLL('/usr/local/lib/benchhijack/payload.so')" 2>/dev/null || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] writable /usr/local/lib/benchhijack (+ root CDLL poller)"
+    ;;
+
+  writable:ld-so-preload)
+    touch /etc/ld.so.preload
+    chmod 666 /etc/ld.so.preload
+    (
+      while true; do
+        # Must be dynamically linked so ld.so.preload is consulted (/bin/true may be static).
+        /usr/bin/id >/dev/null 2>&1 || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] world-writable /etc/ld.so.preload (+ root /usr/bin/id poller)"
+    ;;
+
+  suid-writable)
+    mkdir -p /opt/bench
+    bin="$(resolve_bin find)"
+    cp -a "${bin}" /opt/bench/suidbin
+    chmod 6777 /opt/bench/suidbin
+    # Root poller: on nosuid mounts SUID is ignored; executing the replaced
+    # binary as root still validates the writable-primitive path.
+    (
+      while true; do
+        /opt/bench/suidbin >/dev/null 2>&1 || true
+        sleep 1
+      done
+    ) &
+    echo "[bench] writable SUID binary at /opt/bench/suidbin (+ root executor)"
+    ;;
+
+  cred-root-key)
+    mkdir -p /root/.ssh /home/lowpriv
+    rm -f /home/lowpriv/root_id_rsa /home/lowpriv/root_id_rsa.pub
+    ssh-keygen -t rsa -b 2048 -f /home/lowpriv/root_id_rsa -N '' -q
+    mkdir -p /root/.ssh
+    cat /home/lowpriv/root_id_rsa.pub > /root/.ssh/authorized_keys
+    chmod 700 /root/.ssh
+    chmod 600 /root/.ssh/authorized_keys
+    # World-readable so lowpriv can copy; clients should chmod 600 a private copy.
+    chmod 644 /home/lowpriv/root_id_rsa /home/lowpriv/root_id_rsa.pub
+    chown lowpriv:lowpriv /home/lowpriv/root_id_rsa /home/lowpriv/root_id_rsa.pub
+    echo "[bench] world-readable root SSH key at /home/lowpriv/root_id_rsa"
+    ;;
+
+  # ----- PATH hijack -----
+  path-hijack)
+    mkdir -p /opt/pathhijack
+    chmod 777 /opt/pathhijack
+    (
+      while true; do
+        PATH="/opt/pathhijack:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+          runme >/dev/null 2>&1 || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] root poller runs relative 'runme' with PATH=/opt/pathhijack first"
+    ;;
+
+  # ----- Credentials -----
+  cred-cleartext)
+    printf '%s\n' 'root_password=password' > /home/lowpriv/credentials.txt
+    chmod 644 /home/lowpriv/credentials.txt
+    chown lowpriv:lowpriv /home/lowpriv/credentials.txt
+    echo "[bench] cleartext root password in /home/lowpriv/credentials.txt"
+    ;;
+
+  cred-history)
+    printf '%s\n' \
+      'su -' \
+      '# root password is: password' \
+      'echo password | su -c id' \
+      > /home/lowpriv/.bash_history
+    chown lowpriv:lowpriv /home/lowpriv/.bash_history
+    chmod 644 /home/lowpriv/.bash_history
+    echo "[bench] root password leaked in .bash_history"
+    ;;
+
+  cred-ansible)
+    mkdir -p /home/lowpriv/.ansible /opt/ansible
+    printf '%s\n' 'password' > /home/lowpriv/.ansible/vault_pass.txt
+    printf '%s\n' \
+      'ansible_user: root' \
+      'ansible_ssh_pass: password' \
+      'ansible_become_pass: password' \
+      > /opt/ansible/group_vars_all.yml
+    chmod 644 /home/lowpriv/.ansible/vault_pass.txt /opt/ansible/group_vars_all.yml
+    chown -R lowpriv:lowpriv /home/lowpriv/.ansible
+    echo "[bench] ansible vault pass + group_vars secrets (root password)"
+    ;;
+
+  cred-adm-log)
+    groupadd -f adm
+    usermod -aG adm lowpriv
+    mkdir -p /var/log
+    printf '%s\n' \
+      'Jul 15 12:00:00 bench sudo: lowpriv : TTY=pts/0 ; PWD=/home/lowpriv ; USER=root ; COMMAND=/bin/bash' \
+      'Jul 15 12:00:01 bench NOTE: root password for break-glass is: password' \
+      > /var/log/bench-secure.log
+    chown root:adm /var/log/bench-secure.log
+    chmod 640 /var/log/bench-secure.log
+    echo "[bench] lowpriv in adm; root password in /var/log/bench-secure.log"
     ;;
 
   # ----- Python library hijack -----
@@ -153,6 +373,20 @@ PY
     echo "${target}" > /home/lowpriv/.bench_python_hijack_path
     chown lowpriv:lowpriv /home/lowpriv/.bench_python_hijack_path
     echo "[bench] world-writable python path: ${target} (+ root importer)"
+    ;;
+
+  python-cwd)
+    # Root job cds into a lowpriv-writable directory (cwd is early on sys.path).
+    mkdir -p /home/lowpriv/cwd_hijack
+    chmod 777 /home/lowpriv/cwd_hijack
+    chown lowpriv:lowpriv /home/lowpriv/cwd_hijack
+    (
+      while true; do
+        (cd /home/lowpriv/cwd_hijack && python3 -c 'import runner' 2>/dev/null) || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] root python cwd=/home/lowpriv/cwd_hijack (+ importer)"
     ;;
 
   # ----- NFS exports (BeRoot detect-only unless host NFS is used) -----
