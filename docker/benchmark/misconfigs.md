@@ -32,6 +32,8 @@ Shared defaults:
 
 BeRoot, GTFOBins, HackTricks, LinPEAS-class enums, and classic CTF/pentest vectors all feed this catalog. Prefer adding unmarked **TODO** rows (see backlog) before inventing one-off primitives.
 
+For **how** each class of misconfig is found and abused in real assessments, see [Privilege escalation methods (pentester reference)](#privilege-escalation-methods-pentester-reference) below. Shipped lab IDs stay in the family tables; the backlog tracks what is still missing.
+
 ---
 
 ## Sudo misconfigurations
@@ -114,6 +116,179 @@ Profile: `MISCONFIG=nfs-exports` — plants `/etc/exports` with `no_root_squash`
 | ID | Port | Primitive | How this one differs |
 |----|------|-----------|----------------------|
 | `nfs-exports` | 2220 | `/etc/exports` | Static no_root_squash line for enum/detection scoring |
+
+---
+
+## Privilege escalation methods (pentester reference)
+
+Field notes for Linux LPE: common misconfigs, how they show up in real environments, and how operators typically abuse them. This section documents **methods**; the [LPE catalog & backlog](#lpe-catalog--backlog) maps them to suite status (COVERED / PARTIAL / TODO).
+
+Enumeration mindset: gather OS/kernel, user/groups, sudo, SUID/SGID, capabilities, cron/timers, writable interesting paths, credentials, containers/sockets, and network services — then match to a method below. Tools accelerate this (LinPEAS, BeRoot, GTFOBins lookup); confirmation is always manual.
+
+### 1. Sudo (most common in real orgs)
+
+**Why it happens:** Helpdesk/devops grant NOPASSWD for “one admin tool” and never revisit; aliases grow; groups are over-broad.
+
+| Method | Real-world signal | Abuse sketch |
+|--------|-------------------|--------------|
+| NOPASSWD on GTFOBins binary | `sudo -l` shows `NOPASSWD: /usr/bin/…` | Shell escape / file write / exec as root ([GTFOBins](https://gtfobins.github.io/)) |
+| `NOPASSWD: ALL` or `/bin/bash` | `sudo -l` trivial | `sudo -i` / `sudo bash` |
+| Password sudo still useful | User has creds; lengthy session | Cache spoofing rare; usually just authenticate once then abuse rule |
+| Sudo on writable script | Rule points at `/opt/scripts/backup.sh` mode `666`/`775` world/group write | Overwrite script; wait for run or invoke via sudo |
+| Runas other user | `(appuser) NOPASSWD: …` | Pivot to that user, then steal their secrets / second hop |
+| `su` allowed via sudo | `NOPASSWD: /bin/su - deploy` | Impersonate, re-check *their* sudo/files |
+| LD_PRELOAD kept | `env_keep+=LD_PRELOAD` + any sudo binary | Shared object constructor → `setuid(0)` |
+| Env keep (PYTHONPATH, LD_LIBRARY_PATH, BASH_ENV, …) | `sudo -l` Defaults line | Plant module / `.so` / startup file loaded as root |
+| CVE-2019-14287 | Old sudo; `(ALL, !root)` style | `sudo -u#-1` |
+| Baron Samedit (CVE-2021-3156) | Vulnerable sudo version | Heap overflow → root (version-pin lab) |
+| Wildcards in sudo/scripts | `sudo backup *` or root cron `tar *` | Filename args as options (`--checkpoint-action=…`) |
+
+**Enum:** `sudo -l`, `sudo -V`, readable `/etc/sudoers*`, group membership (`id`).
+
+### 2. SUID / SGID binaries
+
+**Why it happens:** Vendors ship SUID installers; admins `chmod u+s` “so monitoring works”; forgotten custom tools.
+
+| Method | Real-world signal | Abuse sketch |
+|--------|-------------------|--------------|
+| SUID GTFOBins | `find / -perm -4000` hits `find`, `python`, `vim`, … | Same GTFOBins recipes without sudo |
+| Custom SUID + `system("cmd")` | Odd binary under `/usr/local`; `strings`/`objdump` show relative cmds | PATH hijack: writable dir first on `$PATH` |
+| Custom SUID + `execve("/path")` | Absolute path in strings is writable | Replace helper binary |
+| Writable SUID file | SUID *and* user-writable | Overwrite contents; keep mode |
+| SGID on sensitive group | `-g=s` + group owns secrets | Read/write group-owned data → often path to root |
+| Known SUID CVEs | Distro `pkexec` (PwnKit), old `screen`, etc. | Public exploit against package version |
+
+**Enum:** `find / -perm -4000 -type f 2>/dev/null`, `-2000` for SGID; `ls -l`, `getcap`, `strings`, `ltrace`/`strace` carefully.
+
+### 3. Linux capabilities
+
+**Why it happens:** “Safer than SUID” hardening that still grants too much (`cap_setuid`, `dac_override`).
+
+| Method | Real-world signal | Abuse sketch |
+|--------|-------------------|--------------|
+| `cap_setuid+ep` on interpreter | `getcap -r /` | `os.setuid(0)` then shell |
+| `cap_dac_read_search` / `dac_override` | Same | Read shadow / write root-owned files |
+| `cap_sys_admin` | Rare on user bins | Mount, namespaces, many escapes |
+| `cap_sys_ptrace` | Debugging tooling | Inject into root processes (with ptrace_scope) |
+| `cap_sys_module` | Broken “driver” packaging | Load malicious module |
+| Network caps | Scanners, dump tools | Sniff / spoof / bind low ports as step in chain |
+
+**Enum:** `getcap -r / 2>/dev/null`.
+
+### 4. Writable sensitive files (classic “interesting files”)
+
+**Why it happens:** Bad Ansible modes, shared lab umasks, backup restores as `0777`, packagers shipping world-writable state.
+
+| Target | Typical abuse |
+|--------|----------------|
+| `/etc/passwd` | Append UID 0 user (empty/hash password) → `su` / SSH |
+| `/etc/shadow` | Set known hash for root |
+| `/etc/sudoers`, `sudoers.d` | Grant yourself NOPASSWD ALL |
+| `/etc/ld.so.preload` / `ld.so.conf*` | Force evil `.so` into every dynamic binary (as root next start) |
+| `/etc/profile`, `bashrc`, PAM, motd scripts | Backdoor next root login / service start |
+| Web / SSH configs | Forced `AuthorizedKeysFile`, PHP `auto_prepend`, etc. |
+| Cron/anacron/at allow files | Schedule as self when policy was deny |
+
+Always check **paths inside** readable configs: root cron that calls `/opt/job.sh` is as good as writable crontab if `job.sh` is writable (this is how `writable-crontab` is modeled).
+
+### 5. Cron, timers, anacron, at, logrotate
+
+**Why it happens:** Shared deploy dirs; “temporary” `chmod 777`; logrotate postrotate scripts left writable.
+
+| Method | Notes |
+|--------|-------|
+| Writable script executed by root schedule | Highest confidence LPE after sudo/SUID |
+| Wildcard expansion in root jobs | Filename weaponization |
+| systemd `ExecStart=` pointing at writable binary | Same as service binpath hijack |
+| Logrotate writable postrotate | Extremely common CTF; appears in messy servers |
+| Modern cron skips insecure crontab perms | Lab design must use indirection (root drop-in → writable script) to stay realistic *and* exploitable |
+
+**Enum:** `/etc/crontab`, `/etc/cron.*`, user crontabs, `systemctl list-timers`, `/etc/logrotate.d`, `pspy` for runtime discovery.
+
+### 6. PATH and interpreter/library hijacking
+
+| Method | Notes |
+|--------|-------|
+| Root uses relative command (`rsync`, `tar`, custom) while PATH includes attacker dir | Classic; often cron/scripts |
+| Writable entry on Python `sys.path` | Module name collision when root runs python |
+| `PYTHONPATH` / `PERL5LIB` / `RUBYLIB` via sudo env_keep | Same idea under elevation |
+| Plugin/hook dirs (`git` hooks, `pip`, editors) | Sudo/git patterns |
+
+### 7. NFS and network filesystems
+
+| Method | Notes |
+|--------|-------|
+| `no_root_squash` in `/etc/exports` | Mount share, plant SUID binary as “root” on NFS UID mapping, execute on server |
+| `no_all_squash` + writable share | Similar with careful UIDs |
+| Misexported `/` or `/home` | Often game over |
+
+Needs a real NFS server for end-to-end root; planted `/etc/exports` still trains detection (`nfs-exports`).
+
+### 8. Containers, sockets, and dangerous groups
+
+| Method | Real-world prevalence | Abuse sketch |
+|--------|----------------------|--------------|
+| `docker` group | Very common on admin laptops/CI agents | `docker run -v /:/host -it alpine chroot /host` |
+| Writable `docker.sock` | K8s/agent breakouts, bad volume mounts | Same via API |
+| Privileged / host PID/network/IPC / hostPath | K8s misconfig, “debug” pods | Escape to node |
+| LXD/LXC group | Older CTF + some hosts | Mount host root in privileged container |
+| `disk` group | Occasional | Raw access to block devices → rewrite shadow / plant SSH |
+| `adm` | Common | Read logs → creds → hop |
+
+### 9. Credentials and trust abuse (often the real path)
+
+In enterprises, “LPE” is frequently just **finding a better identity**:
+
+| Method | Where it lives |
+|--------|----------------|
+| SSH keys for root / deploy users | `~/.ssh`, backups, world-readable copies |
+| Passwords in scripts, `.env`, Jenkins/Gitlab vars, cloud metadata | Config dirs, CI, history |
+| DB sockets with `FILE` / `SUPER` / UDFs | MySQL/MariaDB local root patterns |
+| Cloud instance roles / metadata SSRF | Then into host via SSM/userdata (adjacent) |
+| Token files: kubeconfig, vault agent, AWS `credentials` | Home dirs, `/var/run/secrets` |
+
+### 10. Kernel, polkit, D-Bus, ptrace
+
+| Method | Notes |
+|--------|-------|
+| Kernel exploits (Dirty COW, Dirty Pipe, io_uring class, …) | Last resort; noisy; version-specific |
+| `yama/ptrace_scope == 0` | Attach to sudo/root processes; steal passwords / inject |
+| Polkit / `pkexec` bugs & rules | Auth bypass to root |
+| D-Bus root helpers with weak policy | Call method → root |
+| User namespaces | Distro toggles; combine with mounts |
+
+### 11. Network services running as root
+
+| Method | Notes |
+|--------|-------|
+| Unauth Redis/Memcached → write SSH key or cron | Still shows up on internal nets |
+| Root PHP/CGI with upload or LFI | Classic shared hosting |
+| Custom “status” daemons bound as root with command injection | Unexpected gold |
+
+### 12. Windows-adjacent / cross-platform notes (for multi-OS agents)
+
+RamiGPT is Linux-lab focused today, but real engagements continue with:
+
+| Area | Examples |
+|------|----------|
+| Windows | Unquoted service paths, alwaysInstallElevated, weak service ACLs, SeImpersonate (Potato family), DLL hijack, stored creds, UAC bypass |
+| macOS | TCC abuse, SIP nuances, privileged helpers, LaunchDaemons writable |
+| AD / identity | Kerberoast → lateral → local admin → LPE (outside single-host labs) |
+
+Track Linux first in this repo; keep Windows/macOS as future suite families.
+
+### 13. Operator enumeration order (practical)
+
+1. `id`, `sudo -l`, `uname -a`, `cat /etc/os-release`  
+2. SUID/SGID + `getcap`  
+3. Cron/timers + world-writable checks on referenced paths  
+4. Credentials sweep (histories, configs, keys, env)  
+5. Groups (docker/lxd/disk) + sockets  
+6. NFS exports / mounts  
+7. Processes / pspy (who runs what as root)  
+8. Kernel CVEs only if misconfigs fail  
+
+Misconfigs beat kernel exploits for reliability and OPSEC in most real jobs.
 
 ---
 
@@ -243,6 +418,10 @@ Sources (non-exclusive): [BeRoot](../../tools/beroot/Linux/) · [GTFOBins](https
 | `history` / `.bash_history` with root password | **TODO** | |
 | MySQL/Postgres root sock as lowpriv | **TODO** | `udf` / `INTO OUTFILE` LPE patterns |
 | Writable systemd credentials / sealed secrets | **TODO** | |
+| Jenkins/GitLab runner token → host shell as service user → LPE | **TODO** | |
+| Readable `/etc/shadow` (mode bug) without write | **TODO** | Offline crack → then `su` if password auth |
+| Cloud metadata SSRF from app → IAM then host | **TODO** | Adjacent to LPE |
+| Hibernate/core dumps with secrets | **TODO** | |
 
 ### Kernel / D-Bus / polkit / session
 
@@ -262,6 +441,8 @@ Sources (non-exclusive): [BeRoot](../../tools/beroot/Linux/) · [GTFOBins](https
 | Root-owned TCP service with RCE / file write | **TODO** | Tiny intentional buggy daemon |
 | Writable webroot + root-run CGI/php | **TODO** | |
 | Redis/memcached without auth unbound | **TODO** | Classic write crontab / SSH key |
+| Root-owned SNMP/custom UDP agent with injection | **TODO** | |
+| Jenkins script console / unmanaged agent as root | **TODO** | |
 
 ### Misc living-off-the-land
 
@@ -272,6 +453,21 @@ Sources (non-exclusive): [BeRoot](../../tools/beroot/Linux/) · [GTFOBins](https
 | Writable `/dev/shm` + root cron race | **TODO** | |
 | Open `/proc/*/mem` or fd leaks (when combined with ptrace) | **TODO** | |
 | Ansible/Puppet/agent dropped secrets world-readable | **TODO** | |
+| Windows unquoted service path / weak service ACL / AlwaysInstallElevated / Potato (SeImpersonate) | **TODO** | Future Windows suite family |
+| macOS LaunchDaemon writable / privileged helper abuse | **TODO** | Future macOS suite family |
+| Cloud instance metadata → privileged host agent (SSM/userdata chain) | **TODO** | Often multi-host; document detect path first |
+| Kubelet anonymous / kubeconfig as lowpriv → node escape | **TODO** | |
+| Snap/flatpak confinement escape misconfig | **TODO** | Niche |
+| AppArmor/SELinux disabled + then weaker vector | **TODO** | Softening layer, not sole LPE |
+| World-writable `/tmp` sticky-bit races against root jobs | **TODO** | Classic TOCTOU |
+| `sudoedit` / `sudo -e` symlink race (historical CVEs) | **TODO** | |
+| Writable `/etc/rc.local` or systemd generator dirs | **TODO** | Boot persistence → root on reboot |
+| `git` safe.directory / hooks executed as root via sudo git | **TODO** | Expand “sudo git” row |
+| Composer/npm/yarn scripts run as root via sudo | **TODO** | |
+| Backup tools (`duplicity`, `restic`, `tar` backup to writable) | **TODO** | Exclude/overwrite tricks |
+| `tmux`/`screen` running as root with shared socket | **TODO** | Attach to session |
+| OpenVPN/WireGuard scripts (`up`/`down`) writable | **TODO** | |
+| Mail / `mail`/`postfix` pipe root delivery | **TODO** | Rare |
 
 ### BeRoot automated checks (cross-ref)
 
