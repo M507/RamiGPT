@@ -198,7 +198,10 @@ def test_ssh_access(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> Dict[
         ignore_config=True,
     )
     try:
-        out = conn.run("id && hostname && uname -srm", timeout=15).recvall(timeout=15)
+        tube = conn.run("id && hostname && uname -srm", timeout=15)
+        if tube is None:
+            raise RuntimeError("ssh.run() returned None during pre-flight")
+        out = tube.recvall(timeout=15)
         text = out.decode(errors="replace").strip()
         log(f"SSH OK:\n{text}")
         return {

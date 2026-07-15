@@ -318,6 +318,58 @@ def _sh_single_quote(value: str) -> str:
     return "'" + str(value or "").replace("'", "'\"'\"'") + "'"
 
 
+def _ssh_run_capture(ssh_conn, command: str, *, timeout: int = 60) -> bytes:
+    """
+    Non-interactive remote exec via ``ssh.run()``.
+
+    Unlike ``ssh.process()``, this does not require a Python interpreter on the
+    target just to open the channel — critical for slim lab images.
+    """
+    if not command:
+        raise ValueError("empty remote command")
+    try:
+        tube = ssh_conn.run(command, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"ssh.run() failed: {exc}") from exc
+    if tube is None:
+        raise RuntimeError("ssh.run() returned None (SSH session may be dead)")
+    try:
+        return tube.recvall(timeout=timeout) or b""
+    finally:
+        try:
+            tube.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _ssh_run_or_shell(ssh_conn, command: str, *, timeout: int = 60, slog=None) -> bytes:
+    """Prefer ``ssh.run()``; fall back to an interactive shell if run fails."""
+    try:
+        return _ssh_run_capture(ssh_conn, command, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        if slog is not None:
+            slog.warning(f"ssh.run() failed ({exc}); falling back to interactive shell")
+        runner = _open_ssh_interactive_shell(ssh_conn)
+        try:
+            recv_for_duration(runner, 0.5)
+            runner.sendline(command.encode() if isinstance(command, str) else command)
+            deadline = time.time() + max(5, int(timeout))
+            buf = b""
+            while time.time() < deadline:
+                try:
+                    chunk = runner.recv(timeout=2)
+                except Exception:  # noqa: BLE001
+                    chunk = b""
+                if chunk:
+                    buf += chunk
+            return buf
+        finally:
+            try:
+                runner.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 180) -> str:
     """
     Upload tools/beroot/Linux to /tmp/Linux on the remote host, run BeRoot,
@@ -347,39 +399,9 @@ def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 
     if slog is not None:
         slog.info("beroot: starting remote scan (this can take a minute)")
 
-    runner = ssh_conn.process("/bin/sh", env={"TERM": ""})
-    try:
-        # Drain banner / prompt noise briefly
-        recv_for_duration(runner, 1.0)
-        runner.sendline(remote_cmd.encode() if isinstance(remote_cmd, str) else remote_cmd)
-        deadline = time.time() + max(30, int(timeout))
-        buf = b""
-        while time.time() < deadline:
-            try:
-                chunk = runner.recv(timeout=2)
-            except Exception:  # noqa: BLE001
-                chunk = b""
-            if chunk:
-                buf += chunk
-                if b"__BEROOT_EXIT__:" in buf:
-                    # Grab trailing wc line
-                    try:
-                        buf += runner.recv(timeout=2)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    break
-        else:
-            # Timed out — still try to read whatever is left and the output file.
-            if slog is not None:
-                slog.warning(f"beroot: remote scan timed out after {timeout}s — fetching partial output")
-            extra = recv_for_duration(runner, 2)
-            if extra:
-                buf += extra
-    finally:
-        try:
-            runner.close()
-        except Exception:  # noqa: BLE001
-            pass
+    buf = _ssh_run_or_shell(
+        ssh_conn, remote_cmd, timeout=max(30, int(timeout)), slog=slog
+    )
 
     # Prefer the file BeRoot wrote; fall back to captured stdout.
     text = ""
@@ -392,63 +414,43 @@ def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 
     except Exception as exc:  # noqa: BLE001
         if slog is not None:
             slog.warning(f"beroot: download /tmp/beroot.txt failed: {exc}")
-        text = buf.decode("utf-8", errors="replace")
+        text = (buf or b"").decode("utf-8", errors="replace")
 
     text = (text or "").strip()
     if not text:
         raise RuntimeError(
             "BeRoot produced empty output. "
-            f"Remote buffer tail: {buf[-500:]!r}"
+            f"Remote buffer tail: {(buf or b'')[-500:]!r}"
         )
 
     # BeRoot's sudo -ll parser often misses modern NOPASSWD listings; append a
     # plain `sudo -l` capture so privilege-escalation rules stay visible to the AI.
     try:
-        probe = ssh_conn.process("/bin/sh", env={"TERM": ""})
-        try:
-            recv_for_duration(probe, 0.5)
-            probe_cmd = (
-                f"echo { _sh_single_quote(password) } | sudo -S -l 2>/dev/null; "
-                "sudo -ln 2>/dev/null; echo __SUDO_L_DONE__"
+        probe_cmd = (
+            f"echo {_sh_single_quote(password)} | sudo -S -l 2>/dev/null; "
+            "sudo -ln 2>/dev/null; echo __SUDO_L_DONE__"
+        )
+        pbuf = _ssh_run_or_shell(ssh_conn, probe_cmd, timeout=20, slog=slog)
+        sudo_l = (pbuf or b"").decode("utf-8", errors="replace")
+        sudo_l = sudo_l.split("__SUDO_L_DONE__")[0]
+        lines = [
+            ln for ln in sudo_l.splitlines()
+            if ln.strip() and not ln.strip().startswith("$")
+            and "sudo -S -l" not in ln and "sudo -ln" not in ln
+        ]
+        sudo_clean = "\n".join(lines).strip()
+        if sudo_clean and (
+            "may run" in sudo_clean.lower()
+            or "NOPASSWD" in sudo_clean
+            or "sudoers" in sudo_clean.lower()
+            or "(root)" in sudo_clean
+        ):
+            text = (
+                text
+                + "\n\n################ sudo -l (runner capture) ################\n\n"
+                + sudo_clean
+                + "\n"
             )
-            probe.sendline(probe_cmd.encode())
-            pbuf = b""
-            p_end = time.time() + 20
-            while time.time() < p_end:
-                try:
-                    chunk = probe.recv(timeout=1)
-                except Exception:  # noqa: BLE001
-                    chunk = b""
-                if chunk:
-                    pbuf += chunk
-                    if b"__SUDO_L_DONE__" in pbuf:
-                        break
-            sudo_l = pbuf.decode("utf-8", errors="replace")
-            sudo_l = sudo_l.split("__SUDO_L_DONE__")[0]
-            # Drop shell echo of the command / prompt noise
-            lines = [
-                ln for ln in sudo_l.splitlines()
-                if ln.strip() and not ln.strip().startswith("$")
-                and "sudo -S -l" not in ln and "sudo -ln" not in ln
-            ]
-            sudo_clean = "\n".join(lines).strip()
-            if sudo_clean and (
-                "may run" in sudo_clean.lower()
-                or "NOPASSWD" in sudo_clean
-                or "sudoers" in sudo_clean.lower()
-                or "(root)" in sudo_clean
-            ):
-                text = (
-                    text
-                    + "\n\n################ sudo -l (runner capture) ################\n\n"
-                    + sudo_clean
-                    + "\n"
-                )
-        finally:
-            try:
-                probe.close()
-            except Exception:  # noqa: BLE001
-                pass
     except Exception as exc:  # noqa: BLE001
         if slog is not None:
             slog.warning(f"beroot: sudo -l enrichment skipped: {exc}")
@@ -459,37 +461,90 @@ def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 
     return text
 
 
-def get_or_create_ssh_shell(session_id, create_new=False):
-    if session_id in ssh_shells:
-        return ssh_shells[session_id]
-    elif create_new:
+def _require_live_shell(shell, *, where: str = "shell op"):
+    """Raise a clear error instead of AttributeError on a dead/missing tube."""
+    if shell is None:
+        raise RuntimeError(
+            f"{where}: SSH shell is None "
+            "(process spawn failed, session disconnected, or connect never finished)"
+        )
+    return shell
+
+
+def _open_ssh_interactive_shell(ssh_conn):
+    """
+    Open an interactive remote shell tube.
+
+    pwntools ``ssh.process()`` needs a Python interpreter on the target. Some
+    minimal lab images omit it, in which case ``process()`` returns None — fall
+    back to ``ssh.system()`` / ``ssh.shell()`` which use a raw SSH channel.
+    """
+    if ssh_conn is None:
+        raise RuntimeError("Cannot open shell: SSH connection is None")
+    errors = []
+    for label, opener in (
+        ("process:/bin/sh", lambda: ssh_conn.process("/bin/sh", env={"TERM": ""})),
+        ("process:/bin/bash", lambda: ssh_conn.process("/bin/bash", env={"TERM": ""})),
+        ("system:/bin/sh", lambda: ssh_conn.system("/bin/sh")),
+        ("system:/bin/bash", lambda: ssh_conn.system("/bin/bash")),
+        ("shell:/bin/bash", lambda: ssh_conn.shell("/bin/bash")),
+        ("shell:/bin/sh", lambda: ssh_conn.shell("/bin/sh")),
+    ):
         try:
-            # ignore_config: don't load ~/.ssh/known_hosts — lab/docker targets
-            # regenerate host keys often (esp. host-network benchmarks on one IP).
-            ssh_conn = ssh(
-                user=session.get('username'),
-                host=session.get('server'),
-                port=session.get('port'),
-                password=session.get('password'),
-                timeout=10,
-                ignore_config=True,
-            )
-            ssh_conn.set_env('TERM', '')
+            shell = opener()
+            if shell is not None:
+                return shell
+            errors.append(f"{label} returned None")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{label}: {exc}")
+    raise RuntimeError(
+        "Failed to open remote interactive shell "
+        "(install python3 on the target for pwntools process()). "
+        + "; ".join(errors[:6])
+    )
 
-            # Opening a shell
-            shell = ssh_conn.process('/bin/sh', env={'TERM': ''})
-            shell_output_bytes, \
-            shell_output_lines, \
-            shell_output_lines_string, \
-            shell_output = shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default)
 
-            # Saving the shell and connection objects
-            ssh_shells[session_id] = shell
-            ssh_ssh_conns[session_id] = ssh_conn
-            return shell
-        except Exception as e:
-            debug_logger.exception("Failed to create or use SSH shell.")
-            raise e
+def get_or_create_ssh_shell(session_id, create_new=False):
+    existing = ssh_shells.get(session_id)
+    if existing is not None:
+        return existing
+    if not create_new:
+        raise RuntimeError(
+            f"No SSH shell for session {session_id}; connect this session first"
+        )
+
+    ssh_conn = None
+    shell = None
+    try:
+        # ignore_config: don't load ~/.ssh/known_hosts — lab/docker targets
+        # regenerate host keys often (esp. host-network benchmarks on one IP).
+        ssh_conn = ssh(
+            user=session.get('username'),
+            host=session.get('server'),
+            port=session.get('port'),
+            password=session.get('password'),
+            timeout=10,
+            ignore_config=True,
+        )
+        ssh_conn.set_env('TERM', '')
+
+        shell = _open_ssh_interactive_shell(ssh_conn)
+        shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default)
+
+        ssh_shells[session_id] = shell
+        ssh_ssh_conns[session_id] = ssh_conn
+        return shell
+    except Exception:
+        debug_logger.exception("Failed to create or use SSH shell.")
+        for obj in (shell, ssh_conn):
+            try:
+                if obj is not None:
+                    obj.close()
+            except Exception:  # noqa: BLE001
+                pass
+        ssh_shells.pop(session_id, None)
+        ssh_ssh_conns.pop(session_id, None)
+        raise
 
 
 def start_shell_listener(session_id):
@@ -1385,6 +1440,7 @@ def receive_shell_output(shell, prompt_delimiter, timeout_default=0.5, max_timeo
     return shell_output.decode('utf-8', errors='ignore').strip()  # Decode safely
 
 def recv_for_duration(shell, duration):
+    _require_live_shell(shell, where="recv_for_duration")
     end_time = time.time() + duration
     data = b''
     while time.time() < end_time:
@@ -1400,6 +1456,7 @@ def recv_for_duration(shell, duration):
     return data
 
 def shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default):
+    _require_live_shell(shell, where="shell_recvuntil")
     shell_output_bytes  = shell.recvuntil(prompt_delimiter, drop=False, timeout=timeout_default)
     shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
     shell_output        = shell_output_bytes.decode('utf-8').strip()
@@ -1407,6 +1464,7 @@ def shell_recvuntil(shell, prompt_delimiter, drop=False, timeout=timeout_default
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
 def shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_default, session = None, emit_func = None):
+    _require_live_shell(shell, where="shell_recvuntil_v2")
     shell_output_bytes  = shell.recvuntil(prompt_delimiter, drop=False, timeout=timeout_default)
     shell_output_lines  = shell_output_bytes.decode('utf-8').split('\n')
     shell_output        = shell_output_bytes.decode('utf-8').strip()
@@ -1427,6 +1485,7 @@ def shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_defa
     return shell_output_bytes, shell_output_lines, shell_output_lines_string, shell_output
 
 def shell_recvuntil_v3(shell, prompt_delimiter, drop=False, timeout=timeout_default, session=None, emit_func=None):
+    _require_live_shell(shell, where="shell_recvuntil_v3")
     try:
         shell_output_bytes = shell.recvuntil(prompt_delimiter, drop=drop, timeout=timeout)
     except TimeoutError:
@@ -1554,6 +1613,7 @@ def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_defa
     Does NOT use bare `$` / `#` as byte delimiters — those appear constantly in
     command output and used to desync sessions (see events 008 after grep -r /etc).
     """
+    _require_live_shell(shell, where="shell_recvuntil_v4")
     with app.app_context():
         wait = max(float(timeout or 0), 8.0)
         deadline = time.time() + wait
@@ -1776,9 +1836,9 @@ def _reconnect_shell_for_session(session_id, session_data, slog) -> bool:
 
     ssh_conn = ssh_ssh_conns.get(session_id)
     try:
-        if ssh_conn is None:
-            slog.info("No cached SSH connection — creating a new one")
-            ssh_conn = ssh(
+        def _new_ssh_conn():
+            slog.info("Creating a new SSH connection")
+            conn = ssh(
                 user=session_data.get("username"),
                 host=session_data.get("server"),
                 port=int(session_data.get("port") or 22),
@@ -1786,10 +1846,25 @@ def _reconnect_shell_for_session(session_id, session_data, slog) -> bool:
                 timeout=10,
                 ignore_config=True,
             )
-            ssh_conn.set_env("TERM", "")
-            ssh_ssh_conns[session_id] = ssh_conn
+            conn.set_env("TERM", "")
+            ssh_ssh_conns[session_id] = conn
+            return conn
 
-        shell = ssh_conn.process("/bin/sh", env={"TERM": ""})
+        if ssh_conn is None:
+            ssh_conn = _new_ssh_conn()
+
+        try:
+            shell = _open_ssh_interactive_shell(ssh_conn)
+        except Exception as shell_exc:  # noqa: BLE001
+            # Cached connection may be dead after a hang — rebuild once.
+            slog.warning(f"shell open on cached conn failed ({shell_exc}); rebuilding SSH")
+            try:
+                ssh_conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            ssh_conn = _new_ssh_conn()
+            shell = _open_ssh_interactive_shell(ssh_conn)
+
         drained = recv_for_duration(shell, 2)
         drain_text = drained.decode("utf-8", errors="replace") if drained else ""
         ssh_shells[session_id] = shell
@@ -1814,14 +1889,24 @@ def recreate_shell(emit_func, session_id):
     message = 'Exiting /bin/sh'
     debug_logger.debug(message)
     emit_func('message', {'data': message}, namespace='/get')
-    ssh_conn = ssh_ssh_conns[session_id]
-    shell = ssh_conn.process('/bin/sh', env={'TERM': ''})
+    ssh_conn = ssh_ssh_conns.get(session_id)
+    if ssh_conn is None:
+        ssh_conn = ssh(
+            user=session.get('username'),
+            host=session.get('server'),
+            port=int(session.get('port') or 22),
+            password=session.get('password'),
+            timeout=10,
+            ignore_config=True,
+        )
+        ssh_conn.set_env('TERM', '')
+        ssh_ssh_conns[session_id] = ssh_conn
+    shell = _open_ssh_interactive_shell(ssh_conn)
     ssh_shells[session_id] = shell
-    # After you start a new shell, drain the buffer using the recv function \/ 
-    shell_output_bytes, \
-    shell_output_lines, \
-    shell_output_lines_string, \
-    shell_output = shell_recvuntil_v2(shell, prompt_delimiter, drop=False, timeout=timeout_default, session = session)
+    # After you start a new shell, drain the buffer using the recv function \/
+    shell_recvuntil_v2(
+        shell, prompt_delimiter, drop=False, timeout=timeout_default, session=session
+    )
     return jsonify(output='Started a new /bin/sh process'), 200
 
 @app.route('/execute', methods=['POST'])

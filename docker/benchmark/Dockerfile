@@ -7,10 +7,14 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG BINARY_PATH
 ARG BINARY_INSTALL_CMD
 
-# Install sudo and openssh-server
+# sudo/sshd for the lab; python3 required by pwntools ssh.process() and BeRoot
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends sudo openssh-server ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        sudo \
+        openssh-server \
+        ca-certificates \
+        python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a low-privileged user named 'lowpriv'
 RUN useradd -m -s /bin/bash lowpriv && \
