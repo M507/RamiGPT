@@ -243,7 +243,9 @@ def run_verify(
         raise RuntimeError("sshpass is required on PATH to verify benchmark targets")
     write_catalog()
     ensure_check_scripts_executable()
-    targets = resolve_targets(list(target_ids) if target_ids else None)
+    targets = resolve_targets(list(target_ids) if target_ids is not None else None)
+    if not targets:
+        raise ValueError("Select at least one benchmark target")
     run = VerifyRun(id=str(uuid.uuid4()), host=host, phase="running", running=True, started_at=time.time())
 
     def emit(msg: str) -> None:
@@ -301,7 +303,9 @@ def start_verify_async(
         try:
             write_catalog()
             ensure_check_scripts_executable()
-            targets = resolve_targets(list(target_ids) if target_ids else None)
+            targets = resolve_targets(list(target_ids) if target_ids is not None else None)
+            if not targets:
+                raise ValueError("Select at least one benchmark target")
             _log(run, f"Verifying {len(targets)} target(s) on {host}")
             run.phase = "running"
             for t in targets:

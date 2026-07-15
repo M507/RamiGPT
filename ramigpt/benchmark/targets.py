@@ -295,7 +295,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="sudo-all",
         name="Bench · sudo ALL",
         service="bench-sudo-all",
-        port=2221,
+        port=2170,
         hostname="bench-sudo-all",
         family=FAMILY_SUDO_ADVANCED,
         primitive="ALL",
@@ -306,7 +306,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="sudo-group",
         name="Bench · sudo group",
         service="bench-sudo-group",
-        port=2222,
+        port=2171,
         hostname="bench-sudo-group",
         family=FAMILY_SUDO_ADVANCED,
         primitive="%benchsudo",
@@ -317,7 +317,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="sudo-writable-script",
         name="Bench · sudo writable script",
         service="bench-sudo-writable-script",
-        port=2223,
+        port=2172,
         hostname="bench-sudo-writable-script",
         family=FAMILY_SUDO_ADVANCED,
         primitive="/opt/bench/root.sh",
@@ -328,7 +328,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="sudo-pythonpath",
         name="Bench · sudo PYTHONPATH",
         service="bench-sudo-pythonpath",
-        port=2224,
+        port=2173,
         hostname="bench-sudo-pythonpath",
         family=FAMILY_SUDO_ADVANCED,
         primitive="PYTHONPATH",
@@ -339,7 +339,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="writable-shadow",
         name="Bench · writable shadow",
         service="bench-writable-shadow",
-        port=2225,
+        port=2174,
         hostname="bench-writable-shadow",
         family=FAMILY_WRITABLE,
         primitive="/etc/shadow",
@@ -350,7 +350,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="writable-sudoers",
         name="Bench · writable sudoers.d",
         service="bench-writable-sudoers",
-        port=2226,
+        port=2175,
         hostname="bench-writable-sudoers",
         family=FAMILY_WRITABLE,
         primitive="/opt/bench/sudoers.pending",
@@ -361,7 +361,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="suid-writable",
         name="Bench · writable SUID binary",
         service="bench-suid-writable",
-        port=2227,
+        port=2176,
         hostname="bench-suid-writable",
         family=FAMILY_SUID,
         primitive="/opt/bench/suidbin",
@@ -405,7 +405,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="cred-cleartext",
         name="Bench · cleartext root password",
         service="bench-cred-cleartext",
-        port=2231,
+        port=2177,
         hostname="bench-cred-cleartext",
         family=FAMILY_CREDENTIALS,
         primitive="credentials.txt",
@@ -438,7 +438,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="cred-history",
         name="Bench · bash_history password",
         service="bench-cred-history",
-        port=2234,
+        port=2178,
         hostname="bench-cred-history",
         family=FAMILY_CREDENTIALS,
         primitive=".bash_history",
@@ -449,7 +449,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="sudo-bash",
         name="Bench · sudo bash",
         service="bench-sudo-bash",
-        port=2235,
+        port=2179,
         hostname="bench-sudo-bash",
         family=FAMILY_SUDO,
         primitive="bash",
@@ -460,7 +460,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="cap-chown",
         name="Bench · cap_chown",
         service="bench-cap-chown",
-        port=2236,
+        port=2180,
         hostname="bench-cap-chown",
         family=FAMILY_CAPABILITIES,
         primitive="python3",
@@ -504,7 +504,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="cred-adm-log",
         name="Bench · adm log credentials",
         service="bench-cred-adm-log",
-        port=2240,
+        port=2181,
         hostname="bench-cred-adm-log",
         family=FAMILY_CREDENTIALS,
         primitive="adm",
@@ -515,7 +515,7 @@ TARGETS: List[BenchmarkTarget] = [
         id="writable-ld-so-preload",
         name="Bench · writable ld.so.preload",
         service="bench-writable-ld-so-preload",
-        port=2241,
+        port=2182,
         hostname="bench-writable-ld-so-preload",
         family=FAMILY_WRITABLE,
         primitive="/etc/ld.so.preload",
@@ -548,7 +548,8 @@ def resolve_targets(target_ids: Optional[List[str]] = None) -> List[BenchmarkTar
     """
     Resolve a subset of suite targets.
 
-    None / empty after normalize means all targets. Unknown ids raise ValueError.
+    None means all targets. An empty list means no targets (caller validates).
+    Unknown ids raise ValueError.
     """
     if target_ids is None:
         return list(TARGETS)
@@ -563,7 +564,7 @@ def resolve_targets(target_ids: Optional[List[str]] = None) -> List[BenchmarkTar
         ordered.append(tid)
 
     if not ordered:
-        return list(TARGETS)
+        return []
 
     known = {t.id: t for t in TARGETS}
     missing = [tid for tid in ordered if tid not in known]

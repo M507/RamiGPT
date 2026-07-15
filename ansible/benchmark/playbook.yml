@@ -2,7 +2,10 @@
 # Deploy RamiGPT benchmark SSH targets on a remote host.
 # Expected vars (extra-vars or inventory):
 #   ansible_user, ansible_password, ansible_port (optional)
-#   project_root can be set; compose files are copied from controller by default.
+# Optional selective deploy (from ramigpt.benchmark.deploy):
+#   bench_compose_services: [bench-sudo-vim, ...]  # compose service names to start
+#   bench_ssh_ports: [2211, ...]                   # only wait for these
+#   bench_all_ssh_ports: [2211, 2212, ...]         # all suite ports (teardown/DNAT cleanup)
 
 - name: Deploy RamiGPT privilege-escalation benchmark targets
   hosts: benchmark_hosts
@@ -11,47 +14,10 @@
   vars:
     bench_remote_dir: "{{ ansible_env.HOME | default('/root') }}/ramigpt-benchmark"
     bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
-    # Keep in sync with ramigpt/benchmark/targets.py ports (2203–2241).
-    bench_ssh_ports:
-      - 2211
-      - 2212
-      - 2203
-      - 2204
-      - 2205
-      - 2206
-      - 2207
-      - 2208
-      - 2209
-      - 2210
-      - 2213
-      - 2214
-      - 2215
-      - 2216
-      - 2217
-      - 2218
-      - 2219
-      - 2220
-      - 2221
-      - 2222
-      - 2223
-      - 2224
-      - 2225
-      - 2226
-      - 2227
-      - 2228
-      - 2229
-      - 2230
-      - 2231
-      - 2232
-      - 2233
-      - 2234
-      - 2235
-      - 2236
-      - 2237
-      - 2238
-      - 2239
-      - 2240
-      - 2241
+    # Overridden by deploy_remote extra-vars for selected targets.
+    bench_compose_services: []
+    bench_ssh_ports: []
+    bench_all_ssh_ports: []
     bench_wait_timeout: 120
 
   tasks:
@@ -149,7 +115,23 @@
         - entrypoint.sh
         - apply-misconfig.sh
 
-    - name: Tear down previous benchmark containers (bridge → host network)
+    - name: Force remove any running RamiGPT benchmark containers
+      # Host-network labs can leave listeners if compose down missed a container.
+      ansible.builtin.shell: |
+        set +e
+        ids="$(docker ps -aq --filter 'name=ramigpt_bench_')"
+        if [ -n "$ids" ]; then
+          docker rm -f $ids
+        fi
+        exit 0
+      args:
+        executable: /bin/bash
+      register: bench_force_rm
+      changed_when: bench_force_rm.stdout | trim != ''
+      failed_when: false
+
+    - name: Tear down previous benchmark containers before recreate
+      # Always down: removes publish/DNAT leftovers and host-mode listeners cleanly.
       ansible.builtin.command:
         cmd: >-
           docker compose
@@ -160,15 +142,33 @@
       changed_when: compose_down.rc == 0
       failed_when: false
 
-    - name: Build and start benchmark containers
+    - name: Drop stale Docker DNAT rules for benchmark SSH ports
+      # Host-network sshd must not compete with leftover `docker publish` DNATs.
+      ansible.builtin.shell: |
+        set +e
+        for port in {{ (bench_all_ssh_ports | default(bench_ssh_ports)) | map('string') | join(' ') }}; do
+          iptables-save -t nat 2>/dev/null | grep -E "^-A DOCKER .*--dport ${port}( |$)" | while read -r rule; do
+            del="${rule/-A /-D }"
+            # shellcheck disable=SC2086
+            iptables -t nat $del
+          done
+        done
+        exit 0
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Build and start selected benchmark containers
       # Absolute paths: snap-hosted Docker cannot see /opt and mishandles relative -f paths.
-      # Host networking: sshd binds SSH_PORT on the lab host (no Docker DNAT).
+      # Host networking: sshd binds SSH_PORT on the lab host (no Docker publish/DNAT).
       ansible.builtin.command:
         cmd: >-
           docker compose
           -f {{ bench_remote_dir }}/docker-compose.yml
           --project-directory {{ bench_remote_dir }}
           up -d --build --force-recreate
+          {{ bench_compose_services | join(' ') }}
       register: compose_up
       changed_when: >-
         'Started' in (compose_up.stdout | default(''))
@@ -176,9 +176,14 @@
         or 'Built' in (compose_up.stdout | default(''))
         or compose_up.rc == 0
 
-    - name: Wait for benchmark SSH ports to accept connections
+    - name: Fail when no SSH ports were provided to wait on
+      ansible.builtin.fail:
+        msg: "bench_ssh_ports must list at least one selected target port"
+      when: (bench_ssh_ports | default([]) | length) == 0
+
+    - name: Wait for selected SSH ports on lab host IP (direct, not DNAT)
       ansible.builtin.wait_for:
-        host: 127.0.0.1
+        host: "{{ ansible_host | default(inventory_hostname) }}"
         port: "{{ item }}"
         timeout: "{{ bench_wait_timeout }}"
         state: started

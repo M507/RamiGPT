@@ -6,6 +6,8 @@ from pathlib import Path
 import logging
 import os
 import re
+import tarfile
+import tempfile
 import time
 import warnings
 
@@ -374,6 +376,71 @@ def _ssh_run_or_shell(ssh_conn, command: str, *, timeout: int = 60, slog=None) -
                 pass
 
 
+def _pack_beroot_archive(dest: Path) -> None:
+    """
+    Pack tools/beroot/Linux into dest as Linux/... for remote extraction.
+
+    Skips local scan downloads and macOS junk so the upload stays small/portable.
+    """
+    src = BEROOT_DIR
+    with tarfile.open(dest, "w:gz") as tar:
+        for path in sorted(src.rglob("*")):
+            if path.name.startswith("._") or path.name in {".DS_Store", "__MACOSX"}:
+                continue
+            try:
+                rel = path.relative_to(src)
+            except ValueError:
+                continue
+            if rel.parts and rel.parts[0] == "downloaded":
+                continue
+            if not (path.is_file() or path.is_dir()):
+                continue
+            tar.add(path, arcname=str(Path("Linux") / rel), recursive=False)
+
+
+def _upload_beroot_tree(ssh_conn, *, slog=None) -> None:
+    """
+    Upload BeRoot to /tmp/Linux without relying on remote GNU tar.
+
+    pwntools upload_dir runs ``tar -xzf`` on the target; GNU tar 1.35 hits ENOSYS
+    under some Docker/seccomp profiles (snap Docker + older kernels). Python's
+    tarfile works on those same hosts, so pack locally and extract with python3.
+    """
+    remote_archive = "/tmp/ramigpt-beroot-linux.tgz"
+    with tempfile.TemporaryDirectory(prefix="ramigpt-beroot-") as tmp:
+        archive = Path(tmp) / "beroot-linux.tgz"
+        _pack_beroot_archive(archive)
+        if slog is not None:
+            slog.info(
+                f"beroot: uploading archive ({archive.stat().st_size} bytes) → {remote_archive}"
+            )
+        ssh_conn.upload(str(archive), remote_archive)
+
+    extract_cmd = (
+        "rm -rf /tmp/Linux && "
+        "python3 -c "
+        "\"import tarfile; tarfile.open('/tmp/ramigpt-beroot-linux.tgz','r:gz')"
+        ".extractall('/tmp')\" && "
+        "rm -f /tmp/ramigpt-beroot-linux.tgz && "
+        "test -f /tmp/Linux/beroot.py"
+    )
+    if slog is not None:
+        slog.info("beroot: extracting with remote python3 (avoids broken GNU tar)")
+    buf = _ssh_run_or_shell(ssh_conn, extract_cmd, timeout=60, slog=slog)
+    # Soft-check: command already ends with test -f; re-raise with buffer if needed.
+    check = _ssh_run_or_shell(
+        ssh_conn,
+        "test -f /tmp/Linux/beroot.py && echo BEROOT_READY",
+        timeout=10,
+        slog=slog,
+    )
+    if b"BEROOT_READY" not in (check or b""):
+        raise RuntimeError(
+            "BeRoot upload/extract failed on remote host "
+            f"(python3 extract). Tail: {(buf or b'')[-400]!r} / {(check or b'')[-400]!r}"
+        )
+
+
 def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 180) -> str:
     """
     Upload tools/beroot/Linux to /tmp/Linux on the remote host, run BeRoot,
@@ -384,9 +451,8 @@ def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 
         raise FileNotFoundError(f"BeRoot package missing at {BEROOT_DIR}")
 
     if slog is not None:
-        slog.info(f"beroot: uploading {BEROOT_DIR} → /tmp/")
-    # pwntools uploads the directory itself, landing as /tmp/Linux/
-    ssh_conn.upload(str(BEROOT_DIR), "/tmp/")
+        slog.info(f"beroot: uploading {BEROOT_DIR} → /tmp/Linux")
+    _upload_beroot_tree(ssh_conn, slog=slog)
 
     pw = _sh_single_quote(password)
     # cd into the package so `from beroot.run import run` resolves.

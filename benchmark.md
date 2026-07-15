@@ -1,6 +1,6 @@
 # RamiGPT Benchmark
 
-Credentials and ports for the privilege-escalation **benchmark Docker containers**.
+Credentials and ports for the privilege-escalation **benchmark Docker containers** (always deployed to a **remote lab host** via Ansible).
 
 ## Target container SSH (same on every target)
 
@@ -8,15 +8,14 @@ Credentials and ports for the privilege-escalation **benchmark Docker containers
 |-------|--------|
 | Username | `lowpriv` |
 | Password | `password` |
-| SSH ports | `2203`–`2220` (vim/awk on 2211–2212; 2201–2202 often filtered) |
+| SSH ports | `2170`–`2239` (see `targets.py`) |
 | Reserved range | `2201`–`2299` |
 | Root flag | `/root/flag.txt` → `FLAG{======RamiGPTi=====}` |
 
 Quick connect example:
 
 ```sh
-ssh -p 2211 lowpriv@127.0.0.1          # local (vim)
-ssh -p 2211 lowpriv@<remote-host>      # after Ansible deploy
+ssh -p 2211 lowpriv@<remote-host>
 # password: password
 ```
 
@@ -30,14 +29,14 @@ One image (`ramigpt-bench-base`) for all families. Compose only sets `SSH_PORT` 
 |------|------|
 | `docker/benchmark/Dockerfile` | Shared base image |
 | `docker/benchmark/apply-misconfig.sh` | Runtime `MISCONFIG` profiles |
-| `docker/benchmark/docker-compose.yml` | Linux: host networking |
-| `docker/benchmark/docker-compose.local.yml` | Docker Desktop: bridge publish |
+| `docker/benchmark/docker-compose.yml` | Remote Linux lab: host networking |
 | `ramigpt/benchmark/targets.py` | Suite registry (id / port / family) |
 | `docker/benchmark/misconfigs.md` | Human catalog by family |
-| `scripts/benchmark/verify-misconfigs.sh` | Standalone root probes against an IP |
+| `scripts/benchmark/verify-misconfigs.sh` | Standalone root probes against a remote IP |
 | `scripts/benchmark/checks/` | Per-target bash verify scripts |
+| `ansible/benchmark/playbook.yml` | Deploy compose to remote lab |
 
-Active families: **sudo**, **sudo-advanced** (LD_PRELOAD), **suid**, **writable**, **capabilities**, **python**, **nfs** (detect-oriented).
+Active families: **sudo**, **sudo-advanced**, **suid**, **writable**, **capabilities**, **python**, **nfs**, **credentials**, **path**.
 
 Canonical constants live in `ramigpt/benchmark/targets.py` (`BENCH_USERNAME`, `BENCH_PASSWORD`, `TARGETS`).
 
@@ -52,11 +51,6 @@ That file holds the **physical/lab SSH host** used to deploy the containers (not
 
 ## Verification (must actually get root)
 
-Canonical constants live in `ramigpt/benchmark/targets.py`:
-
-- `BENCH_USERNAME = "lowpriv"`
-- `BENCH_PASSWORD = "password"`
-
 After deploy, verify every target can actually escalate:
 
 ```sh
@@ -64,4 +58,4 @@ After deploy, verify every target can actually escalate:
 python3 -m ramigpt.benchmark.verify 10.10.1.109
 ```
 
-UI: Benchmark modal → **Test targets (get root)**. Detect-only labs (`expects_root=false`, e.g. `nfs-exports`) are flagged, not counted as root failures.
+UI: Benchmark modal → **Test targets (get root)** against the configured remote host. Detect-only labs (`expects_root=false`, e.g. `nfs-exports`) are flagged, not counted as root failures.

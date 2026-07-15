@@ -4,6 +4,9 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   let pollTimer = null;
+  let pollRunning = null;
+  /** @type {Array<{id:string,port:number,name?:string}>} */
+  let knownTargets = [];
 
   async function api(path, options = {}) {
     const opts = {
@@ -36,22 +39,11 @@
     el.style.color = isError ? "var(--danger)" : "var(--muted)";
   }
 
-  function mode() {
-    const checked = document.querySelector('input[name="bench-mode"]:checked');
-    return checked ? checked.value : "local";
-  }
-
-  function syncModeUI() {
-    const remote = $("bench-remote-fields");
-    if (remote) remote.hidden = mode() !== "remote";
-  }
-
   function openModal() {
     const modal = $("benchmark-modal");
     if (!modal) return;
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
-    syncModeUI();
     refresh().catch((e) => setStatus(e.message, true));
     startPolling();
   }
@@ -64,11 +56,19 @@
     stopPolling();
   }
 
-  function startPolling() {
+  function pollIntervalMs(running) {
+    // Faster while a run is active; slower when idle to avoid busy-spinning the API.
+    return running ? 1200 : 4000;
+  }
+
+  function startPolling(running) {
+    const next = !!running;
+    if (pollTimer && pollRunning === next) return;
     stopPolling();
+    pollRunning = next;
     pollTimer = setInterval(() => {
       refresh().catch(() => {});
-    }, 1500);
+    }, pollIntervalMs(next));
   }
 
   function stopPolling() {
@@ -76,6 +76,7 @@
       clearInterval(pollTimer);
       pollTimer = null;
     }
+    pollRunning = null;
   }
 
   function renderTools(available, defaults) {
@@ -130,11 +131,37 @@
     list.querySelectorAll("input[data-target-id]").forEach((el) => {
       el.checked = !!checked;
     });
+    updateSelectedPortsLabel();
+  }
+
+  function selectedPortsLabel() {
+    const ids = new Set(selectedTargetIds());
+    const ports = knownTargets
+      .filter((t) => ids.has(t.id))
+      .map((t) => t.port)
+      .filter((p) => p != null);
+    if (!ports.length) return "none selected";
+    if (ports.length === 1) return String(ports[0]);
+    const sorted = [...ports].sort((a, b) => a - b);
+    return `${sorted[0]}–${sorted[sorted.length - 1]} (${sorted.length} selected)`;
+  }
+
+  function updateSelectedPortsLabel() {
+    const el = $("bench-cred-ports");
+    if (!el) return;
+    el.textContent = selectedPortsLabel();
   }
 
   function renderTargets(targets, defaults) {
     const list = $("bench-target-list");
     if (!list) return;
+    if (targets && targets.length) {
+      knownTargets = targets.map((t) => ({
+        id: t.id,
+        port: t.port,
+        name: t.name,
+      }));
+    }
     const prev = {};
     list.querySelectorAll("input[data-target-id]").forEach((el) => {
       prev[el.getAttribute("data-target-id")] = !!el.checked;
@@ -164,9 +191,8 @@
     if (defaults) {
       if ($("bench-cred-user")) $("bench-cred-user").textContent = defaults.username || "lowpriv";
       if ($("bench-cred-pass")) $("bench-cred-pass").textContent = defaults.password || "password";
-      if ($("bench-cred-ports"))
-        $("bench-cred-ports").textContent = (defaults.ports || []).join(", ");
     }
+    updateSelectedPortsLabel();
   }
 
   function phaseLabel(phase) {
@@ -191,7 +217,8 @@
 
     if (results) {
       if (!run || !(run.targets || []).length) {
-        results.innerHTML = `<div class="muted small">No run yet. Configure AI, pick local/remote, then Start.</div>`;
+        results.innerHTML = `<div class="muted small">No run yet. Configure AI and remote host, then Start.</div>`;
+
       } else {
         const modelLabel =
           run.provider || run.model
@@ -241,19 +268,27 @@
 
   async function refresh() {
     const data = await api("/api/benchmark/status");
+    if (data.targets && data.targets.length) {
+      knownTargets = data.targets.map((t) => ({
+        id: t.id,
+        port: t.port,
+        name: t.name,
+      }));
+    }
     if (!$("bench-target-list")?.dataset.userTouched) {
       renderTargets(data.targets, data.defaults);
     } else if (data.defaults) {
       if ($("bench-cred-user")) $("bench-cred-user").textContent = data.defaults.username || "lowpriv";
       if ($("bench-cred-pass")) $("bench-cred-pass").textContent = data.defaults.password || "password";
-      if ($("bench-cred-ports"))
-        $("bench-cred-ports").textContent = (data.defaults.ports || []).join(", ");
+      updateSelectedPortsLabel();
     }
     if (!$("bench-tool-list")?.dataset.userTouched) {
       renderTools(data.available_tools, data.defaults);
     }
     applyRemotePreset(data.remote_preset);
     renderRun(data.run, data.running, data.batch);
+    // Retune poll cadence when run activity changes.
+    startPolling(!!data.running);
     if (data.defaults && $("bench-timeout") && !data.running) {
       const field = $("bench-timeout");
       const presetTimeout =
@@ -295,13 +330,6 @@
     if (preset.password && $("bench-remote-pass") && !$("bench-remote-pass").value) {
       $("bench-remote-pass").value = preset.password;
     }
-    if (preset.config_exists && preset.host) {
-      const remoteRadio = document.querySelector('input[name="bench-mode"][value="remote"]');
-      if (remoteRadio && !document.querySelector('input[name="bench-mode"]:checked')?.dataset.userPicked) {
-        remoteRadio.checked = true;
-        syncModeUI();
-      }
-    }
     remotePresetApplied = true;
   }
 
@@ -331,21 +359,19 @@
       return;
     }
     const payload = {
-      mode: mode(),
+      mode: "remote",
       timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
       repetitions: Math.max(1, Math.min(50, parseInt($("bench-runs")?.value, 10) || 1)),
       tools: selectedTools(),
       target_ids: targetIds,
-    };
-    if (payload.mode === "remote") {
-      payload.remote = {
+      remote: {
         host: ($("bench-remote-host").value || "").trim(),
         port: parseInt($("bench-remote-port").value, 10) || 22,
         username: ($("bench-remote-user").value || "").trim(),
         password: $("bench-remote-pass").value || "",
-      };
-      // Empty password falls back to data/benchmark/remote.json on the server.
-    }
+      },
+    };
+    // Empty password falls back to data/benchmark/remote.json on the server.
     try {
       $("bench-start").disabled = true;
       await api("/api/benchmark/start", { method: "POST", body: payload });
@@ -389,10 +415,7 @@
   }
 
   function verifyHost() {
-    if (mode() === "remote") {
-      return ($("bench-remote-host").value || "").trim() || "10.10.1.109";
-    }
-    return "127.0.0.1";
+    return ($("bench-remote-host").value || "").trim() || "";
   }
 
   function renderVerify(run) {
@@ -451,13 +474,17 @@
       setStatus("Select at least one target to test.", true);
       return;
     }
-    setStatus(`Testing ${targetIds.length} target(s) on ${verifyHost()}…`);
+    const host = verifyHost();
+    if (!host) {
+      setStatus("Enter the remote lab host / IP first.", true);
+      return;
+    }
+    setStatus(`Testing ${targetIds.length} target(s) on ${host}…`);
     try {
       await api("/api/benchmark/verify", {
         method: "POST",
         body: {
-          mode: mode(),
-          host: verifyHost(),
+          host,
           target_ids: targetIds,
         },
       });
@@ -485,15 +512,52 @@
       .replace(/"/g, "&quot;");
   }
 
+  async function copyRunLog() {
+    const logEl = $("bench-log");
+    const btn = $("bench-copy-log");
+    const text = (logEl && logEl.textContent) || "";
+    if (!text.trim()) {
+      setStatus("Nothing to copy yet.", true);
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setStatus("Run log copied.");
+      if (btn) {
+        btn.classList.add("is-copied");
+        const icon = btn.querySelector("i");
+        if (icon) {
+          icon.classList.remove("fa-copy");
+          icon.classList.add("fa-check");
+        }
+        window.setTimeout(() => {
+          btn.classList.remove("is-copied");
+          if (icon) {
+            icon.classList.remove("fa-check");
+            icon.classList.add("fa-copy");
+          }
+        }, 1200);
+      }
+    } catch (err) {
+      setStatus(err.message || "Copy failed", true);
+    }
+  }
+
   function bind() {
     document.querySelectorAll("[data-bench-close]").forEach((el) => {
       el.addEventListener("click", closeModal);
-    });
-    document.querySelectorAll('input[name="bench-mode"]').forEach((el) => {
-      el.addEventListener("change", () => {
-        el.dataset.userPicked = "1";
-        syncModeUI();
-      });
     });
     const timeout = $("bench-timeout");
     if (timeout) {
@@ -517,6 +581,7 @@
     if (targetList) {
       targetList.addEventListener("change", () => {
         targetList.dataset.userTouched = "1";
+        updateSelectedPortsLabel();
       });
     }
     const selectAll = $("bench-targets-all");
@@ -530,6 +595,7 @@
     const testBtn = $("bench-test-remote");
     const verifyBtn = $("bench-verify-targets");
     const verifyStop = $("bench-verify-stop");
+    const copyLog = $("bench-copy-log");
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
@@ -537,6 +603,7 @@
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);
     if (verifyStop) verifyStop.addEventListener("click", stopVerify);
+    if (copyLog) copyLog.addEventListener("click", copyRunLog);
   }
 
   window.BenchmarkUI = { open: openModal, close: closeModal, refresh };

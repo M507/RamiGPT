@@ -16,9 +16,7 @@ from flask import Flask
 
 from ramigpt.benchmark.deploy import (
     RemoteDeployConfig,
-    all_target_ports_open,
     check_target_ports,
-    deploy_local,
     deploy_remote,
 )
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
@@ -93,7 +91,7 @@ class TargetRunResult:
 @dataclass
 class BenchmarkRun:
     id: str
-    mode: str  # local | remote
+    mode: str  # remote (Ansible deploy to lab host)
     timeout_seconds: int
     phase: str = "queued"  # queued|deploying|running|stopping|done|error
     host: str = ""
@@ -618,45 +616,30 @@ def _worker(run: BenchmarkRun) -> None:
 
         selected = _selected_suite_targets(run)
 
-        # Resolve where targets should live before deploying anything.
-        if run.mode == "local":
-            expected_host = "127.0.0.1"
-        else:
-            assert run.remote
-            expected_host = str(run.remote["host"])
+        # Benchmark labs always live on a remote host (Ansible + host networking).
+        assert run.remote
+        expected_host = str(run.remote["host"])
 
         run.phase = "deploying"
         _log(
             run,
-            f"Checking whether selected target ports are already up on {expected_host} "
-            f"({len(selected)}/{len(TARGETS)})",
+            f"Stopping all benchmark containers, then starting only "
+            f"{', '.join(t.id for t in selected)} on {expected_host}",
         )
-        if all_target_ports_open(expected_host, log=log_fn, targets=selected):
-            run.host = expected_host
-            _log(
-                run,
-                f"Selected target ports open on {run.host} — skipping "
-                f"{'Ansible' if run.mode == 'remote' else 'docker compose'} deploy",
-            )
-        else:
-            _log(run, f"Ports not ready — deploying benchmark targets ({run.mode})")
-            if run.mode == "local":
-                run.host = deploy_local(log=log_fn)
-            else:
-                assert run.remote
-                run.host = deploy_remote(
-                    RemoteDeployConfig(
-                        host=run.remote["host"],
-                        username=run.remote["username"],
-                        password=run.remote["password"],
-                        port=int(run.remote.get("port") or 22),
-                    ),
-                    log=log_fn,
-                )
-            ports = check_target_ports(run.host, log=log_fn, targets=selected)
-            if not all(p["open"] for p in ports):
-                missing = [f"{p['port']}" for p in ports if not p["open"]]
-                raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
+        run.host = deploy_remote(
+            RemoteDeployConfig(
+                host=run.remote["host"],
+                username=run.remote["username"],
+                password=run.remote["password"],
+                port=int(run.remote.get("port") or 22),
+            ),
+            log=log_fn,
+            targets=selected,
+        )
+        ports = check_target_ports(run.host, log=log_fn, targets=selected)
+        if not all(p["open"] for p in ports):
+            missing = [f"{p['port']}" for p in ports if not p["open"]]
+            raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
 
         run.phase = "running"
         target_by_id = {t.id: t for t in selected}
@@ -777,9 +760,8 @@ def start_run(
     global _current, run_batch_dir
 
     preset = load_remote_config()
-    mode = (mode or preset.get("mode") or "local").strip().lower()
-    if mode not in {"local", "remote"}:
-        raise ValueError("mode must be 'local' or 'remote'")
+    # Local docker-compose deploy was removed; always Ansible → remote lab host.
+    mode = "remote"
 
     if timeout_seconds is None:
         timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
@@ -806,14 +788,12 @@ def start_run(
     if not suite_targets:
         raise ValueError("Select at least one benchmark target")
 
-    merged_remote: Optional[Dict[str, Any]] = None
-    if mode == "remote":
-        merged_remote = merge_remote_override(remote)
-        if not merged_remote.get("host") or not merged_remote.get("username") or not merged_remote.get("password"):
-            raise ValueError(
-                "remote host, username, and password are required "
-                "(set them in data/benchmark/remote.json or the Benchmark UI)"
-            )
+    merged_remote = merge_remote_override(remote)
+    if not merged_remote.get("host") or not merged_remote.get("username") or not merged_remote.get("password"):
+        raise ValueError(
+            "remote host, username, and password are required "
+            "(set them in data/benchmark/remote.json or the Benchmark UI)"
+        )
 
     required = (
         "flask_app",

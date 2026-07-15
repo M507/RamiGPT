@@ -21,39 +21,6 @@
   color: var(--accent);
 }
 
-.bench-mode-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.bench-mode {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  border: 1px solid var(--border-dim);
-  padding: 10px;
-  cursor: pointer;
-  background: #000;
-}
-
-.bench-mode:has(input:checked) {
-  border-color: var(--accent);
-  box-shadow: var(--glow);
-}
-
-.bench-mode strong {
-  display: block;
-  color: var(--text);
-}
-
-.bench-mode small {
-  display: block;
-  color: var(--muted);
-  margin-top: 4px;
-  line-height: 1.35;
-}
-
 .bench-tools {
   margin-top: 10px;
   border: 1px solid var(--border-dim);
@@ -153,6 +120,28 @@
   gap: 12px;
 }
 
+.bench-log-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.bench-log-copy {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bench-log-copy:hover {
+  color: var(--text, #e6edf3);
+}
+
+.bench-log-copy.is-copied {
+  color: var(--accent);
+}
+
 .bench-results {
   display: flex;
   flex-direction: column;
@@ -237,9 +226,6 @@
 }
 
 @media (max-width: 720px) {
-  .bench-mode-row {
-    grid-template-columns: 1fr;
-  }
   .bench-result-row {
     grid-template-columns: 1fr;
   }

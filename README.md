@@ -159,19 +159,18 @@ The app opens into a **multi-session workspace** (sidebar inventory + server wor
 
 ## Privilege Escalation Benchmark
 
-RamiGPT can spin up intentionally misconfigured SSH targets and run **Full AI** against each until root (or timeout).
+RamiGPT deploys intentionally misconfigured SSH targets to a **remote lab host** (Ansible) and runs **Full AI** against each until root (or timeout).
 
-### Targets (Docker Compose)
+### Targets (Docker Compose on remote)
+
+One image (`ramigpt-bench-base`) for all labs; each service only sets `SSH_PORT` + `MISCONFIG` (see `docker/benchmark/apply-misconfig.sh`). Full inventory is in [`docker/benchmark/misconfigs.md`](docker/benchmark/misconfigs.md) and `ramigpt/benchmark/targets.py`. Ports **2170–2239** (host networking, no DNAT; see `targets.py`). Creds: `lowpriv` / `password`.
+
+Deploy uses host networking (`docker/benchmark/docker-compose.yml`) on the remote Linux lab.
 
 ```sh
-# Linux lab (host network):
-docker compose -f docker/benchmark/docker-compose.yml up -d --build
-
-# Docker Desktop (bridge publish):
-docker compose -f docker/benchmark/docker-compose.local.yml up -d --build
+# Prefer: Benchmark UI → Start (Ansible), or:
+ansible-playbook -i ansible/benchmark/inventory.example.ini ansible/benchmark/playbook.yml
 ```
-
-One image (`ramigpt-bench-base`) for all labs; each service only sets `SSH_PORT` + `MISCONFIG` (see `docker/benchmark/apply-misconfig.sh`). Full inventory (sudo, SUID, writable paths, capabilities, Python hijack, NFS exports) is in [`docker/benchmark/misconfigs.md`](docker/benchmark/misconfigs.md) and `ramigpt/benchmark/targets.py`. Ports **2203–2220** (band reserved **2201–2299**). Creds: `lowpriv` / `password`.
 
 After deploy, confirm each target can obtain root:
 
@@ -180,24 +179,23 @@ After deploy, confirm each target can obtain root:
 # or: python3 -m ramigpt.benchmark.verify 10.10.1.109
 ```
 
-UI Benchmark modal → **Test targets (get root)** runs the same probes.
-
-Remote deploy uses host networking (`docker-compose.yml`); local Docker Desktop uses bridge publish (`docker-compose.local.yml`).
+UI Benchmark modal → **Test targets (get root)** runs the same probes against the configured remote host.
 
 ### From the UI
 
 1. Configure AI (top bar → Settings).
 2. Click **Benchmark**.
-3. Choose **Local** (this machine) or **Remote host** (Ansible deploys Docker + compose).
+3. Set the **remote lab host** (SSH for Ansible; prefills from `data/benchmark/remote.json`).
 4. Set per-target timeout (default **60s**).
 5. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
 
 ### Remote deploy (Ansible)
 
 ```sh
-# playbook used by the UI remote mode:
+# playbook used by the UI:
 ansible-playbook -i ansible/benchmark/inventory.example.ini ansible/benchmark/playbook.yml
 ```
+
 
 Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies suite SSH ports before Full AI starts.
 
@@ -225,7 +223,8 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `scripts/` | Ops helpers (TLS cert generation) |
 | `docs/` | Screenshots and documentation assets |
 | `tests/` | Automated tests |
-| `ramigpt/benchmark/` | Benchmark orchestrator (local/remote deploy + Full AI runs) |
+| `ramigpt/benchmark/` | Benchmark orchestrator (remote Ansible deploy + Full AI runs) |
+
 | `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2201+) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
 | `data/` | Runtime logs and sessions (gitignored) |

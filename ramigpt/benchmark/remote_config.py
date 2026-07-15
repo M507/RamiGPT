@@ -47,8 +47,9 @@ def load_remote_config() -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return cfg
 
-    cfg["mode"] = str(raw.get("mode") or "remote").strip().lower() or "remote"
+    cfg["mode"] = "remote"
     cfg["host"] = str(raw.get("host") or "").strip()
+
     try:
         cfg["port"] = int(raw.get("port") or 22)
     except (TypeError, ValueError):

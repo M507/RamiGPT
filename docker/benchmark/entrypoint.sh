@@ -1,5 +1,6 @@
 #!/bin/bash
-# Bind sshd (SSH_PORT) and apply MISCONFIG profile before listen.
+# Bind sshd on SSH_PORT on all IPv4 interfaces (host networking — no DNAT).
+# Same listen pattern for every bench container (see bench-sudo-vim).
 set -euo pipefail
 
 SSH_PORT="${SSH_PORT:-22}"
@@ -11,11 +12,18 @@ fi
 
 /apply-misconfig.sh
 
-if grep -qE '^#?Port[[:space:]]+' /etc/ssh/sshd_config; then
-  sed -i -E "s/^#?Port[[:space:]]+.*/Port ${SSH_PORT}/" /etc/ssh/sshd_config
-else
-  echo "Port ${SSH_PORT}" >> /etc/ssh/sshd_config
-fi
+# Normalize listen config: IPv4 only, all interfaces, exact port.
+sed -i -E \
+  -e '/^#?Port[[:space:]]+/d' \
+  -e '/^#?ListenAddress[[:space:]]+/d' \
+  -e '/^#?AddressFamily[[:space:]]+/d' \
+  /etc/ssh/sshd_config
+
+{
+  echo "Port ${SSH_PORT}"
+  echo "AddressFamily inet"
+  echo "ListenAddress 0.0.0.0"
+} >> /etc/ssh/sshd_config
 
 mkdir -p /var/run/sshd
 exec /usr/sbin/sshd -D -e

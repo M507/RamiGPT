@@ -17,7 +17,7 @@ ramigpt-bench-base (Dockerfile)
 entrypoint.sh → apply-misconfig.sh  ←── MISCONFIG env from compose
         │
         ▼
-sshd on SSH_PORT  (host network remote / published bridge local)
+sshd on SSH_PORT (host networking — direct bind on lab IP, no Docker publish/DNAT)
         │
         ▼
 targets.py  →  UI / orchestrator / verify catalog
@@ -31,7 +31,6 @@ scripts/benchmark/checks/<id>.sh  →  prove root for real
 | `apply-misconfig.sh` | New profile arm, or reuse existing (`sudo:…`, `suid:…`, …) |
 | `Dockerfile` | Only if the profile needs a package not already installed |
 | `docker-compose.yml` | New service (`SSH_PORT` + `MISCONFIG`; rare `cap_add`) |
-| `docker-compose.local.yml` | Same service + `ports: ["NNNN:22"]` |
 | `ramigpt/benchmark/targets.py` | New `TARGETS` entry (source of truth for id/port/family) |
 | `ansible/benchmark/playbook.yml` | Append port to `bench_ssh_ports` |
 | `misconfigs.md` | Document the row under the right family |
@@ -44,7 +43,7 @@ Shared constants:
 |--|--|
 | User / pass | `lowpriv` / `password` |
 | Flag | `/root/flag.txt` → `FLAG{======RamiGPTi=====}` |
-| Port band | **2201–2299** (pick the next free port; see `targets.py`) |
+| Port band | **2170–2299** (pick a free port from `targets.py`; avoid blocked holes on the lab NIC) |
 
 ---
 
@@ -102,9 +101,9 @@ Rules:
 - Fail loudly (`exit 1`) if the binary/path is missing.
 - Prefer absolute paths in sudoers after `resolve_bin` / `readlink -f`.
 
-### Step B — Compose (both files)
+### Step B — Compose (`docker-compose.yml`)
 
-**`docker-compose.yml`** (Linux host network):
+Remote lab uses host networking (sshd binds `SSH_PORT` directly on the lab IP — no Docker publish/DNAT):
 
 ```yaml
   bench-<id>:
@@ -115,19 +114,6 @@ Rules:
       MISCONFIG: "<MISCONFIG>"
     # Only if setcap at start:
     # cap_add: ["SETFCAP"]
-```
-
-**`docker-compose.local.yml`** (Docker Desktop):
-
-```yaml
-  bench-<id>:
-    <<: *bench
-    container_name: ramigpt_bench_<id_underscored>
-    hostname: bench-<id>
-    environment:
-      SSH_PORT: "22"
-      MISCONFIG: "<MISCONFIG>"
-    ports: ["<port>:22"]
 ```
 
 Service name must match `targets.py` `service=`.
@@ -187,25 +173,22 @@ Regenerate catalog:
 python3 -m ramigpt.benchmark.verify --write-catalog
 ```
 
-### Step G — Build, deploy, prove
+### Step G — Deploy remotely, prove
 
 ```sh
-# Local (Mac/Desktop):
-docker compose -f docker/benchmark/docker-compose.local.yml up -d --build bench-<id>
+# Deploy via Ansible / UI (remote lab host), then:
 
-# Smoke SSH:
-sshpass -p password ssh -p <port> -o StrictHostKeyChecking=no lowpriv@127.0.0.1 'id'
+# Smoke SSH on the remote IP:
+sshpass -p password ssh -p <port> -o StrictHostKeyChecking=no lowpriv@<remote-ip> 'id'
 
 # Prove this target only:
-./scripts/benchmark/verify-misconfigs.sh 127.0.0.1 <id>
-# or remote lab:
-./scripts/benchmark/verify-misconfigs.sh 10.10.1.109 <id>
+./scripts/benchmark/verify-misconfigs.sh <remote-ip> <id>
 
 # Full suite (required before calling the addition done):
-./scripts/benchmark/verify-misconfigs.sh <host>
+./scripts/benchmark/verify-misconfigs.sh <remote-ip>
 ```
 
-UI: Benchmark → deploy → **Test targets (get root)** (same probes).
+UI: Benchmark → remote host → deploy → **Test targets (get root)** (same probes).
 
 **Done only when:** `expects_root` targets PASS; detect-only targets FLAG (not FAIL); no regressions on the rest of the suite.
 
@@ -244,7 +227,7 @@ assert_root_output "${out}"
 - World-writable `/etc/cron.d` or `/etc/crontab` as the LPE (ignored by modern cron).
 - Skipping the verify script (“BeRoot will find it” is not enough).
 - Reusing a port already listed in `targets.py`.
-- Changing only `docker-compose.yml` and forgetting `docker-compose.local.yml` / Ansible / `targets.py`.
+- Changing only `docker-compose.yml` and forgetting Ansible / `targets.py`.
 
 ---
 

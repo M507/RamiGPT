@@ -53,26 +53,27 @@ def register_benchmark_routes(app: Flask) -> None:
 
     @app.route("/api/benchmark/verify", methods=["POST"])
     def api_benchmark_verify_start():
-        """Run per-target root probes against already-deployed containers."""
+        """Run per-target root probes against already-deployed containers on the remote lab."""
         body = request.get_json(silent=True) or {}
-        mode = (body.get("mode") or "local").strip().lower()
         preset = load_remote_config()
-        if mode == "remote":
-            host = (
-                (body.get("host") or "").strip()
-                or (
-                    (body.get("remote") or {}).get("host")
-                    if isinstance(body.get("remote"), dict)
-                    else ""
-                )
-                or preset.get("host")
-                or ""
+        host = (
+            (body.get("host") or "").strip()
+            or (
+                (body.get("remote") or {}).get("host")
+                if isinstance(body.get("remote"), dict)
+                else ""
             )
-        else:
-            host = (body.get("host") or "").strip() or "127.0.0.1"
+            or preset.get("host")
+            or ""
+        )
         if not host:
-            return jsonify(ok=False, error="host is required (lab IP with benchmark SSH ports)"), 400
+            return jsonify(
+                ok=False,
+                error="host is required (remote lab IP with benchmark SSH ports)",
+            ), 400
         target_ids = body.get("target_ids", body.get("targets"))
+        if isinstance(target_ids, list) and len(target_ids) == 0:
+            return jsonify(ok=False, error="Select at least one benchmark target"), 400
         user = (body.get("username") or BENCH_USERNAME).strip() or BENCH_USERNAME
         password = body.get("password") if body.get("password") is not None else BENCH_PASSWORD
         if password == "":
@@ -107,7 +108,7 @@ def register_benchmark_routes(app: Flask) -> None:
             return jsonify(error="JSON body required"), 400
         body = request.get_json(silent=True) or {}
         preset = load_remote_config()
-        mode = (body.get("mode") or preset.get("mode") or "local").strip().lower()
+        mode = "remote"
         timeout = body.get("timeout_seconds", preset.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         remote = body.get("remote") or None
         tools = body.get("tools", preset.get("tools"))
