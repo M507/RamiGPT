@@ -152,6 +152,9 @@ PUBLIC_ENDPOINTS = frozenset({
     "api_benchmark_status",
     "api_benchmark_start",
     "api_benchmark_stop",
+    "api_benchmark_verify_start",
+    "api_benchmark_verify_status",
+    "api_benchmark_verify_stop",
 })
 
 

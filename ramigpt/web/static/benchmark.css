@@ -169,14 +169,20 @@
   font-size: 12px;
 }
 
-.bench-result-row.status-passed {
+.bench-result-row.status-passed,
+.bench-result-row.status-pass {
   border-color: var(--accent);
   box-shadow: var(--glow);
 }
 
 .bench-result-row.status-failed,
-.bench-result-row.status-error {
+.bench-result-row.status-error,
+.bench-result-row.status-fail {
   border-color: var(--danger);
+}
+
+.bench-result-row.status-flagged {
+  border-color: var(--warn, #d29922);
 }
 
 .bench-result-row.status-running {
@@ -188,8 +194,19 @@
   letter-spacing: 0.04em;
 }
 
-.bench-result-row.status-passed .bench-result-status {
+.bench-result-row.status-passed .bench-result-status,
+.bench-result-row.status-pass .bench-result-status {
   color: var(--info);
+  font-weight: 700;
+}
+
+.bench-result-row.status-flagged .bench-result-status {
+  color: var(--warn, #d29922);
+  font-weight: 700;
+}
+
+.bench-result-row.status-fail .bench-result-status {
+  color: var(--danger);
   font-weight: 700;
 }
 

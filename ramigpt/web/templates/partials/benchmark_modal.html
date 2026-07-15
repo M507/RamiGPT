@@ -9,9 +9,9 @@
 
     <div class="bench-body">
       <p class="muted small">
-        Deploys sudo-misconfig targets (vim, awk, curl, wget, find, less, nano, python, tar, env),
-        optionally runs selected <strong>tools</strong> first (BeRoot + AI), then Full AI until root.
-        Timeout covers tools + AI per target.
+        Deploys intentional LPE labs (sudo, SUID, writable paths, capabilities, Python hijack, NFS exports — see
+        <code>docker/benchmark/misconfigs.md</code>), optionally runs selected <strong>tools</strong> first
+        (BeRoot + AI), then Full AI until root. Timeout covers tools + AI per target.
       </p>
 
       <section class="bench-section">
@@ -21,7 +21,7 @@
             <input type="radio" name="bench-mode" value="local" checked>
             <span>
               <strong>Local</strong>
-              <small>docker compose up on this machine (ports 2203–2212)</small>
+              <small>docker compose up on this machine (ports 2203–2220)</small>
             </span>
           </label>
           <label class="bench-mode">
@@ -50,7 +50,7 @@
         <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0">
           <button type="button" class="btn btn-secondary" id="bench-test-remote">Test SSH access</button>
         </div>
-        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers use <code>lowpriv / password</code> on ports 2203–2212 after deploy.</p>
+        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers use <code>lowpriv / password</code> on ports 2203–2220 after deploy.</p>
       </section>
 
       <section class="bench-section">
@@ -88,7 +88,7 @@
         </div>
         <div class="bench-creds muted small">
           Target SSH: <code id="bench-cred-user">lowpriv</code> / <code id="bench-cred-pass">password</code>
-          · Ports: <code id="bench-cred-ports">2203–2212</code>
+          · Ports: <code id="bench-cred-ports">2203–2220</code>
         </div>
       </section>
 
@@ -105,6 +105,23 @@
           </div>
           <ul class="bench-target-list" id="bench-target-list"></ul>
         </div>
+      </section>
+
+      <section class="bench-section">
+        <h3>4. Sanity-check misconfigs</h3>
+        <p class="muted small">
+          After deploy, probes each selected target as <code>lowpriv</code> and confirms it can obtain root
+          (read <code>/root/flag.txt</code>). Detect-only labs (e.g. NFS exports) are flagged, not expected to root.
+          Same checks as <code>scripts/benchmark/verify-misconfigs.sh &lt;ip&gt;</code>.
+        </p>
+        <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0;gap:0.5rem">
+          <button type="button" class="btn btn-secondary" id="bench-verify-targets">
+            Test targets (get root)
+          </button>
+          <button type="button" class="btn btn-ghost" id="bench-verify-stop" disabled>Stop test</button>
+        </div>
+        <div class="bench-results" id="bench-verify-results" style="margin-top:0.75rem"></div>
+        <pre class="bench-log" id="bench-verify-log" style="max-height:160px"></pre>
       </section>
 
       <section class="bench-section">

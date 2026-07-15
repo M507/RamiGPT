@@ -1,165 +1,176 @@
 # Local / Docker Desktop (Mac/Windows): bridge publish.
-# Linux remote lab uses docker-compose.yml with network_mode: host (no DNAT issues).
+# Same image + MISCONFIG model as docker-compose.yml (Linux host network).
 # Credentials: lowpriv / password
-# Ports match ramigpt.benchmark.targets (2211–2212, 2203–2210).
+
+x-bench: &bench
+  image: ramigpt-bench-base:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment:
+    SSH_PORT: "22"
+  restart: unless-stopped
 
 services:
   bench-sudo-vim:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/vim"
-        BINARY_INSTALL_CMD: "vim"
-    image: ramigpt-bench-sudo-vim:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_vim
     hostname: bench-vim
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2211:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/vim"
+    ports: ["2211:22"]
 
   bench-sudo-awk:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/awk"
-        BINARY_INSTALL_CMD: "gawk"
-    image: ramigpt-bench-sudo-awk:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_awk
     hostname: bench-awk
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2212:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/awk"
+    ports: ["2212:22"]
 
   bench-sudo-curl:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/curl"
-        BINARY_INSTALL_CMD: "curl"
-    image: ramigpt-bench-sudo-curl:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_curl
     hostname: bench-curl
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2203:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/curl"
+    ports: ["2203:22"]
 
   bench-sudo-wget:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/wget"
-        BINARY_INSTALL_CMD: "wget"
-    image: ramigpt-bench-sudo-wget:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_wget
     hostname: bench-wget
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2204:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/wget"
+    ports: ["2204:22"]
 
   bench-sudo-find:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/find"
-        BINARY_INSTALL_CMD: "findutils"
-    image: ramigpt-bench-sudo-find:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_find
     hostname: bench-find
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2205:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/find"
+    ports: ["2205:22"]
 
   bench-sudo-less:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/less"
-        BINARY_INSTALL_CMD: "less"
-    image: ramigpt-bench-sudo-less:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_less
     hostname: bench-less
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2206:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/less"
+    ports: ["2206:22"]
 
   bench-sudo-nano:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/nano"
-        BINARY_INSTALL_CMD: "nano"
-    image: ramigpt-bench-sudo-nano:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_nano
     hostname: bench-nano
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2207:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/nano"
+    ports: ["2207:22"]
 
   bench-sudo-python:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/python3"
-        BINARY_INSTALL_CMD: "python3"
-    image: ramigpt-bench-sudo-python:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_python
     hostname: bench-python
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2208:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/python3"
+    ports: ["2208:22"]
 
   bench-sudo-tar:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/tar"
-        BINARY_INSTALL_CMD: "tar"
-    image: ramigpt-bench-sudo-tar:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_tar
     hostname: bench-tar
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2209:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/tar"
+    ports: ["2209:22"]
 
   bench-sudo-env:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/env"
-        BINARY_INSTALL_CMD: "coreutils"
-    image: ramigpt-bench-sudo-env:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_env
     hostname: bench-env
     environment:
       SSH_PORT: "22"
-    ports:
-      - "2210:22"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/env"
+    ports: ["2210:22"]
+
+  bench-sudo-ld-preload:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ld_preload
+    hostname: bench-ld-preload
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "sudo-ld-preload:/usr/bin/find"
+    ports: ["2213:22"]
+
+  bench-suid-find:
+    <<: *bench
+    container_name: ramigpt_bench_suid_find
+    hostname: bench-suid-find
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "suid:find"
+    ports: ["2214:22"]
+
+  bench-suid-python:
+    <<: *bench
+    container_name: ramigpt_bench_suid_python
+    hostname: bench-suid-python
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "suid:python3"
+    ports: ["2215:22"]
+
+  bench-writable-crontab:
+    <<: *bench
+    container_name: ramigpt_bench_writable_crontab
+    hostname: bench-writable-cron
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:crontab"
+    ports: ["2216:22"]
+
+  bench-writable-passwd:
+    <<: *bench
+    container_name: ramigpt_bench_writable_passwd
+    hostname: bench-writable-passwd
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "writable:passwd"
+    ports: ["2217:22"]
+
+  bench-cap-python:
+    <<: *bench
+    container_name: ramigpt_bench_cap_python
+    hostname: bench-cap-python
+    cap_add: ["SETFCAP"]
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "cap-setuid:python3"
+    ports: ["2218:22"]
+
+  bench-python-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_python_hijack
+    hostname: bench-python-hijack
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "python-hijack"
+    ports: ["2219:22"]
+
+  bench-nfs-exports:
+    <<: *bench
+    container_name: ramigpt_bench_nfs_exports
+    hostname: bench-nfs-exports
+    environment:
+      SSH_PORT: "22"
+      MISCONFIG: "nfs-exports"
+    ports: ["2220:22"]

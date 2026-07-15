@@ -11,6 +11,7 @@
   vars:
     bench_remote_dir: "{{ ansible_env.HOME | default('/root') }}/ramigpt-benchmark"
     bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
+    # Keep in sync with ramigpt/benchmark/targets.py ports (2203–2220).
     bench_ssh_ports:
       - 2211
       - 2212
@@ -22,6 +23,14 @@
       - 2208
       - 2209
       - 2210
+      - 2213
+      - 2214
+      - 2215
+      - 2216
+      - 2217
+      - 2218
+      - 2219
+      - 2220
     bench_wait_timeout: 120
 
   tasks:
@@ -109,11 +118,15 @@
         - "{{ bench_compose_src }}/docker-compose.yml"
         - "{{ bench_compose_src }}/Dockerfile"
         - "{{ bench_compose_src }}/entrypoint.sh"
+        - "{{ bench_compose_src }}/apply-misconfig.sh"
 
-    - name: Ensure entrypoint is executable
+    - name: Ensure bench scripts are executable
       ansible.builtin.file:
-        path: "{{ bench_remote_dir }}/entrypoint.sh"
+        path: "{{ bench_remote_dir }}/{{ item }}"
         mode: "0755"
+      loop:
+        - entrypoint.sh
+        - apply-misconfig.sh
 
     - name: Tear down previous benchmark containers (bridge → host network)
       ansible.builtin.command:

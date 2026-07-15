@@ -147,12 +147,14 @@
         const checked = preserve
           ? prev[t.id] !== false && (prev[t.id] != null ? prev[t.id] : defaultIds.has(t.id))
           : defaultIds.has(t.id);
+        const primitive = t.primitive || t.sudo_binary || "";
+        const family = t.family || "misc";
         return `<li>
           <label class="bench-tool-check">
             <input type="checkbox" data-target-id="${escapeHtml(t.id)}" ${checked ? "checked" : ""}>
             <span>
               <strong>${escapeHtml(t.name)}</strong>
-              <small>SSH :${t.port} · sudo ${escapeHtml(t.sudo_binary)} — ${escapeHtml(t.description || "")}</small>
+              <small>SSH :${t.port} · ${escapeHtml(family)} · ${escapeHtml(primitive)} — ${escapeHtml(t.description || "")}</small>
             </span>
           </label>
         </li>`;
@@ -386,6 +388,95 @@
     }
   }
 
+  function verifyHost() {
+    if (mode() === "remote") {
+      return ($("bench-remote-host").value || "").trim() || "10.10.1.109";
+    }
+    return "127.0.0.1";
+  }
+
+  function renderVerify(run) {
+    const results = $("bench-verify-results");
+    const logEl = $("bench-verify-log");
+    const stopBtn = $("bench-verify-stop");
+    const startBtn = $("bench-verify-targets");
+    if (logEl) logEl.textContent = (run && run.log) || "";
+    if (stopBtn) stopBtn.disabled = !(run && run.running);
+    if (startBtn) startBtn.disabled = !!(run && run.running);
+    if (!results) return;
+    if (!run || !(run.results || []).length) {
+      results.innerHTML = run && run.running ? `<div class="muted small">Testing…</div>` : "";
+      return;
+    }
+    results.innerHTML = (run.results || [])
+      .map((r) => {
+        const klass = r.status || "unknown";
+        return `<div class="bench-result-row status-${escapeHtml(klass)}">
+          <span class="bench-result-name">${escapeHtml(r.id)} <span class="muted">:${r.port}</span></span>
+          <span class="bench-result-status">${escapeHtml(klass)}</span>
+          <span class="bench-result-meta muted">${escapeHtml((r.detail || "").split("\n")[0])}</span>
+        </div>`;
+      })
+      .join("");
+    if (!run.running && run.summary) {
+      const s = run.summary;
+      const fail = (s.failed_ids || []).join(", ") || "none";
+      const flagged = (s.flagged_ids || []).join(", ") || "none";
+      setStatus(
+        `Verify done — pass=${s.pass || 0} fail=${s.fail || 0} flagged=${s.flagged_no_root || 0}. Failed: ${fail}. Flagged: ${flagged}`,
+        (s.fail || 0) > 0
+      );
+    }
+  }
+
+  let verifyPoll = null;
+  async function refreshVerify() {
+    try {
+      const data = await api("/api/benchmark/verify/status");
+      renderVerify(data.run);
+      if (data.running) {
+        if (!verifyPoll) verifyPoll = setInterval(refreshVerify, 1500);
+      } else if (verifyPoll) {
+        clearInterval(verifyPoll);
+        verifyPoll = null;
+      }
+    } catch (err) {
+      /* ignore poll errors while modal closed */
+    }
+  }
+
+  async function startVerify() {
+    const targetIds = selectedTargetIds();
+    if (!targetIds.length) {
+      setStatus("Select at least one target to test.", true);
+      return;
+    }
+    setStatus(`Testing ${targetIds.length} target(s) on ${verifyHost()}…`);
+    try {
+      await api("/api/benchmark/verify", {
+        method: "POST",
+        body: {
+          mode: mode(),
+          host: verifyHost(),
+          target_ids: targetIds,
+        },
+      });
+      await refreshVerify();
+      if (!verifyPoll) verifyPoll = setInterval(refreshVerify, 1500);
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  async function stopVerify() {
+    try {
+      await api("/api/benchmark/verify/stop", { method: "POST", body: {} });
+      await refreshVerify();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -437,11 +528,15 @@
     const cleanBtn = $("bench-clean-logs");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
+    const verifyBtn = $("bench-verify-targets");
+    const verifyStop = $("bench-verify-stop");
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
+    if (verifyBtn) verifyBtn.addEventListener("click", startVerify);
+    if (verifyStop) verifyStop.addEventListener("click", stopVerify);
   }
 
   window.BenchmarkUI = { open: openModal, close: closeModal, refresh };

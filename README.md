@@ -164,25 +164,25 @@ RamiGPT can spin up intentionally misconfigured SSH targets and run **Full AI** 
 ### Targets (Docker Compose)
 
 ```sh
+# Linux lab (host network):
 docker compose -f docker/benchmark/docker-compose.yml up -d --build
+
+# Docker Desktop (bridge publish):
+docker compose -f docker/benchmark/docker-compose.local.yml up -d --build
 ```
 
-| Container | SSH port | Misconfiguration | Creds |
-|-----------|----------|------------------|-------|
-| `bench-sudo-vim` | 2211 | `sudo vim` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-awk` | 2212 | `sudo awk` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-curl` | 2203 | `sudo curl` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-wget` | 2204 | `sudo wget` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-find` | 2205 | `sudo find` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-less` | 2206 | `sudo less` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-nano` | 2207 | `sudo nano` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-python` | 2208 | `sudo python3` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-tar` | 2209 | `sudo tar` (NOPASSWD) | `lowpriv` / `password` |
-| `bench-sudo-env` | 2210 | `sudo env` (NOPASSWD) | `lowpriv` / `password` |
+One image (`ramigpt-bench-base`) for all labs; each service only sets `SSH_PORT` + `MISCONFIG` (see `docker/benchmark/apply-misconfig.sh`). Full inventory (sudo, SUID, writable paths, capabilities, Python hijack, NFS exports) is in [`docker/benchmark/misconfigs.md`](docker/benchmark/misconfigs.md) and `ramigpt/benchmark/targets.py`. Ports **2203–2220** (band reserved **2201–2299**). Creds: `lowpriv` / `password`.
 
-All sudo targets share one Dockerfile (`docker/benchmark/Dockerfile`); compose passes `BINARY_PATH` / `BINARY_INSTALL_CMD` per service. Remote deploy uses host networking (`docker-compose.yml`); local Docker Desktop uses bridge publish (`docker-compose.local.yml`).
+After deploy, confirm each target can obtain root:
 
-Reserved SSH port range for future suites: **2201–2299**.
+```sh
+./scripts/benchmark/verify-misconfigs.sh 10.10.1.109
+# or: python3 -m ramigpt.benchmark.verify 10.10.1.109
+```
+
+UI Benchmark modal → **Test targets (get root)** runs the same probes.
+
+Remote deploy uses host networking (`docker-compose.yml`); local Docker Desktop uses bridge publish (`docker-compose.local.yml`).
 
 ### From the UI
 
@@ -199,7 +199,7 @@ Reserved SSH port range for future suites: **2201–2299**.
 ansible-playbook -i ansible/benchmark/inventory.example.ini ansible/benchmark/playbook.yml
 ```
 
-Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies ports 2201–2210 before Full AI starts.
+Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies suite SSH ports before Full AI starts.
 
 Requires `ansible-core` (installed via `requirements.txt`).
 
@@ -226,7 +226,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `docs/` | Screenshots and documentation assets |
 | `tests/` | Automated tests |
 | `ramigpt/benchmark/` | Benchmark orchestrator (local/remote deploy + Full AI runs) |
-| `docker/benchmark/` | SSH targets with sudo GTFOBins misconfigs (ports 2201+) |
+| `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2201+) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
 | `data/` | Runtime logs and sessions (gitignored) |
 | `data/sessions/hosts/` | One JSON file per saved SSH session/host |

@@ -1,147 +1,149 @@
-# RamiGPT privilege-escalation benchmark targets (sudo misconfigurations).
-# One Dockerfile; each service builds with different BINARY_PATH / BINARY_INSTALL_CMD.
-# Host networking: sshd listens on SSH_PORT on the lab host directly (no Docker DNAT).
-# Credentials (all targets): lowpriv / password
-# SSH ports: 2203–2210 plus 2211–2212 (2201–2202 filtered on some lab networks).
-# Range reserved through 2299 for future suites.
+# RamiGPT privilege-escalation lab targets.
+# One image (ramigpt-bench-base); each service only changes SSH_PORT + MISCONFIG.
+# Host networking: sshd binds SSH_PORT on the lab host (no Docker DNAT).
+# Credentials: lowpriv / password
+# Ports: 2203–2220 (+ 2211–2212); reserve 2201–2299 for the suite.
+
+x-bench: &bench
+  image: ramigpt-bench-base:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+  network_mode: host
+  restart: unless-stopped
 
 services:
+  # ----- Family: sudo (NOPASSWD GTFOBins) -----
   bench-sudo-vim:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/vim"
-        BINARY_INSTALL_CMD: "vim"
-    image: ramigpt-bench-sudo-vim:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_vim
-    network_mode: host
     environment:
       SSH_PORT: "2211"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/vim"
 
   bench-sudo-awk:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/awk"
-        BINARY_INSTALL_CMD: "gawk"
-    image: ramigpt-bench-sudo-awk:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_awk
-    network_mode: host
     environment:
       SSH_PORT: "2212"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/awk"
 
   bench-sudo-curl:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/curl"
-        BINARY_INSTALL_CMD: "curl"
-    image: ramigpt-bench-sudo-curl:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_curl
-    network_mode: host
     environment:
       SSH_PORT: "2203"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/curl"
 
   bench-sudo-wget:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/wget"
-        BINARY_INSTALL_CMD: "wget"
-    image: ramigpt-bench-sudo-wget:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_wget
-    network_mode: host
     environment:
       SSH_PORT: "2204"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/wget"
 
   bench-sudo-find:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/find"
-        BINARY_INSTALL_CMD: "findutils"
-    image: ramigpt-bench-sudo-find:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_find
-    network_mode: host
     environment:
       SSH_PORT: "2205"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/find"
 
   bench-sudo-less:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/less"
-        BINARY_INSTALL_CMD: "less"
-    image: ramigpt-bench-sudo-less:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_less
-    network_mode: host
     environment:
       SSH_PORT: "2206"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/less"
 
   bench-sudo-nano:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/nano"
-        BINARY_INSTALL_CMD: "nano"
-    image: ramigpt-bench-sudo-nano:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_nano
-    network_mode: host
     environment:
       SSH_PORT: "2207"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/nano"
 
   bench-sudo-python:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/python3"
-        BINARY_INSTALL_CMD: "python3"
-    image: ramigpt-bench-sudo-python:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_python
-    network_mode: host
     environment:
       SSH_PORT: "2208"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/python3"
 
   bench-sudo-tar:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/tar"
-        BINARY_INSTALL_CMD: "tar"
-    image: ramigpt-bench-sudo-tar:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_tar
-    network_mode: host
     environment:
       SSH_PORT: "2209"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/tar"
 
   bench-sudo-env:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BINARY_PATH: "/usr/bin/env"
-        BINARY_INSTALL_CMD: "coreutils"
-    image: ramigpt-bench-sudo-env:latest
+    <<: *bench
     container_name: ramigpt_bench_sudo_env
-    network_mode: host
     environment:
       SSH_PORT: "2210"
-    restart: unless-stopped
+      MISCONFIG: "sudo:/usr/bin/env"
+
+  # ----- Family: sudo advanced (LD_PRELOAD) -----
+  bench-sudo-ld-preload:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ld_preload
+    environment:
+      SSH_PORT: "2213"
+      MISCONFIG: "sudo-ld-preload:/usr/bin/find"
+
+  # ----- Family: SUID -----
+  bench-suid-find:
+    <<: *bench
+    container_name: ramigpt_bench_suid_find
+    environment:
+      SSH_PORT: "2214"
+      MISCONFIG: "suid:find"
+
+  bench-suid-python:
+    <<: *bench
+    container_name: ramigpt_bench_suid_python
+    environment:
+      SSH_PORT: "2215"
+      MISCONFIG: "suid:python3"
+
+  # ----- Family: writable sensitive paths -----
+  bench-writable-crontab:
+    <<: *bench
+    container_name: ramigpt_bench_writable_crontab
+    environment:
+      SSH_PORT: "2216"
+      MISCONFIG: "writable:crontab"
+
+  bench-writable-passwd:
+    <<: *bench
+    container_name: ramigpt_bench_writable_passwd
+    environment:
+      SSH_PORT: "2217"
+      MISCONFIG: "writable:passwd"
+
+  # ----- Family: capabilities -----
+  bench-cap-python:
+    <<: *bench
+    container_name: ramigpt_bench_cap_python
+    # setcap in apply-misconfig needs SETFCAP
+    cap_add: ["SETFCAP"]
+    environment:
+      SSH_PORT: "2218"
+      MISCONFIG: "cap-setuid:python3"
+
+  # ----- Family: python library hijack -----
+  bench-python-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_python_hijack
+    environment:
+      SSH_PORT: "2219"
+      MISCONFIG: "python-hijack"
+
+  # ----- Family: NFS exports (BeRoot detect-only) -----
+  bench-nfs-exports:
+    <<: *bench
+    container_name: ramigpt_bench_nfs_exports
+    environment:
+      SSH_PORT: "2220"
+      MISCONFIG: "nfs-exports"
