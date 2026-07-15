@@ -249,7 +249,7 @@
       .map((id) => byId[id])
       .filter(Boolean)
       .filter(matchesFilter)
-      .slice(0, 8)
+      .slice(0, 3)
       .forEach((s) => recent.appendChild(renderSessionItem(s)));
 
     (state.inventory.groups || []).forEach((group) => {
@@ -296,7 +296,7 @@
     (state.inventory.recent_ids || [])
       .map((id) => byId[id])
       .filter(Boolean)
-      .slice(0, 6)
+      .slice(0, 3)
       .forEach((s) => {
         const li = document.createElement("li");
         li.textContent = `${s.name} · ${s.host}:${s.port}`;

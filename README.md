@@ -166,7 +166,7 @@ docker compose -f docker/benchmark/docker-compose.yml up -d --build
 | `bench-sudo-tar` | 2209 | `sudo tar` (NOPASSWD) | `lowpriv` / `password` |
 | `bench-sudo-env` | 2210 | `sudo env` (NOPASSWD) | `lowpriv` / `password` |
 
-All sudo targets share one Dockerfile (`docker/benchmark/Dockerfile`); compose passes `BINARY_PATH` / `BINARY_INSTALL_CMD` per service and uses host networking so each `sshd` listens on 2201–2210 directly on the lab host.
+All sudo targets share one Dockerfile (`docker/benchmark/Dockerfile`); compose passes `BINARY_PATH` / `BINARY_INSTALL_CMD` per service. Remote deploy uses host networking (`docker-compose.yml`); local Docker Desktop uses bridge publish (`docker-compose.local.yml`).
 
 Reserved SSH port range for future suites: **2201–2299**.
 

@@ -464,13 +464,15 @@ def get_or_create_ssh_shell(session_id, create_new=False):
         return ssh_shells[session_id]
     elif create_new:
         try:
-            # SSH connection setup (BeRoot is NOT uploaded here — Run tool does that)
+            # ignore_config: don't load ~/.ssh/known_hosts — lab/docker targets
+            # regenerate host keys often (esp. host-network benchmarks on one IP).
             ssh_conn = ssh(
                 user=session.get('username'),
                 host=session.get('server'),
                 port=session.get('port'),
                 password=session.get('password'),
                 timeout=10,
+                ignore_config=True,
             )
             ssh_conn.set_env('TERM', '')
 
@@ -1782,6 +1784,7 @@ def _reconnect_shell_for_session(session_id, session_data, slog) -> bool:
                 port=int(session_data.get("port") or 22),
                 password=session_data.get("password"),
                 timeout=10,
+                ignore_config=True,
             )
             ssh_conn.set_env("TERM", "")
             ssh_ssh_conns[session_id] = ssh_conn

@@ -24,8 +24,9 @@ ssh -p 2211 lowpriv@<remote-host>      # after Ansible deploy
 
 All services share one Dockerfile (`docker/benchmark/Dockerfile`) parameterized by
 `BINARY_PATH` and `BINARY_INSTALL_CMD` in `docker-compose.yml`. Containers use
-`network_mode: host` so `sshd` listens on ports 2201–2210 on the lab host directly
-(no Docker port-publish / DNAT).
+`network_mode: host` so `sshd` listens on the lab host directly
+(no Docker port-publish / DNAT). Vim/awk use 2211–2212 because 2201–2202 are
+filtered on some lab networks.
 
 | Service | Host port | Misconfiguration |
 |---------|-----------|------------------|
