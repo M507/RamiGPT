@@ -12,8 +12,16 @@
     bench_remote_dir: "{{ ansible_env.HOME | default('/root') }}/ramigpt-benchmark"
     bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
     bench_ssh_ports:
-      - 2201
-      - 2202
+      - 2211
+      - 2212
+      - 2203
+      - 2204
+      - 2205
+      - 2206
+      - 2207
+      - 2208
+      - 2209
+      - 2210
     bench_wait_timeout: 120
 
   tasks:
@@ -99,8 +107,7 @@
         mode: preserve
       loop:
         - "{{ bench_compose_src }}/docker-compose.yml"
-        - "{{ bench_compose_src }}/Dockerfile.sudo-vim"
-        - "{{ bench_compose_src }}/Dockerfile.sudo-awk"
+        - "{{ bench_compose_src }}/Dockerfile"
         - "{{ bench_compose_src }}/entrypoint.sh"
 
     - name: Ensure entrypoint is executable
@@ -108,14 +115,26 @@
         path: "{{ bench_remote_dir }}/entrypoint.sh"
         mode: "0755"
 
-    - name: Build and start benchmark containers
-      # Absolute paths: snap-hosted Docker cannot see /opt and mishandles relative -f paths.
+    - name: Tear down previous benchmark containers (bridge → host network)
       ansible.builtin.command:
         cmd: >-
           docker compose
           -f {{ bench_remote_dir }}/docker-compose.yml
           --project-directory {{ bench_remote_dir }}
-          up -d --build
+          down --remove-orphans
+      register: compose_down
+      changed_when: compose_down.rc == 0
+      failed_when: false
+
+    - name: Build and start benchmark containers
+      # Absolute paths: snap-hosted Docker cannot see /opt and mishandles relative -f paths.
+      # Host networking: sshd binds SSH_PORT on the lab host (no Docker DNAT).
+      ansible.builtin.command:
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          up -d --build --force-recreate
       register: compose_up
       changed_when: >-
         'Started' in (compose_up.stdout | default(''))

@@ -9,8 +9,9 @@
 
     <div class="bench-body">
       <p class="muted small">
-        Deploys sudo-misconfig targets (vim / awk), optionally runs selected <strong>tools</strong>
-        first (BeRoot + AI), then Full AI until root. Timeout covers tools + AI per target.
+        Deploys sudo-misconfig targets (vim, awk, curl, wget, find, less, nano, python, tar, env),
+        optionally runs selected <strong>tools</strong> first (BeRoot + AI), then Full AI until root.
+        Timeout covers tools + AI per target.
       </p>
 
       <section class="bench-section">
@@ -20,7 +21,7 @@
             <input type="radio" name="bench-mode" value="local" checked>
             <span>
               <strong>Local</strong>
-              <small>docker compose up on this machine (ports 2201–2202)</small>
+              <small>docker compose up on this machine (ports 2203–2212)</small>
             </span>
           </label>
           <label class="bench-mode">
@@ -49,7 +50,7 @@
         <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0">
           <button type="button" class="btn btn-secondary" id="bench-test-remote">Test SSH access</button>
         </div>
-        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers use <code>zeus / benchmark</code> on ports 2201–2202 after deploy.</p>
+        <p class="muted small">Requires <code>ansible-core</code> on the RamiGPT host. Benchmark containers use <code>lowpriv / password</code> on ports 2203–2212 after deploy.</p>
       </section>
 
       <section class="bench-section">
@@ -86,14 +87,24 @@
           </div>
         </div>
         <div class="bench-creds muted small">
-          Target SSH: <code id="bench-cred-user">zeus</code> / <code id="bench-cred-pass">benchmark</code>
-          · Ports: <code id="bench-cred-ports">2201, 2202</code>
+          Target SSH: <code id="bench-cred-user">lowpriv</code> / <code id="bench-cred-pass">password</code>
+          · Ports: <code id="bench-cred-ports">2203–2212</code>
         </div>
       </section>
 
       <section class="bench-section">
         <h3>3. Targets</h3>
-        <ul class="bench-target-list" id="bench-target-list"></ul>
+        <div class="bench-targets">
+          <div class="bench-tools-head">
+            <strong>Suite targets</strong>
+            <span class="muted small">Checked targets run. All selected by default.</span>
+            <span class="bench-target-actions">
+              <button type="button" class="btn-link" id="bench-targets-all">Select all</button>
+              <button type="button" class="btn-link" id="bench-targets-none">None</button>
+            </span>
+          </div>
+          <ul class="bench-target-list" id="bench-target-list"></ul>
+        </div>
       </section>
 
       <section class="bench-section">

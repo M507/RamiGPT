@@ -116,26 +116,54 @@
     return out;
   }
 
+  function selectedTargetIds() {
+    return Array.from(document.querySelectorAll("#bench-target-list input[data-target-id]"))
+      .filter((el) => el.checked)
+      .map((el) => el.getAttribute("data-target-id"))
+      .filter(Boolean);
+  }
+
+  function setAllTargets(checked) {
+    const list = $("bench-target-list");
+    if (!list) return;
+    list.dataset.userTouched = "1";
+    list.querySelectorAll("input[data-target-id]").forEach((el) => {
+      el.checked = !!checked;
+    });
+  }
+
   function renderTargets(targets, defaults) {
     const list = $("bench-target-list");
     if (!list) return;
+    const prev = {};
+    list.querySelectorAll("input[data-target-id]").forEach((el) => {
+      prev[el.getAttribute("data-target-id")] = !!el.checked;
+    });
+    const preserve = !!list.dataset.userTouched;
+    const defaultIds = new Set((defaults && defaults.target_ids) || (targets || []).map((t) => t.id));
+
     list.innerHTML = (targets || [])
-      .map(
-        (t) => `<li>
-          <strong>${escapeHtml(t.name)}</strong>
-          <span class="muted">SSH :${t.port} · sudo ${escapeHtml(t.sudo_binary)}</span>
-          <div class="muted small">${escapeHtml(t.description || "")}</div>
-        </li>`
-      )
+      .map((t) => {
+        const checked = preserve
+          ? prev[t.id] !== false && (prev[t.id] != null ? prev[t.id] : defaultIds.has(t.id))
+          : defaultIds.has(t.id);
+        return `<li>
+          <label class="bench-tool-check">
+            <input type="checkbox" data-target-id="${escapeHtml(t.id)}" ${checked ? "checked" : ""}>
+            <span>
+              <strong>${escapeHtml(t.name)}</strong>
+              <small>SSH :${t.port} · sudo ${escapeHtml(t.sudo_binary)} — ${escapeHtml(t.description || "")}</small>
+            </span>
+          </label>
+        </li>`;
+      })
       .join("");
+
     if (defaults) {
-      if ($("bench-cred-user")) $("bench-cred-user").textContent = defaults.username || "zeus";
-      if ($("bench-cred-pass")) $("bench-cred-pass").textContent = defaults.password || "benchmark";
+      if ($("bench-cred-user")) $("bench-cred-user").textContent = defaults.username || "lowpriv";
+      if ($("bench-cred-pass")) $("bench-cred-pass").textContent = defaults.password || "password";
       if ($("bench-cred-ports"))
         $("bench-cred-ports").textContent = (defaults.ports || []).join(", ");
-      if ($("bench-timeout") && !document.activeElement?.id?.startsWith("bench-")) {
-        // only set default when idle field not focused
-      }
     }
   }
 
@@ -211,7 +239,14 @@
 
   async function refresh() {
     const data = await api("/api/benchmark/status");
-    renderTargets(data.targets, data.defaults);
+    if (!$("bench-target-list")?.dataset.userTouched) {
+      renderTargets(data.targets, data.defaults);
+    } else if (data.defaults) {
+      if ($("bench-cred-user")) $("bench-cred-user").textContent = data.defaults.username || "lowpriv";
+      if ($("bench-cred-pass")) $("bench-cred-pass").textContent = data.defaults.password || "password";
+      if ($("bench-cred-ports"))
+        $("bench-cred-ports").textContent = (data.defaults.ports || []).join(", ");
+    }
     if (!$("bench-tool-list")?.dataset.userTouched) {
       renderTools(data.available_tools, data.defaults);
     }
@@ -288,11 +323,17 @@
 
   async function startBenchmark() {
     setStatus("");
+    const targetIds = selectedTargetIds();
+    if (!targetIds.length) {
+      setStatus("Select at least one target to run.", true);
+      return;
+    }
     const payload = {
       mode: mode(),
       timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
       repetitions: Math.max(1, Math.min(50, parseInt($("bench-runs")?.value, 10) || 1)),
       tools: selectedTools(),
+      target_ids: targetIds,
     };
     if (payload.mode === "remote") {
       payload.remote = {
@@ -306,7 +347,7 @@
     try {
       $("bench-start").disabled = true;
       await api("/api/benchmark/start", { method: "POST", body: payload });
-      setStatus("Benchmark started…");
+      setStatus(`Benchmark started (${targetIds.length} target${targetIds.length === 1 ? "" : "s"})…`);
       await refresh();
       if (window.Workspace && typeof window.Workspace.refreshInventory === "function") {
         window.Workspace.refreshInventory();
@@ -381,6 +422,16 @@
         toolList.dataset.userTouched = "1";
       });
     }
+    const targetList = $("bench-target-list");
+    if (targetList) {
+      targetList.addEventListener("change", () => {
+        targetList.dataset.userTouched = "1";
+      });
+    }
+    const selectAll = $("bench-targets-all");
+    const selectNone = $("bench-targets-none");
+    if (selectAll) selectAll.addEventListener("click", () => setAllTargets(true));
+    if (selectNone) selectNone.addEventListener("click", () => setAllTargets(false));
     const start = $("bench-start");
     const stop = $("bench-stop");
     const cleanBtn = $("bench-clean-logs");

@@ -155,8 +155,18 @@ docker compose -f docker/benchmark/docker-compose.yml up -d --build
 
 | Container | SSH port | Misconfiguration | Creds |
 |-----------|----------|------------------|-------|
-| `bench-sudo-vim` | 2201 | `sudo vim` (NOPASSWD) | `zeus` / `benchmark` |
-| `bench-sudo-awk` | 2202 | `sudo awk` (NOPASSWD) | `zeus` / `benchmark` |
+| `bench-sudo-vim` | 2211 | `sudo vim` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-awk` | 2212 | `sudo awk` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-curl` | 2203 | `sudo curl` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-wget` | 2204 | `sudo wget` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-find` | 2205 | `sudo find` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-less` | 2206 | `sudo less` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-nano` | 2207 | `sudo nano` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-python` | 2208 | `sudo python3` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-tar` | 2209 | `sudo tar` (NOPASSWD) | `lowpriv` / `password` |
+| `bench-sudo-env` | 2210 | `sudo env` (NOPASSWD) | `lowpriv` / `password` |
+
+All sudo targets share one Dockerfile (`docker/benchmark/Dockerfile`); compose passes `BINARY_PATH` / `BINARY_INSTALL_CMD` per service and uses host networking so each `sshd` listens on 2201–2210 directly on the lab host.
 
 Reserved SSH port range for future suites: **2201–2299**.
 
@@ -175,7 +185,7 @@ Reserved SSH port range for future suites: **2201–2299**.
 ansible-playbook -i ansible/benchmark/inventory.example.ini ansible/benchmark/playbook.yml
 ```
 
-Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies ports 2201/2202 before Full AI starts.
+Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies ports 2201–2210 before Full AI starts.
 
 Requires `ansible-core` (installed via `requirements.txt`).
 
@@ -202,7 +212,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `docs/` | Screenshots and documentation assets |
 | `tests/` | Automated tests |
 | `ramigpt/benchmark/` | Benchmark orchestrator (local/remote deploy + Full AI runs) |
-| `docker/benchmark/` | SSH targets with sudo vim / awk misconfigs (ports 2201+) |
+| `docker/benchmark/` | SSH targets with sudo GTFOBins misconfigs (ports 2201+) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
 | `data/` | Runtime logs and sessions (gitignored) |
 | `data/sessions/hosts/` | One JSON file per saved SSH session/host |

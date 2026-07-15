@@ -29,6 +29,7 @@ from ramigpt.benchmark.targets import (
     DEFAULT_TIMEOUT_SECONDS,
     TARGETS,
     BenchmarkTarget,
+    resolve_targets,
 )
 from ramigpt.benchmark.results import write_batch_summary, write_benchmark_result
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
@@ -220,6 +221,7 @@ def get_status() -> Dict[str, Any]:
                 "username": BENCH_USERNAME,
                 "password": BENCH_PASSWORD,
                 "ports": [t.port for t in TARGETS],
+                "target_ids": [t.id for t in TARGETS],
                 "tools": remote_cfg.get("tools") or default_tools(),
             },
             "available_tools": AVAILABLE_TOOLS,
@@ -603,10 +605,18 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
 run_batch_dir: Optional[str] = None
 
 
+def _selected_suite_targets(run: BenchmarkRun) -> List[BenchmarkTarget]:
+    """Targets included in this run (subset of TARGETS)."""
+    wanted = {item.target_id for item in run.targets}
+    return [t for t in TARGETS if t.id in wanted]
+
+
 def _worker(run: BenchmarkRun) -> None:
     try:
         def log_fn(msg: str) -> None:
             _log(run, msg)
+
+        selected = _selected_suite_targets(run)
 
         # Resolve where targets should live before deploying anything.
         if run.mode == "local":
@@ -616,12 +626,16 @@ def _worker(run: BenchmarkRun) -> None:
             expected_host = str(run.remote["host"])
 
         run.phase = "deploying"
-        _log(run, f"Checking whether benchmark ports are already up on {expected_host}")
-        if all_target_ports_open(expected_host, log=log_fn):
+        _log(
+            run,
+            f"Checking whether selected target ports are already up on {expected_host} "
+            f"({len(selected)}/{len(TARGETS)})",
+        )
+        if all_target_ports_open(expected_host, log=log_fn, targets=selected):
             run.host = expected_host
             _log(
                 run,
-                f"All target ports open on {run.host} — skipping "
+                f"Selected target ports open on {run.host} — skipping "
                 f"{'Ansible' if run.mode == 'remote' else 'docker compose'} deploy",
             )
         else:
@@ -639,13 +653,13 @@ def _worker(run: BenchmarkRun) -> None:
                     ),
                     log=log_fn,
                 )
-            ports = check_target_ports(run.host, log=log_fn)
+            ports = check_target_ports(run.host, log=log_fn, targets=selected)
             if not all(p["open"] for p in ports):
                 missing = [f"{p['port']}" for p in ports if not p["open"]]
                 raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
 
         run.phase = "running"
-        target_by_id = {t.id: t for t in TARGETS}
+        target_by_id = {t.id: t for t in selected}
         for item in run.targets:
             if run.stop_requested:
                 item.status = "skipped"
@@ -710,6 +724,7 @@ def _make_run(
     batch_id: str,
     repetition: int,
     repetitions: int,
+    suite_targets: List[BenchmarkTarget],
 ) -> BenchmarkRun:
     settings = get_settings()
     run = BenchmarkRun(
@@ -724,7 +739,7 @@ def _make_run(
                 name=t.name,
                 port=t.port,
             )
-            for t in TARGETS
+            for t in suite_targets
         ],
         batch_id=batch_id,
         repetition=repetition,
@@ -738,7 +753,7 @@ def _make_run(
         meta={
             "timeout_seconds": run.timeout_seconds,
             "tools": tools_cfg,
-            "targets": [t.id for t in TARGETS],
+            "targets": [t.id for t in suite_targets],
             "batch_id": batch_id,
             "repetition": repetition,
             "repetitions": repetitions,
@@ -757,6 +772,7 @@ def start_run(
     remote: Optional[Dict[str, Any]] = None,
     tools: Optional[Any] = None,
     repetitions: int = 1,
+    target_ids: Optional[List[str]] = None,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
 
@@ -779,6 +795,16 @@ def start_run(
         tools_cfg = normalize_tools(preset.get("tools"))
     else:
         tools_cfg = normalize_tools(tools)
+
+    # Explicit empty list means "nothing selected" — reject instead of silently using all.
+    if isinstance(target_ids, list) and len(target_ids) == 0:
+        raise ValueError("Select at least one benchmark target")
+    try:
+        suite_targets = resolve_targets(target_ids)
+    except ValueError:
+        raise
+    if not suite_targets:
+        raise ValueError("Select at least one benchmark target")
 
     merged_remote: Optional[Dict[str, Any]] = None
     if mode == "remote":
@@ -828,19 +854,22 @@ def start_run(
             batch_id=batch_id,
             repetition=1,
             repetitions=reps,
+            suite_targets=suite_targets,
         )
         _current = first
 
     enabled = enabled_tool_ids(tools_cfg)
+    selected_ids = [t.id for t in suite_targets]
     debug_logger.info(
         f"[benchmark] suite logs → {first.log_dir}/ "
         f"(run.log + per-target events under <target_id>/) "
-        f"repetitions={reps} batch={batch_id[:8]}"
+        f"repetitions={reps} batch={batch_id[:8]} targets={selected_ids}"
     )
     _log(
         first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
-        f"timeout={first.timeout_seconds}s, run={1}/{reps}, logs={first.log_dir})",
+        f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
+        f"run={1}/{reps}, logs={first.log_dir})",
     )
 
     def _batch_worker() -> None:
@@ -872,12 +901,14 @@ def start_run(
                             batch_id=batch_id,
                             repetition=rep,
                             repetitions=reps,
+                            suite_targets=suite_targets,
                         )
                         _current = run
                         _log(
                             run,
                             f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
-                            f"timeout={run.timeout_seconds}s, run={rep}/{reps}, logs={run.log_dir})",
+                            f"targets={selected_ids}, timeout={run.timeout_seconds}s, "
+                            f"run={rep}/{reps}, logs={run.log_dir})",
                         )
                 debug_logger.info(
                     f"[benchmark] starting repetition {rep}/{reps} run_id={run.id}"

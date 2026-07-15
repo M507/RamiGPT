@@ -15,7 +15,7 @@ Layout (benchmark suite — one folder per BenchmarkRun.id):
   data/logs/sessions/benchmarks/<benchmark_run_id>/
     run.json                   — suite snapshot (targets, phase, timings)
     run.log                    — suite timeline (same lines as [benchmark] in debug.log)
-    <target_id>/               — e.g. sudo-vim, sudo-awk
+    <target_id>/               — e.g. sudo-vim, sudo-curl
       runs.index
       latest
       001_<stamp>_benchmark/

@@ -95,8 +95,33 @@ def deploy_local(log: LogFn = _default_log) -> str:
     docker = shutil.which("docker")
     if not docker:
         raise RuntimeError("docker CLI not found on PATH (required for local benchmark deploy)")
+    try:
+        _run(
+            [
+                docker,
+                "compose",
+                "-f",
+                str(BENCHMARK_COMPOSE_FILE),
+                "down",
+                "--remove-orphans",
+            ],
+            cwd=BENCHMARK_COMPOSE_DIR,
+            log=log,
+            timeout=120,
+        )
+    except Exception as exc:  # noqa: BLE001 — prior stack may be absent
+        log(f"Compose down (best-effort): {exc}")
     _run(
-        [docker, "compose", "-f", str(BENCHMARK_COMPOSE_FILE), "up", "-d", "--build"],
+        [
+            docker,
+            "compose",
+            "-f",
+            str(BENCHMARK_COMPOSE_FILE),
+            "up",
+            "-d",
+            "--build",
+            "--force-recreate",
+        ],
         cwd=BENCHMARK_COMPOSE_DIR,
         log=log,
         timeout=600,
@@ -105,6 +130,18 @@ def deploy_local(log: LogFn = _default_log) -> str:
     for target in TARGETS:
         wait_for_tcp(host, target.port, timeout=120, log=log)
     return host
+
+
+def wait_for_target_ports(
+    host: str,
+    targets: Sequence = TARGETS,
+    *,
+    timeout: float = 120.0,
+    log: LogFn = _default_log,
+) -> None:
+    """Wait until each given target's SSH port accepts connections."""
+    for target in targets:
+        wait_for_tcp(host, int(target.port), timeout=timeout, log=log)
 
 
 def tear_down_local(log: LogFn = _default_log) -> None:
@@ -158,7 +195,7 @@ def test_ssh_access(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> Dict[
 def deploy_remote(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> str:
     """
     Use Ansible to install Docker (if needed), copy compose assets, bring targets up,
-    and verify ports 2201/2202 on the remote host.
+    and verify benchmark SSH ports on the remote host.
     """
     ensure_compose_assets()
     ansible = shutil.which("ansible-playbook")
@@ -210,14 +247,17 @@ def deploy_remote(cfg: RemoteDeployConfig, log: LogFn = _default_log) -> str:
             timeout=900,
         )
 
-    for target in TARGETS:
-        wait_for_tcp(cfg.host, target.port, timeout=120, log=log)
+    wait_for_target_ports(cfg.host, TARGETS, timeout=120, log=log)
     return cfg.host
 
 
-def check_target_ports(host: str, log: LogFn = _default_log) -> List[dict]:
+def check_target_ports(
+    host: str,
+    log: LogFn = _default_log,
+    targets: Optional[Sequence] = None,
+) -> List[dict]:
     results = []
-    for target in TARGETS:
+    for target in targets if targets is not None else TARGETS:
         open_ = False
         try:
             with socket.create_connection((host, target.port), timeout=2.0):
@@ -229,7 +269,11 @@ def check_target_ports(host: str, log: LogFn = _default_log) -> List[dict]:
     return results
 
 
-def all_target_ports_open(host: str, log: LogFn = _default_log) -> bool:
-    """True when every benchmark target SSH port already accepts connections."""
-    results = check_target_ports(host, log=log)
+def all_target_ports_open(
+    host: str,
+    log: LogFn = _default_log,
+    targets: Optional[Sequence] = None,
+) -> bool:
+    """True when every given (or all) benchmark target SSH port accepts connections."""
+    results = check_target_ports(host, log=log, targets=targets)
     return bool(results) and all(p["open"] for p in results)

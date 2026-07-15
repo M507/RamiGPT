@@ -1,22 +1,19 @@
 #!/bin/bash
-# Shared SSH entrypoint for benchmark privilege-escalation targets.
+# Bind sshd directly on the host network (no Docker port-publish / DNAT).
 set -euo pipefail
 
-BENCH_USER="${BENCH_USER:-zeus}"
-BENCH_PASS="${BENCH_PASS:-benchmark}"
+SSH_PORT="${SSH_PORT:-22}"
 
-if ! id -u "${BENCH_USER}" >/dev/null 2>&1; then
-  useradd -m -s /bin/bash "${BENCH_USER}"
+if ! [[ "${SSH_PORT}" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+  echo "Invalid SSH_PORT=${SSH_PORT}" >&2
+  exit 1
 fi
-echo "${BENCH_USER}:${BENCH_PASS}" | chpasswd
+
+if grep -qE '^#?Port[[:space:]]+' /etc/ssh/sshd_config; then
+  sed -i -E "s/^#?Port[[:space:]]+.*/Port ${SSH_PORT}/" /etc/ssh/sshd_config
+else
+  echo "Port ${SSH_PORT}" >> /etc/ssh/sshd_config
+fi
 
 mkdir -p /var/run/sshd
-ssh-keygen -A >/dev/null 2>&1 || true
-
-# Password auth for benchmark SSH
-sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sed -i 's/#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
-grep -q '^UsePAM' /etc/ssh/sshd_config || echo 'UsePAM yes' >> /etc/ssh/sshd_config
-
 exec /usr/sbin/sshd -D -e

@@ -61,6 +61,7 @@ def register_benchmark_routes(app: Flask) -> None:
         remote = body.get("remote") or None
         tools = body.get("tools", preset.get("tools"))
         repetitions = body.get("repetitions", body.get("runs", body.get("run_times", 1)))
+        target_ids = body.get("target_ids", body.get("targets"))
         try:
             timeout_i = int(timeout)
         except (TypeError, ValueError):
@@ -72,6 +73,7 @@ def register_benchmark_routes(app: Flask) -> None:
                 remote=remote,
                 tools=tools,
                 repetitions=repetitions,
+                target_ids=target_ids,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
