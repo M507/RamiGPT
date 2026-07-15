@@ -263,8 +263,8 @@ assert_root_output "${out}"
 
 ## Related docs
 
-- Human catalog + **BeRoot coverage / TODO matrix**: [`misconfigs.md`](misconfigs.md)
+- Full LPE catalog + TODO backlog: [`misconfigs.md`](misconfigs.md)
 - Suite credentials / ports: [`../../benchmark.md`](../../benchmark.md)
 - Standalone verify: `scripts/benchmark/verify-misconfigs.sh`, `python3 -m ramigpt.benchmark.verify`
 
-When choosing *what* to add next, prefer an unmarked **TODO** row in the BeRoot coverage matrix in `misconfigs.md` over inventing an unrelated primitive.
+When choosing *what* to add next, pick an unmarked **TODO** from the catalog in `misconfigs.md` (not limited to BeRoot — any high-value LPE misconfig).
