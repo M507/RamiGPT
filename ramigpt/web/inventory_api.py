@@ -17,6 +17,7 @@ from ramigpt.services.runtime_status import (
 from ramigpt.services.session_store import get_session_store
 from ramigpt.utils import debug_logger
 from ramigpt.utils.session_logging import (
+    clear_all_data_logs,
     clear_terminal_buffer,
     get_session_logger,
     get_terminal_history,
@@ -294,6 +295,31 @@ def register_inventory_routes(
             error=get_error(session_id),
             connected=session_id in ssh_shells,
         ), 200
+
+    @app.route("/api/logs/clean", methods=["POST"])
+    def api_clean_all_logs():
+        """Delete folders under data/logs/ and truncate debug/times log files."""
+        try:
+            from ramigpt.benchmark.orchestrator import get_status as get_bench_status
+
+            status = get_bench_status()
+            if status.get("running"):
+                return jsonify(
+                    ok=False,
+                    error="Stop the active benchmark before cleaning logs",
+                ), 409
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            result = clear_all_data_logs(include_log_files=True)
+            debug_logger.info(
+                f"logs.clean removed={result.get('removed')} path={result.get('path')}"
+            )
+            return jsonify(ok=True, **result), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to clean data/logs")
+            return jsonify(ok=False, error=str(exc)), 500
 
     @app.route("/api/credentials/lookup", methods=["POST"])
     def api_credentials_lookup():

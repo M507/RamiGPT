@@ -45,6 +45,28 @@ def _env_flag(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _should_run_startup_side_effects(use_reloader: bool) -> bool:
+    """With Werkzeug reloader, only the child process should run one-shot work."""
+    if not use_reloader:
+        return True
+    return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+
+
+def _clean_logs_on_startup() -> None:
+    """Wipe data/logs on boot (same as the UI broom / POST /api/logs/clean)."""
+    from ramigpt.utils.logging import debug_logger
+    from ramigpt.utils.session_logging import clear_all_data_logs
+
+    try:
+        result = clear_all_data_logs(include_log_files=True)
+        removed = result.get("removed", 0)
+        path = result.get("path", "")
+        print(f"[RamiGPT] Cleared data/logs (removed={removed})", flush=True)
+        debug_logger.info(f"logs.clean.startup removed={removed} path={path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[RamiGPT] Failed to clear data/logs: {exc}", flush=True)
+
+
 def _extra_watch_files() -> list[str]:
     """Watch templates/static so UI edits also trigger a reload."""
     files: list[str] = []
@@ -107,6 +129,12 @@ if __name__ == "__main__":
             f"[RamiGPT] Auto-reload enabled on https://{APP_HOST}:{APP_PORT}",
             flush=True,
         )
+
+    # Default on; set APP_CLEAN_LOGS_ON_START=0 to keep previous session logs.
+    if _should_run_startup_side_effects(use_reloader) and _env_flag(
+        "APP_CLEAN_LOGS_ON_START", "1"
+    ):
+        _clean_logs_on_startup()
 
     _silence_eventlet_ssl_noise()
     socketio.run(

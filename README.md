@@ -42,8 +42,9 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
 
 | Provider | `AI_PROVIDER` value | Notes |
 |----------|---------------------|-------|
-| OpenAI | `openai` (default) | Official OpenAI Chat Completions API |
-| Open WebUI | `openwebui` | OpenAI-compatible API at `/api/chat/completions` |
+| Ollama | `ollama` (default) | Native Ollama OpenAI-compatible API at `/v1/chat/completions` |
+| Open WebUI | `openwebui` | Open WebUI OpenAI-compatible API at `/api/chat/completions` |
+| OpenAI | `openai` | Official OpenAI Chat Completions API |
 
 ### Quick setup
 
@@ -52,14 +53,15 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
    cp .env.example .env
    ```
 
-2. **OpenAI** — set your key (and optionally the model):
+2. **Ollama** — point at your Ollama host (OpenAI-compatible `/v1`):
    ```
-   AI_PROVIDER=openai
-   OPENAI_API_KEY=your_api_key_here
-   OPENAI_MODEL=gpt-5-mini
+   AI_PROVIDER=ollama
+   OLLAMA_BASE_URL=http://10.10.10.82:11434
+   OLLAMA_API_KEY=ollama
+   OLLAMA_MODEL=qwen3:8b
    ```
 
-3. **Open WebUI** — point at your instance:
+3. **Open WebUI** — point at your instance (`/api`):
    ```
    AI_PROVIDER=openwebui
    OPENWEBUI_BASE_URL=http://localhost:3000
@@ -67,13 +69,25 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
    OPENWEBUI_MODEL=llama3.1
    ```
 
-4. In the running app, click **Settings** to change provider, model, keys, and max AI requests. Saving writes back to `.env`. Use **Reload from .env** after editing the file by hand.
+4. **OpenAI** — set your key (and optionally the model):
+   ```
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=your_api_key_here
+   OPENAI_MODEL=gpt-5-mini
+   ```
+
+5. In the running app, click **Settings** to change provider, model, keys, and max AI requests. Saving writes back to `.env`. Use **Reload from .env** after editing the file by hand.
 
 ### Obtaining an OpenAI API Key
 
 1. Visit [OpenAI](https://www.openai.com/) and sign up / log in.
 2. Create an API key in the API dashboard.
 3. Put it in `.env` as `OPENAI_API_KEY`, or paste it in the Settings window.
+
+### Ollama notes
+
+- Base URL is the Ollama host (e.g. `http://10.10.10.82:11434`); RamiGPT appends `/v1`.
+- Model names must match `ollama list` on that host.
 
 ### Open WebUI notes
 
@@ -224,7 +238,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 
 ### AI provider settings
 
-Switch between **OpenAI** and **Open WebUI** from the **Settings** button in the terminal UI, or by editing `.env` (`AI_PROVIDER`, keys, models, base URL).
+Switch between **Ollama**, **Open WebUI**, and **OpenAI** from the **Settings** button in the terminal UI, or by editing `.env` (`AI_PROVIDER`, keys, models, base URL).
 
 ### Import and export instructions
 

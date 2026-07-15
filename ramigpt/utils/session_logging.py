@@ -701,9 +701,19 @@ def clear_all_session_logs() -> Dict[str, Any]:
     Delete everything under data/logs/sessions/ (normal + benchmark suite logs).
 
     Closes in-memory session log handlers first, recreates empty dirs afterward.
-    Does not touch data/benchmark/results or data/logs/debug.log.
+    Does not touch data/benchmark/results.
     """
-    root = SESSION_LOGS_DIR.resolve()
+    return clear_all_data_logs(include_log_files=False)
+
+
+def clear_all_data_logs(*, include_log_files: bool = True) -> Dict[str, Any]:
+    """
+    Delete folders under data/logs/ (session / benchmark log trees).
+
+    When ``include_log_files`` is True, also truncate debug.log / times.log.
+    Recreates the runtime log directory layout afterward.
+    """
+    root = LOGS_DIR.resolve()
     removed = 0
     errors: List[str] = []
 
@@ -719,14 +729,20 @@ def clear_all_session_logs() -> Dict[str, Any]:
 
     if root.is_dir():
         for child in list(root.iterdir()):
+            name = child.name
+            if name == ".gitkeep":
+                continue
             try:
                 if child.is_dir():
                     shutil.rmtree(child)
-                else:
-                    child.unlink()
-                removed += 1
+                    removed += 1
+                elif include_log_files and child.is_file() and child.suffix == ".log":
+                    # Truncate instead of unlink so open FileHandlers keep working.
+                    with child.open("w", encoding="utf-8"):
+                        pass
+                    removed += 1
             except OSError as exc:
-                errors.append(f"{child.name}: {exc}")
+                errors.append(f"{name}: {exc}")
 
     ensure_runtime_dirs()
     SESSION_LOGS_DIR.mkdir(parents=True, exist_ok=True)

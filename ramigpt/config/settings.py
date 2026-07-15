@@ -17,6 +17,9 @@ PERSISTED_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
     "OPENAI_BASE_URL",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_API_KEY",
+    "OLLAMA_MODEL",
     "OPENWEBUI_BASE_URL",
     "OPENWEBUI_API_KEY",
     "OPENWEBUI_MODEL",
@@ -24,17 +27,20 @@ PERSISTED_KEYS = (
     "DEBUG",
 )
 
-VALID_PROVIDERS = ("openai", "openwebui")
+VALID_PROVIDERS = ("openai", "ollama", "openwebui")
 
 
 @dataclass
 class Settings:
     """Runtime AI and app settings."""
 
-    ai_provider: str = "openai"
+    ai_provider: str = "ollama"
     openai_api_key: str = ""
     openai_model: str = "gpt-5-mini"
     openai_base_url: str = ""  # empty → OpenAI default
+    ollama_base_url: str = "http://10.10.10.82:11434"
+    ollama_api_key: str = "ollama"
+    ollama_model: str = "qwen3:14b"
     openwebui_base_url: str = "http://localhost:3000"
     openwebui_api_key: str = ""
     openwebui_model: str = "llama3.1"
@@ -42,11 +48,15 @@ class Settings:
     debug: int = 0
 
     def active_api_key(self) -> str:
+        if self.ai_provider == "ollama":
+            return self.ollama_api_key or "ollama"
         if self.ai_provider == "openwebui":
             return self.openwebui_api_key or self.openai_api_key
         return self.openai_api_key
 
     def active_model(self) -> str:
+        if self.ai_provider == "ollama":
+            return self.ollama_model
         if self.ai_provider == "openwebui":
             return self.openwebui_model
         return self.openai_model
@@ -59,6 +69,10 @@ class Settings:
             "openai_api_key_set": bool(self.openai_api_key),
             "openai_model": self.openai_model,
             "openai_base_url": self.openai_base_url,
+            "ollama_base_url": self.ollama_base_url,
+            "ollama_api_key": _mask_secret(self.ollama_api_key),
+            "ollama_api_key_set": bool(self.ollama_api_key),
+            "ollama_model": self.ollama_model,
             "openwebui_base_url": self.openwebui_base_url,
             "openwebui_api_key": _mask_secret(self.openwebui_api_key),
             "openwebui_api_key_set": bool(self.openwebui_api_key),
@@ -87,18 +101,40 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _normalize_provider(raw: str) -> str:
+    provider = (raw or "ollama").strip().lower()
+    if provider not in VALID_PROVIDERS:
+        return "ollama"
+    return provider
+
+
 def _load_settings_from_env() -> Settings:
     load_dotenv(ENV_PATH, override=True)
-    provider = (os.getenv("AI_PROVIDER") or "openai").strip().lower()
-    if provider not in VALID_PROVIDERS:
-        provider = "openai"
+    provider = _normalize_provider(os.getenv("AI_PROVIDER") or "ollama")
+
+    # Migrate older setups that used openwebui_* for a bare Ollama :11434 endpoint.
+    ollama_base = (os.getenv("OLLAMA_BASE_URL") or "").strip().rstrip("/")
+    ollama_key = (os.getenv("OLLAMA_API_KEY") or "").strip().strip('"')
+    ollama_model = (os.getenv("OLLAMA_MODEL") or "").strip()
+    owu_base = (os.getenv("OPENWEBUI_BASE_URL") or "").strip().rstrip("/")
+    if not ollama_base and (":11434" in owu_base or owu_base.endswith("/v1")):
+        ollama_base = owu_base
+        if not ollama_key:
+            ollama_key = (os.getenv("OPENWEBUI_API_KEY") or "ollama").strip().strip('"')
+        if not ollama_model:
+            ollama_model = (os.getenv("OPENWEBUI_MODEL") or "").strip()
+        if provider == "openwebui":
+            provider = "ollama"
 
     return Settings(
         ai_provider=provider,
         openai_api_key=(os.getenv("OPENAI_API_KEY") or "").strip().strip('"'),
         openai_model=(os.getenv("OPENAI_MODEL") or "gpt-5-mini").strip(),
         openai_base_url=(os.getenv("OPENAI_BASE_URL") or "").strip(),
-        openwebui_base_url=(os.getenv("OPENWEBUI_BASE_URL") or "http://localhost:3000").strip().rstrip("/"),
+        ollama_base_url=ollama_base or "http://10.10.10.82:11434",
+        ollama_api_key=ollama_key or "ollama",
+        ollama_model=ollama_model or "qwen3:14b",
+        openwebui_base_url=owu_base or "http://localhost:3000",
         openwebui_api_key=(os.getenv("OPENWEBUI_API_KEY") or "").strip().strip('"'),
         openwebui_model=(os.getenv("OPENWEBUI_MODEL") or "llama3.1").strip(),
         openai_max_num_of_reqs=_env_int("OPENAI_MAX_NUM_OF_REQS", 10),
@@ -132,7 +168,7 @@ class SettingsManager:
             for key, value in updates.items():
                 if key not in field_names:
                     continue
-                if key in ("openai_api_key", "openwebui_api_key"):
+                if key in ("openai_api_key", "ollama_api_key", "openwebui_api_key"):
                     if value is None:
                         continue
                     if isinstance(value, str) and (
@@ -141,12 +177,12 @@ class SettingsManager:
                         # Keep existing key when the UI sends a masked/empty value
                         continue
                 if key == "ai_provider":
-                    value = str(value).strip().lower()
+                    value = _normalize_provider(str(value))
                     if value not in VALID_PROVIDERS:
                         raise ValueError(f"Invalid AI provider: {value}")
                 if key in ("openai_max_num_of_reqs", "debug"):
                     value = int(value)
-                if key == "openwebui_base_url" and isinstance(value, str):
+                if key in ("ollama_base_url", "openwebui_base_url") and isinstance(value, str):
                     value = value.strip().rstrip("/")
                 data[key] = value
 
@@ -170,6 +206,9 @@ class SettingsManager:
             "OPENAI_API_KEY": settings.openai_api_key,
             "OPENAI_MODEL": settings.openai_model,
             "OPENAI_BASE_URL": settings.openai_base_url,
+            "OLLAMA_BASE_URL": settings.ollama_base_url,
+            "OLLAMA_API_KEY": settings.ollama_api_key,
+            "OLLAMA_MODEL": settings.ollama_model,
             "OPENWEBUI_BASE_URL": settings.openwebui_base_url,
             "OPENWEBUI_API_KEY": settings.openwebui_api_key,
             "OPENWEBUI_MODEL": settings.openwebui_model,

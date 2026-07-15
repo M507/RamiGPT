@@ -9,17 +9,20 @@
         <p class="settings-help">
             Configure the AI provider before connecting. Changes save to <code>.env</code>.
             Use <strong>Test connection</strong> to verify the selected provider.
+            <strong>Ollama</strong> uses the native OpenAI-compatible API (<code>/v1</code>);
+            <strong>Open WebUI</strong> uses its own <code>/api</code> surface.
         </p>
 
         <label class="settings-field">
             <span>Provider</span>
             <select id="settings-provider" class="settings-input">
-                <option value="openai">OpenAI</option>
+                <option value="ollama">Ollama</option>
                 <option value="openwebui">Open WebUI</option>
+                <option value="openai">OpenAI</option>
             </select>
         </label>
 
-        <div data-provider-group="openai">
+        <div data-provider-group="openai" style="display:none;">
             <label class="settings-field">
                 <span>OpenAI API Key</span>
                 <input type="password" id="settings-openai-api-key" class="settings-input" autocomplete="off">
@@ -31,6 +34,29 @@
             <label class="settings-field">
                 <span>OpenAI Base URL <em>(optional)</em></span>
                 <input type="text" id="settings-openai-base-url" class="settings-input" placeholder="https://api.openai.com/v1">
+            </label>
+        </div>
+
+        <div data-provider-group="ollama">
+            <label class="settings-field">
+                <span>Ollama Base URL</span>
+                <input type="text" id="settings-ollama-base-url" class="settings-input" placeholder="http://10.10.10.82:11434">
+            </label>
+            <label class="settings-field">
+                <span>Ollama API Key <em>(usually "ollama")</em></span>
+                <input type="password" id="settings-ollama-api-key" class="settings-input" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>Ollama Model</span>
+                <div class="settings-input-row">
+                    <select id="settings-ollama-model" class="settings-input" disabled>
+                        <option value="">Loading models…</option>
+                    </select>
+                    <button type="button" id="settings-ollama-refresh-models" class="settings-btn secondary settings-icon-btn" title="Refresh models from Ollama">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <span id="settings-ollama-models-hint" class="settings-hint">Models are loaded from the Ollama host when available.</span>
             </label>
         </div>
 

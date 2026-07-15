@@ -134,6 +134,7 @@ PUBLIC_ENDPOINTS = frozenset({
     "get_ai_settings",
     "update_ai_settings",
     "reload_ai_settings",
+    "list_ollama_models_endpoint",
     "test_ai_settings",
     "api_inventory",
     "api_create_session",
@@ -1020,10 +1021,41 @@ def autonomous(session_data):
                     emit_session(session_id, f"{summary}\n", color="#1E90FF")
                     break
             except Exception as e:
-                debug_logger.exception(f"full_ai.error session_id={session_id!r}")
+                err_l = str(e).lower()
+                is_ai_provider_error = (
+                    any(
+                        token in err_l
+                        for token in (
+                            "ai provider",
+                            "unreachable",
+                            "connecttimeout",
+                            "connection error",
+                            "apitimeouterror",
+                            "apiconnectionerror",
+                            "timed out",
+                            "model not found",
+                        )
+                    )
+                    and "recv" not in err_l
+                )
+
+                # Keep debug.log readable for expected provider outages (no full httpx stack).
+                if is_ai_provider_error:
+                    debug_logger.error(
+                        f"full_ai.ai_provider_error session_id={session_id!r}: {e}"
+                    )
+                else:
+                    debug_logger.exception(f"full_ai.error session_id={session_id!r}")
                 slog.exception(f"Failed to execute command: {e}")
                 slog.event("ERROR", str(e), ai_request=i)
                 emit_session(session_id, f"Error: {str(e)}", color="#f85149")
+
+                # Provider/network failures are not PTY faults — abort instead of
+                # burning reconnect budget on pointless SSH respawns.
+                if is_ai_provider_error:
+                    stop_reason = "ai_provider_error"
+                    break
+
                 # Recover the PTY and continue Full AI instead of aborting on decode / tube faults.
                 try:
                     _interrupt_shell(ssh_shells.get(session_id) or shell)
@@ -2122,6 +2154,9 @@ def update_ai_settings():
         "openai_api_key",
         "openai_model",
         "openai_base_url",
+        "ollama_base_url",
+        "ollama_api_key",
+        "ollama_model",
         "openwebui_base_url",
         "openwebui_api_key",
         "openwebui_model",
@@ -2148,6 +2183,35 @@ def reload_ai_settings():
     return jsonify(success=True, settings=settings.to_public_dict()), 200
 
 
+@app.route('/api/settings/ollama/models', methods=['GET', 'POST'])
+def list_ollama_models_endpoint():
+    """Return installed models from an Ollama host (``GET /api/tags``)."""
+    from ramigpt.ai.providers.ollama_provider import list_ollama_models
+
+    payload = request.get_json(silent=True) or {}
+    base_url = (
+        (payload.get("ollama_base_url") or request.args.get("base_url") or "").strip()
+        or get_settings().ollama_base_url
+    )
+    try:
+        models = list_ollama_models(base_url, timeout=8.0)
+        return jsonify(
+            success=True,
+            base_url=base_url.rstrip("/"),
+            models=models,
+            count=len(models),
+        ), 200
+    except Exception as exc:  # noqa: BLE001
+        debug_logger.warning(f"ollama.list_models failed: {exc}")
+        return jsonify(
+            success=False,
+            error=str(exc),
+            base_url=base_url.rstrip("/") if base_url else "",
+            models=[],
+            count=0,
+        ), 400
+
+
 @app.route('/api/settings/test', methods=['POST'])
 def test_ai_settings():
     """
@@ -2160,6 +2224,9 @@ def test_ai_settings():
         "openai_api_key",
         "openai_model",
         "openai_base_url",
+        "ollama_base_url",
+        "ollama_api_key",
+        "ollama_model",
         "openwebui_base_url",
         "openwebui_api_key",
         "openwebui_model",
@@ -2207,6 +2274,26 @@ if __name__ == '__main__':
     use_reloader = os.getenv("APP_RELOAD", "1").strip().lower() in {"1", "true", "yes", "on"}
     if use_reloader:
         app.config["TEMPLATES_AUTO_RELOAD"] = True
+    # Same startup clean as root app.py (no-op under reloader parent process).
+    clean_on_start = os.getenv("APP_CLEAN_LOGS_ON_START", "1").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    run_startup = (not use_reloader) or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if clean_on_start and run_startup:
+        try:
+            from ramigpt.utils.session_logging import clear_all_data_logs
+
+            result = clear_all_data_logs(include_log_files=True)
+            debug_logger.info(
+                f"logs.clean.startup removed={result.get('removed')} "
+                f"path={result.get('path')}"
+            )
+            print(
+                f"[RamiGPT] Cleared data/logs (removed={result.get('removed', 0)})",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[RamiGPT] Failed to clear data/logs: {exc}", flush=True)
     socketio.run(
         app,
         host=host,

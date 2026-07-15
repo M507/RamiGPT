@@ -53,6 +53,22 @@ def normalize_ai_command(command):
         flags=re.IGNORECASE,
     )
 
+    # BeRoot / GTFOBins label the awk family as "gawk" even when sudoers is
+    # path-exact `(ALL) NOPASSWD: /usr/bin/awk`. `sudo gawk …` then waits for a
+    # password and hangs the PTY (bench-awk session 001_…162945Z). Canonicalize
+    # shell-drop one-liners onto /usr/bin/awk.
+    awk_m = re.match(
+        r"""^(sudo\s+)(?:/(?:usr/)?bin/)?(?:gawk|mawk|nawk|awk)\b(\s+.*)""",
+        s,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if awk_m and re.search(
+        r"""BEGIN\s*\{[^}]*(?:system|exe(?:cute)?)\s*\(""",
+        awk_m.group(2),
+        flags=re.IGNORECASE,
+    ):
+        s = f"{awk_m.group(1)}/usr/bin/awk{awk_m.group(2)}"
+
     # Bare `sudo vim /path` (no -c) opens an interactive editor and desyncs the PTY
     # (session 003_…195756Z: "Type :qa to exit Vim"). Rewrite to a non-interactive
     # GTFOBins-style probe that still validates NOPASSWD vim → root.
@@ -351,5 +367,13 @@ if __name__ == "__main__":
     print(priv_esc.generate_prompt())
     assert "pass123" not in priv_esc.generate_prompt()
     assert normalize_ai_command("$ id") == "id"
+    assert (
+        normalize_ai_command("sudo gawk 'BEGIN {system(\"/bin/sh\")}'")
+        == 'sudo /usr/bin/awk \'BEGIN {system("id")}\''
+    )
+    assert (
+        normalize_ai_command("sudo awk 'BEGIN {system(\"id\")}'")
+        == 'sudo /usr/bin/awk \'BEGIN {system("id")}\''
+    )
     assert priv_esc.process_command_output("ls -l /bin", "lrwxrwxrwx 1 root root 7 Jul 13 00:00 /bin -> usr/bin") == \
         "lrwxrwxrwx 1 root root 7 Jul 13 00:00 /bin -> usr/bin"

@@ -598,6 +598,22 @@
     await refreshInventory();
   }
 
+  async function deleteAllLogs() {
+    const ok = window.confirm(
+      "Delete all folders under data/logs?\n\nThis removes session and benchmark logs, and clears debug.log / times.log. Inventory sessions and benchmark results are kept."
+    );
+    if (!ok) return;
+    try {
+      const data = await api("/api/logs/clean", { method: "POST", body: {} });
+      const removed = data.removed != null ? data.removed : "?";
+      addTerminalOutput(`[+] Cleared data/logs (${removed} items).`, "#58a6ff");
+      clearChat();
+    } catch (err) {
+      addTerminalOutput("[!] " + (err.message || String(err)), "#f85149");
+      alert(err.message || String(err));
+    }
+  }
+
   function switchTab(name) {
     document.querySelectorAll(".tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.tab === name);
@@ -818,6 +834,9 @@
       if (action === "edit") openSessionModal(selected());
       if (action === "delete") deleteSelected();
     });
+
+    const deleteLogsBtn = $("btn-delete-logs");
+    if (deleteLogsBtn) deleteLogsBtn.addEventListener("click", () => deleteAllLogs());
 
     document.querySelectorAll("#session-tabs .tab").forEach((tab) => {
       tab.addEventListener("click", () => switchTab(tab.dataset.tab));
