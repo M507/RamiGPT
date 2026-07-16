@@ -606,10 +606,20 @@
     try {
       const data = await api("/api/logs/clean", { method: "POST", body: {} });
       const removed = data.removed != null ? data.removed : "?";
-      addTerminalOutput(`[+] Cleared data/logs (${removed} items).`, "#58a6ff");
-      clearChat();
+      const msg = `Cleared data/logs (${removed} items).`;
+      if (state.selectedId) {
+        state.terminalLoadToken = (state.terminalLoadToken || 0) + 1;
+        clearTerminal(false);
+        try {
+          await api(`/api/sessions/${state.selectedId}/terminal`, { method: "DELETE" });
+        } catch (err) {
+          addTerminalOutput("[!] Clear failed: " + err.message, "#f85149");
+        }
+        addTerminalOutput(`[+] ${msg}`, "#58a6ff");
+      } else {
+        alert(msg);
+      }
     } catch (err) {
-      addTerminalOutput("[!] " + (err.message || String(err)), "#f85149");
       alert(err.message || String(err));
     }
   }
