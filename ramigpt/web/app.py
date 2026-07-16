@@ -102,11 +102,19 @@ def _strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
 
 
+_URL_LINE_RE = re.compile(
+    r"^\s*(?:Details|Download URL):\s*https?://",
+    re.IGNORECASE,
+)
+_URL_RE = re.compile(r"https?://\S+")
+
+
 def sanitize_beroot_for_prompt(beroot_text: str) -> str:
     """
-    Prepare BeRoot output for the model: strip ANSI and drop misleading
+    Prepare BeRoot output for the model: strip ANSI, drop misleading
     `sudo <bin>` GTFOBins lines from the SUID section (those binaries are SUID,
-    not sudo rules — keeping them looks like fake NOPASSWD advice).
+    not sudo rules — keeping them looks like fake NOPASSWD advice), and remove
+    reference URLs (exploit write-ups, PoC download links) that waste prompt space.
     """
     text = _strip_ansi(beroot_text or "").strip()
     if not text:
@@ -123,7 +131,11 @@ def sanitize_beroot_for_prompt(beroot_text: str) -> str:
             in_suid = False
         if in_suid and re.search(r"^\s*-\s*sudo\s+\S+", line):
             continue
-        cleaned.append(line)
+        if _URL_LINE_RE.match(line):
+            continue
+        stripped = _URL_RE.sub("", line).rstrip()
+        if stripped:
+            cleaned.append(stripped)
     return "\n".join(cleaned).strip()
 
 # Endpoints reachable without an active SSH session (workspace is open by default).
