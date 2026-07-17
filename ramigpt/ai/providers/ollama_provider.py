@@ -15,6 +15,7 @@ from ramigpt.ai.providers.compat import (
     completion_text,
     ensure_suffix,
     make_openai_compat_client,
+    usage_from_completion,
 )
 from ramigpt.config import Settings
 
@@ -102,8 +103,10 @@ class OllamaProvider(AIProvider):
                 messages=messages,
             )
         except Exception as exc:  # noqa: BLE001
+            self.last_usage = None
             raise RuntimeError(
                 f"AI provider ollama request failed at {self._base_url} "
                 f"(model={self._model!r}): {exc}"
             ) from exc
+        self.last_usage = usage_from_completion(completion)
         return completion_text(completion)

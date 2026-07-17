@@ -26,7 +26,7 @@ _ai_tls = threading.local()
 
 from pwn import *
 context.log_level = "error"
-from ramigpt.ai import get_answer
+from ramigpt.ai import get_answer_with_usage
 from ramigpt.ai.factory import create_provider
 from ramigpt.domain import PrivEscPrompt, got_root, normalize_ai_command
 from ramigpt.domain.root_detection import diagnose_root
@@ -38,6 +38,7 @@ from ramigpt.utils import (
     get_session_logger,
     start_session_log_run,
 )
+from ramigpt.utils.session_logging import load_shell_command_history
 from ramigpt.config import get_settings, get_settings_manager
 from ramigpt.paths import (
     BEROOT_DIR,
@@ -214,6 +215,8 @@ loop = {}
 shell_listener_epoch = {}
 beroots = {}
 last_commands = {}
+# session_id -> history list stashed across disconnect/reconnect
+_prompt_history_stash = {}
 # session_id -> True when Full AI detects root (benchmark + UI)
 root_won_by_session = {}
 timeout_default = 6
@@ -251,7 +254,14 @@ def close_ssh_connection(session_id):
     shell_listener_epoch[session_id] = shell_listener_epoch.get(session_id, 0) + 1
     shell = ssh_shells.pop(session_id, None)
     conn = ssh_ssh_conns.pop(session_id, None)
-    prompts.pop(session_id, None)
+    priv = prompts.pop(session_id, None)
+    if priv is not None and getattr(priv, "history", None):
+        # Keep command history across disconnect so Full AI can avoid repeats
+        # after reconnect (also reseeded from SHELL_IO logs as a fallback).
+        _prompt_history_stash[session_id] = [
+            {"command": e.get("command", ""), "output": e.get("output", "")}
+            for e in priv.history
+        ]
     prompt_delimiters.pop(session_id, None)
     last_commands.pop(session_id, None)
     beroots.pop(session_id, None)
@@ -269,6 +279,39 @@ def close_ssh_connection(session_id):
             conn.close()
     except Exception:
         pass
+
+
+def _seed_prompt_history(session_id, priv_esc) -> int:
+    """
+    Restore prior command history into a PrivEscPrompt.
+
+    Prefers an in-memory stash from the last disconnect, then fills gaps from
+    SHELL_IO events on disk (covers app restart / stopped Full AI loops).
+    """
+    if priv_esc is None:
+        return 0
+    added = 0
+    stashed = _prompt_history_stash.pop(session_id, None) or []
+    if stashed:
+        added += int(priv_esc.merge_history_entries(stashed) or 0)
+    try:
+        from_logs = load_shell_command_history(session_id)
+    except Exception:  # noqa: BLE001
+        from_logs = []
+    if from_logs:
+        added += int(priv_esc.merge_history_entries(from_logs) or 0)
+    return added
+
+
+def _make_priv_esc_prompt(session_id, username, password, system, target_user):
+    """Create a PrivEscPrompt and reseed command history for this session."""
+    priv = PrivEscPrompt(username, password, system, target_user)
+    seeded = _seed_prompt_history(session_id, priv)
+    if seeded:
+        debug_logger.info(
+            f"prompt.history_seeded session_id={session_id!r} entries={len(priv.history)}"
+        )
+    return priv
 
 
 def login_required(f):
@@ -691,7 +734,9 @@ def connect():
             try:
                 shell = get_or_create_ssh_shell(session_id, create_new=True)
                 
-                priv_esc_prompt = PrivEscPrompt(username, password, "Linux", "root")
+                priv_esc_prompt = _make_priv_esc_prompt(
+                    session_id, username, password, "Linux", "root"
+                )
                 prompts[session_id] = priv_esc_prompt
                 prompt_delimiters[session_id] = b"$ "
 
@@ -807,6 +852,12 @@ def autonomous(session_data):
         prompt_delimiter = prompt_delimiters.get(session_id, "$")  # Default to "#" if not set
         shell = ssh_shells.get(session_id)
         priv_esc = prompts.get(session_id)
+        if priv_esc is not None:
+            # Pull any commands from earlier Full AI / manual runs (e.g. stopped
+            # before add_history) so a restarted Full AI does not repeat them.
+            seeded = _seed_prompt_history(session_id, priv_esc)
+            if seeded:
+                slog.info(f"reseeded {seeded} history entr(y/ies) from stash/logs")
 
         slog.info(f"initial shell={bool(shell)} prompt_delimiter={prompt_delimiter!r} priv_esc={bool(priv_esc)}")
         
@@ -824,13 +875,17 @@ def autonomous(session_data):
                 # Create a prompt
                 prompt = priv_esc.generate_prompt()
                 if _debug_enabled():
-                    emit_session(session_id, f"[DEBUG] About to send prompt:\n{prompt}")
+                    emit_session(
+                        session_id,
+                        f"[DEBUG] About to send prompt:\n{prompt}",
+                        color="#d2a8ff",
+                    )
                 
                 # Prompt/response live in the session run log only (not debug.log).
                 slog.debug(f"prompt #{i}:\n{prompt}")
 
                 system = "You are an experienced pentester."
-                response = get_answer(system, prompt)
+                response, usage = get_answer_with_usage(system, prompt)
                 trimmed_ai_command = priv_esc.filter_output(response)
                 command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
                 settings = get_settings()
@@ -842,6 +897,7 @@ def autonomous(session_data):
                     filtered_command=command or "",
                     provider=settings.ai_provider,
                     model=settings.active_model(),
+                    usage=usage,
                 )
                 if not command:
                     slog.warning(f"AI returned empty/unusable command on request#{i}; skipping")
@@ -858,6 +914,9 @@ def autonomous(session_data):
                 delim = prompt_delimiter.decode('utf-8').strip() if isinstance(prompt_delimiter, (bytes, bytearray)) else str(prompt_delimiter).strip()
                 emit_session(session_id, f"{delim} {command}")
                 slog.info(f"sent to shell: {delim} {command}")
+                # Record immediately so a Stop / timeout still leaves the command
+                # in history for the next Full AI run ("Do not repeat…").
+                priv_esc.add_history(command, "")
 
                 if not just_got_root:  
                     shell_output_bytes, \
@@ -879,6 +938,10 @@ def autonomous(session_data):
                     if shell_output == None:
                         if stop_flag.is_set():
                             stop_reason = "stopped"
+                            priv_esc.add_history(
+                                command,
+                                "[runner] command stopped / timed out",
+                            )
                             slog.event("FULL_AI_STOP", "Stop during command wait — exiting")
                             break
                         slog.warning(f"recv timeout after command: {command!r}")
@@ -1002,6 +1065,11 @@ def autonomous(session_data):
                                 # Fall through to normal history / root check.
                             elif stop_flag.is_set():
                                 stop_reason = "stopped"
+                                priv_esc.add_history(
+                                    command,
+                                    (shell_output or "")
+                                    + "\n[runner] command stopped / timed out",
+                                )
                                 slog.event("FULL_AI_STOP", "Stop during hang recovery — exiting")
                                 break
                             else:
@@ -2059,7 +2127,7 @@ def execute():
 
         if from_ai:
             system = "You are an experienced pentester."
-            response = get_answer(system, prompt)
+            response, usage = get_answer_with_usage(system, prompt)
             trimmed_ai_command = priv_esc.filter_output(response)
             trimmed_ai_command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
             command = trimmed_ai_command
@@ -2072,6 +2140,7 @@ def execute():
                 source="execute_ai",
                 provider=get_settings().ai_provider,
                 model=get_settings().active_model(),
+                usage=usage,
             )
         else:
             slog.info(f"manual command requested: {command}")
@@ -2193,6 +2262,7 @@ register_inventory_routes(
     close_ssh_connection=close_ssh_connection,
     emit_session=emit_session,
     start_shell_listener=start_shell_listener,
+    seed_prompt_history=_seed_prompt_history,
 )
 
 from ramigpt.benchmark.api import register_benchmark_routes
@@ -2209,6 +2279,7 @@ register_benchmark_hooks(
     prompts=prompts,
     prompt_delimiters=prompt_delimiters,
     stop_full_ai_by_session=stop_full_ai_by_session,
+    seed_prompt_history=_seed_prompt_history,
     loop=loop,
     emit_session=emit_session,
     root_won_by_session=root_won_by_session,
@@ -2225,7 +2296,7 @@ def get_ai_settings():
 
 @app.route('/api/settings', methods=['PUT', 'POST'])
 def update_ai_settings():
-    """Update AI settings in memory and persist them to .env."""
+    """Persist user choices to JSON and API keys to .env."""
     if not request.is_json:
         return jsonify(error="Invalid request format."), 400
 
@@ -2241,6 +2312,9 @@ def update_ai_settings():
         "openwebui_base_url",
         "openwebui_api_key",
         "openwebui_model",
+        "cursor_api_key",
+        "cursor_model",
+        "cursor_base_url",
         "openai_max_num_of_reqs",
         "debug",
     }
@@ -2259,7 +2333,7 @@ def update_ai_settings():
 
 @app.route('/api/settings/reload', methods=['POST'])
 def reload_ai_settings():
-    """Reload settings from the .env file (useful after manual edits)."""
+    """Reload API keys/defaults from .env and user choices from JSON."""
     settings = get_settings_manager().reload()
     return jsonify(success=True, settings=settings.to_public_dict()), 200
 
@@ -2293,6 +2367,47 @@ def list_ollama_models_endpoint():
         ), 400
 
 
+@app.route('/api/settings/cursor/models', methods=['GET', 'POST'])
+def list_cursor_models_endpoint():
+    """Return recommended models from Cursor's Cloud Agents API (``GET /v1/models``)."""
+    from ramigpt.ai.providers.cursor_provider import (
+        DEFAULT_BASE_URL,
+        list_cursor_model_details,
+    )
+
+    payload = request.get_json(silent=True) or {}
+    api_key = (
+        (payload.get("cursor_api_key") or request.args.get("api_key") or "").strip()
+    )
+    if not api_key or "..." in api_key or api_key.startswith("*"):
+        api_key = get_settings().cursor_api_key
+    base_url = (
+        (payload.get("cursor_base_url") or request.args.get("base_url") or "").strip()
+        or get_settings().cursor_base_url
+        or DEFAULT_BASE_URL
+    )
+    try:
+        details = list_cursor_model_details(api_key, base_url=base_url, timeout=8.0)
+        models = [item["id"] for item in details]
+        return jsonify(
+            success=True,
+            base_url=base_url.rstrip("/"),
+            models=models,
+            model_details=details,
+            count=len(models),
+        ), 200
+    except Exception as exc:  # noqa: BLE001
+        debug_logger.warning(f"cursor.list_models failed: {exc}")
+        return jsonify(
+            success=False,
+            error=str(exc),
+            base_url=base_url.rstrip("/") if base_url else "",
+            models=[],
+            model_details=[],
+            count=0,
+        ), 400
+
+
 @app.route('/api/settings/test', methods=['POST'])
 def test_ai_settings():
     """
@@ -2311,13 +2426,16 @@ def test_ai_settings():
         "openwebui_base_url",
         "openwebui_api_key",
         "openwebui_model",
+        "cursor_api_key",
+        "cursor_model",
+        "cursor_base_url",
         "openai_max_num_of_reqs",
         "debug",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 
     try:
-        # Use form values for the probe; do not write .env unless Save was used.
+        # Use form values for the probe without writing JSON or .env.
         if updates:
             get_settings_manager().update(updates, persist=False)
 

@@ -7,10 +7,13 @@
             <button type="button" id="settings-close" class="settings-close" aria-label="Close">&times;</button>
         </div>
         <p class="settings-help">
-            Configure the AI provider before connecting. Changes save to <code>.env</code>.
+            Provider choices save to <code>data/ai_settings.json</code>; API keys
+            remain in <code>.env</code>.
             Use <strong>Test connection</strong> to verify the selected provider.
             <strong>Ollama</strong> uses the native OpenAI-compatible API (<code>/v1</code>);
             <strong>Open WebUI</strong> uses its own <code>/api</code> surface.
+            <strong>Cursor API</strong> runs each turn as a Cursor Cloud Agent, so it is
+            slower per request than the other providers.
         </p>
 
         <label class="settings-field">
@@ -19,6 +22,7 @@
                 <option value="ollama">Ollama</option>
                 <option value="openwebui">Open WebUI</option>
                 <option value="openai">OpenAI</option>
+                <option value="cursor">Cursor API</option>
             </select>
         </label>
 
@@ -75,23 +79,38 @@
             </label>
         </div>
 
+        <div data-provider-group="cursor" style="display:none;">
+            <label class="settings-field">
+                <span>Cursor API Key</span>
+                <input type="password" id="settings-cursor-api-key" class="settings-input" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>Cursor Model</span>
+                <div class="settings-input-row">
+                    <select id="settings-cursor-model" class="settings-input" disabled>
+                        <option value="">Loading models…</option>
+                    </select>
+                    <button type="button" id="settings-cursor-refresh-models" class="settings-btn secondary settings-icon-btn" title="Refresh models from Cursor">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <span id="settings-cursor-models-hint" class="settings-hint">Models are loaded from the Cursor API (costly → cheap). <strong>Auto</strong> is the cheap account-default option at the bottom of the list. First request can take ~60s while Cursor boots the agent.</span>
+            </label>
+            <label class="settings-field">
+                <span>Cursor Base URL <em>(optional)</em></span>
+                <input type="text" id="settings-cursor-base-url" class="settings-input" placeholder="https://api.cursor.com">
+            </label>
+        </div>
+
         <label class="settings-field">
             <span>Max AI requests (Full AI loop)</span>
             <input type="number" id="settings-max-reqs" class="settings-input" min="1" max="200">
         </label>
 
-        <label class="settings-field">
-            <span>Debug</span>
-            <select id="settings-debug" class="settings-input">
-                <option value="0">Off</option>
-                <option value="1">On</option>
-            </select>
-        </label>
-
         <p id="settings-status" class="settings-status"></p>
 
         <div class="settings-actions">
-            <button type="button" id="settings-reload" class="settings-btn secondary">Reload from .env</button>
+            <button type="button" id="settings-reload" class="settings-btn secondary">Reload from disk</button>
             <button type="button" id="settings-test" class="settings-btn secondary">Test connection</button>
             <button type="button" id="settings-save" class="settings-btn">Save</button>
         </div>

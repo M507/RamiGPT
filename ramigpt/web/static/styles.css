@@ -418,6 +418,76 @@ overflow-y: auto;
     color: #ff5555;
 }
 
+.settings-toggle-field {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    cursor: pointer;
+}
+
+.settings-toggle-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.settings-toggle-title {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.settings-toggle-hint {
+    font-size: 11px;
+    opacity: 0.75;
+    line-height: 1.35;
+}
+
+.settings-toggle {
+    position: relative;
+    flex: 0 0 auto;
+    width: 46px;
+    height: 26px;
+    margin-top: 2px;
+}
+
+.settings-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.settings-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #111;
+    border: 1px solid #0f0;
+    border-radius: 999px;
+}
+
+.settings-toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    top: 3px;
+    background: #0f0;
+    border-radius: 50%;
+    transition: transform 0.15s ease;
+}
+
+.settings-toggle input:checked + .settings-toggle-slider {
+    background: rgba(0, 255, 0, 0.22);
+}
+
+.settings-toggle input:checked + .settings-toggle-slider::before {
+    transform: translateX(20px);
+}
+
 .logout-button {
     background-color: #0f0;
     color: #000;

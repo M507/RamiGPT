@@ -1,0 +1,31 @@
+<!-- App settings modal (UI / runtime toggles — separate from AI provider settings) -->
+<div id="app-settings-modal" class="settings-modal" aria-hidden="true">
+    <div id="app-settings-backdrop" class="settings-backdrop"></div>
+    <div class="settings-panel" role="dialog" aria-labelledby="app-settings-title">
+        <div class="settings-header">
+            <h2 id="app-settings-title">App Settings</h2>
+            <button type="button" id="app-settings-close" class="settings-close" aria-label="Close">&times;</button>
+        </div>
+        <p class="settings-help">
+            Runtime UI options. Saved to <code>data/ai_settings.json</code>
+            (same file as provider choices; API keys stay in <code>.env</code>).
+        </p>
+
+        <label class="settings-toggle-field" for="app-settings-show-prompts">
+            <span class="settings-toggle-copy">
+                <span class="settings-toggle-title">Show AI prompts in terminal</span>
+                <span class="settings-toggle-hint">When on, Full AI prints <code>[DEBUG] About to send prompt:</code> before each request.</span>
+            </span>
+            <span class="settings-toggle">
+                <input type="checkbox" id="app-settings-show-prompts">
+                <span class="settings-toggle-slider" aria-hidden="true"></span>
+            </span>
+        </label>
+
+        <p id="app-settings-status" class="settings-status"></p>
+
+        <div class="settings-actions">
+            <button type="button" id="app-settings-save" class="settings-btn">Save</button>
+        </div>
+    </div>
+</div>

@@ -146,12 +146,39 @@ class PrivEscPrompt:
         clipped = truncate_output(output)
         for i, entry in enumerate(self.history):
             if self._history_command_key(entry.get("command")) == cmd:
+                # Prefer non-empty output when updating an existing entry (e.g.
+                # pending → real output, or empty seed → log restore).
+                if not clipped and entry.get("output"):
+                    return
                 self.history[i] = {"command": cmd, "output": clipped}
                 break
         else:
             self.history.append({"command": cmd, "output": clipped})
         if len(self.history) > _MAX_HISTORY_ENTRIES:
             self.history = self.history[-_MAX_HISTORY_ENTRIES:]
+
+    def merge_history_entries(self, entries):
+        """
+        Add command/output pairs that are not already in history.
+
+        Used to reseed from session SHELL_IO logs without clobbering richer
+        in-memory outputs from the current process.
+        """
+        if not entries:
+            return 0
+        existing = {
+            self._history_command_key(entry.get("command"))
+            for entry in self.history
+        }
+        added = 0
+        for entry in entries:
+            cmd = self._history_command_key(entry.get("command") if entry else None)
+            if not cmd or cmd in existing:
+                continue
+            self.add_history(entry.get("command"), entry.get("output") or "")
+            existing.add(cmd)
+            added += 1
+        return added
 
     # Generic add function to prevent duplicates
     def add_entry(self, entry_list, entry):
@@ -290,7 +317,11 @@ class PrivEscPrompt:
                 size += len(piece)
             entries.reverse()
 
-        report = "You already tried the following commands:\n\n~~~ bash\n"
+        report = (
+            "You already tried the following commands (none of them got "
+            f"'{self.target_user}' — if any had, this session would have stopped):\n\n"
+            "~~~ bash\n"
+        )
         for entry in entries:
             report += f"{entry['command']}\n"
             if entry.get("output"):

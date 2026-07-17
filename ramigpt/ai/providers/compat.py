@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from openai import OpenAI
 
@@ -103,3 +103,41 @@ def completion_text(completion: Any) -> str:
             if fallback:
                 return fallback
     return ""
+
+
+def usage_from_completion(completion: Any) -> Optional[Dict[str, int]]:
+    """
+    Extract token usage from an OpenAI-compatible chat completion.
+
+    Returns None when the backend does not report usage (some proxies omit
+    it). Never raises — usage is best-effort metadata for logs/results.
+    """
+    usage = getattr(completion, "usage", None)
+    if usage is None:
+        return None
+
+    def _get(name: str) -> Optional[int]:
+        val = getattr(usage, name, None)
+        if val is None and isinstance(usage, dict):
+            val = usage.get(name)
+        try:
+            return int(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    prompt_tokens = _get("prompt_tokens")
+    completion_tokens = _get("completion_tokens")
+    total_tokens = _get("total_tokens")
+    if prompt_tokens is None and completion_tokens is None and total_tokens is None:
+        return None
+
+    result: Dict[str, int] = {}
+    if prompt_tokens is not None:
+        result["prompt_tokens"] = prompt_tokens
+    if completion_tokens is not None:
+        result["completion_tokens"] = completion_tokens
+    if total_tokens is not None:
+        result["total_tokens"] = total_tokens
+    elif prompt_tokens is not None and completion_tokens is not None:
+        result["total_tokens"] = prompt_tokens + completion_tokens
+    return result or None

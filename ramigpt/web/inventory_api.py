@@ -21,6 +21,7 @@ from ramigpt.utils.session_logging import (
     clear_terminal_buffer,
     get_session_logger,
     get_terminal_history,
+    load_shell_command_history,
     start_session_log_run,
 )
 
@@ -36,8 +37,21 @@ def register_inventory_routes(
     close_ssh_connection: Callable[[str], None],
     emit_session: Callable[..., None],
     start_shell_listener: Callable[..., None],
+    seed_prompt_history: Optional[Callable[..., Any]] = None,
 ):
     store = get_session_store()
+
+    def _apply_history(session_id: str, prompt: PrivEscPrompt) -> None:
+        if seed_prompt_history is not None:
+            try:
+                seed_prompt_history(session_id, prompt)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            prompt.merge_history_entries(load_shell_command_history(session_id))
+        except Exception:  # noqa: BLE001
+            pass
 
     @app.route("/api/inventory", methods=["GET"])
     def api_inventory():
@@ -157,6 +171,7 @@ def register_inventory_routes(
                 prompt.add_hint(hint)
             for avoid in saved.avoids or []:
                 prompt.add_avoid(avoid)
+            _apply_history(session_id, prompt)
             prompts[session_id] = prompt
             prompt_delimiters[session_id] = b"$ "
             set_status(session_id, "connected")

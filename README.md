@@ -36,7 +36,9 @@
 
 ## Configuration: AI Providers
 
-RamiGPT supports multiple AI backends. Configure them via the **Settings** button in the UI, or by editing the `.env` file.
+RamiGPT supports multiple AI backends. Configure them through the **Settings**
+button. API keys come from `.env`; provider, model, URL, and UI choices are
+saved in `data/ai_settings.json`.
 
 ### Supported providers
 
@@ -45,6 +47,7 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
 | Ollama | `ollama` (default) | Native Ollama OpenAI-compatible API at `/v1/chat/completions` |
 | Open WebUI | `openwebui` | Open WebUI OpenAI-compatible API at `/api/chat/completions` |
 | OpenAI | `openai` | Official OpenAI Chat Completions API |
+| Cursor API | `cursor` | Cursor [Cloud Agents API](https://cursor.com/docs/cloud-agent/api/endpoints) — runs each turn as a no-repo cloud agent, any model listed by `GET /v1/models` |
 
 ### Quick setup
 
@@ -76,7 +79,17 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
    OPENAI_MODEL=gpt-5-mini
    ```
 
-5. In the running app, click **Settings** to change provider, model, keys, and max AI requests. Saving writes back to `.env`. Use **Reload from .env** after editing the file by hand.
+5. **Cursor API** — set your Cursor API key (and optionally the model):
+   ```
+   AI_PROVIDER=cursor
+   CURSOR_API_KEY=your_cursor_api_key
+   CURSOR_MODEL=composer-2.5
+   ```
+
+6. In the running app, click **Settings** to change provider, model, keys, and
+   max AI requests. Saving writes non-secret choices to
+   `data/ai_settings.json` and API keys to `.env`. **Reload from disk** reloads
+   both files.
 
 ### Obtaining an OpenAI API Key
 
@@ -94,6 +107,12 @@ RamiGPT supports multiple AI backends. Configure them via the **Settings** butto
 - Create an API key in Open WebUI under **Settings → Account**.
 - Use the model ID exactly as it appears in Open WebUI (Ollama, OpenAI, or custom models).
 - Base URL should be the Open WebUI origin (e.g. `http://localhost:3000`); RamiGPT appends `/api` for the compatible completions endpoint.
+
+### Cursor API notes
+
+- Generate a user API key from the [Cursor Dashboard → API Keys](https://cursor.com/dashboard), or use a service account API key.
+- Any model ID accepted by `model.id` on Cloud Agents works (e.g. `composer-2.5`, `claude-sonnet-4-6`, `gpt-5.2`). Click the refresh icon next to the model field in **Settings** to list the current recommended models from `GET /v1/models`, or type a model ID manually. Agent create can take ~60s while Cursor provisions a cloud VM.
+- Each pentest turn creates a fresh, repo-less Cloud Agent, waits for it to finish, reads its reply, then archives it — so this provider is noticeably slower per request than the other providers (agent boot + run time vs. a plain chat completion). It never touches a GitHub repo (no `repos`/`env`/PR creation).
 
 
 ## Run with Docker
@@ -217,7 +236,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `ramigpt/web/` | Flask/Socket.IO UI, templates, static assets |
 | `ramigpt/ai/` | AI provider interface (OpenAI, Open WebUI) |
 | `ramigpt/domain/` | Privilege-escalation prompt + root detection |
-| `ramigpt/config/` | Settings loaded/persisted via `.env` |
+| `ramigpt/config/` | Settings loaded from `.env` secrets plus JSON user choices |
 | `ramigpt/utils/` | Shared helpers and logging |
 | `tools/` | Bundled priv-esc tooling (BeRoot, LinPEAS) |
 | `scripts/` | Ops helpers (TLS cert generation) |
@@ -237,7 +256,9 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 
 ### AI provider settings
 
-Switch between **Ollama**, **Open WebUI**, and **OpenAI** from the **Settings** button in the terminal UI, or by editing `.env` (`AI_PROVIDER`, keys, models, base URL).
+Switch between **Ollama**, **Open WebUI**, **OpenAI**, and **Cursor API** from
+the **Settings** button. The selection persists in `data/ai_settings.json`;
+`.env` remains the source for API keys and initial defaults.
 
 ### Import and export instructions
 

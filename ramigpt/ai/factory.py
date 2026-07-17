@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ramigpt.ai.base import AIProvider
+from ramigpt.ai.providers.cursor_provider import CursorProvider
 from ramigpt.ai.providers.ollama_provider import OllamaProvider
 from ramigpt.ai.providers.openai_provider import OpenAIProvider
 from ramigpt.ai.providers.openwebui_provider import OpenWebUIProvider
@@ -20,6 +21,8 @@ def create_provider(settings: Settings | None = None) -> AIProvider:
         return OpenWebUIProvider(cfg)
     if provider == "openai":
         return OpenAIProvider(cfg)
+    if provider == "cursor":
+        return CursorProvider(cfg)
     raise ValueError(f"Unsupported AI provider: {provider}")
 
 

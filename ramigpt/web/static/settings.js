@@ -3,10 +3,13 @@
  */
 (function () {
     const MASK_HINT = "...";
-    const PROVIDER_GROUPS = ["openai", "ollama", "openwebui"];
+    const PROVIDER_GROUPS = ["openai", "ollama", "openwebui", "cursor"];
 
     let preferredOllamaModel = "";
     let ollamaModelsFetchSeq = 0;
+    let preferredCursorModel = "";
+    let cursorModelsFetchSeq = 0;
+    let cursorApiKeySet = false;
 
     function $(id) {
         return document.getElementById(id);
@@ -26,6 +29,13 @@
         el.className = "settings-hint" + (isError ? " error" : "");
     }
 
+    function setCursorHint(message, isError) {
+        const el = $("settings-cursor-models-hint");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "settings-hint" + (isError ? " error" : "");
+    }
+
     function toggleProviderFields(provider) {
         PROVIDER_GROUPS.forEach((name) => {
             document.querySelectorAll("[data-provider-group='" + name + "']").forEach((el) => {
@@ -34,6 +44,9 @@
         });
         if (provider === "ollama") {
             refreshOllamaModels();
+        }
+        if (provider === "cursor") {
+            refreshCursorModels();
         }
     }
 
@@ -72,6 +85,123 @@
         select.disabled = false;
         select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
         preferredOllamaModel = select.value;
+    }
+
+    function populateCursorModelSelect(models, selectedModel, details) {
+        const select = $("settings-cursor-model");
+        if (!select) return;
+
+        const preferred = (selectedModel || preferredCursorModel || "").trim();
+        const detailMap = {};
+        (Array.isArray(details) ? details : []).forEach((item) => {
+            if (item && item.id) {
+                detailMap[item.id] = item.displayName || item.id;
+            }
+        });
+
+        const fetched = Array.isArray(models) ? models.slice() : [];
+        let list = fetched.slice();
+        if (!list.length && Array.isArray(details) && details.length) {
+            list = details.map((item) => item.id).filter(Boolean);
+        }
+
+        select.innerHTML = "";
+
+        if (!list.length) {
+            const opt = document.createElement("option");
+            opt.value = preferred;
+            opt.textContent = preferred
+                ? preferred + " (unavailable — keeping saved model)"
+                : "No models available";
+            select.appendChild(opt);
+            select.value = preferred;
+            select.disabled = !preferred;
+            return;
+        }
+
+        if (preferred && list.indexOf(preferred) === -1) {
+            list.unshift(preferred);
+        }
+
+        list.forEach((id) => {
+            const opt = document.createElement("option");
+            opt.value = id;
+            const label = detailMap[id] || id;
+            const notListed = fetched.length > 0 && fetched.indexOf(id) === -1;
+            if (notListed) {
+                opt.textContent = id + " (not listed)";
+            } else if (id === "default" || id === "auto") {
+                opt.textContent = label || "Auto (cheap / account default)";
+            } else if (label && label !== id) {
+                opt.textContent = label + " (" + id + ")";
+            } else {
+                opt.textContent = id;
+            }
+            select.appendChild(opt);
+        });
+        select.disabled = false;
+        select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
+        preferredCursorModel = select.value;
+    }
+
+    async function refreshCursorModels() {
+        const select = $("settings-cursor-model");
+        const refreshBtn = $("settings-cursor-refresh-models");
+        const apiKeyInput = $("settings-cursor-api-key");
+        const baseUrlInput = $("settings-cursor-base-url");
+        if (!select) return;
+
+        const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
+        const baseUrl = baseUrlInput ? baseUrlInput.value.trim() : "";
+        const seq = ++cursorModelsFetchSeq;
+        const keep = (select.value || preferredCursorModel || "").trim();
+        preferredCursorModel = keep;
+
+        if ((!apiKey || apiKey.includes(MASK_HINT)) && !cursorApiKeySet) {
+            populateCursorModelSelect([], keep, []);
+            setCursorHint("Enter an API key (or Save one) to load models from Cursor.", false);
+            return;
+        }
+
+        select.disabled = true;
+        if (refreshBtn) refreshBtn.disabled = true;
+        setCursorHint("Loading models from Cursor…", false);
+
+        try {
+            const response = await fetch("/api/settings/cursor/models", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ cursor_api_key: apiKey, cursor_base_url: baseUrl }),
+            });
+            const data = await response.json();
+            if (seq !== cursorModelsFetchSeq) return;
+
+            if (!response.ok || !data.success) {
+                populateCursorModelSelect([], keep, []);
+                setCursorHint(
+                    data.error || "Could not list models — keeping the saved model.",
+                    true
+                );
+                return;
+            }
+
+            populateCursorModelSelect(data.models || [], keep, data.model_details || []);
+            const count = (data.models || []).length;
+            setCursorHint(
+                count
+                    ? "Loaded " + count + " model" + (count === 1 ? "" : "s") + " from Cursor."
+                    : "Cursor responded but reported no models.",
+                false
+            );
+        } catch (err) {
+            if (seq !== cursorModelsFetchSeq) return;
+            populateCursorModelSelect([], keep, []);
+            setCursorHint(err.message || "Failed to load Cursor models.", true);
+        } finally {
+            if (seq === cursorModelsFetchSeq && refreshBtn) {
+                refreshBtn.disabled = false;
+            }
+        }
     }
 
     async function refreshOllamaModels() {
@@ -153,13 +283,26 @@
             ? "•••••••• (leave blank to keep)"
             : "API key / JWT";
 
+        $("settings-cursor-base-url").value = settings.cursor_base_url || "";
+        cursorApiKeySet = !!settings.cursor_api_key_set;
+        preferredCursorModel = settings.cursor_model || "";
+        populateCursorModelSelect(
+            preferredCursorModel ? [preferredCursorModel] : [],
+            preferredCursorModel,
+            []
+        );
+        $("settings-cursor-api-key").value = "";
+        $("settings-cursor-api-key").placeholder = settings.cursor_api_key_set
+            ? "•••••••• (leave blank to keep)"
+            : "key_...";
+
         $("settings-max-reqs").value = settings.openai_max_num_of_reqs;
-        $("settings-debug").value = String(settings.debug);
         toggleProviderFields(settings.ai_provider || "ollama");
     }
 
     function collectFormPayload(persist) {
         const modelSelect = $("settings-ollama-model");
+        const cursorModelSelect = $("settings-cursor-model");
         const payload = {
             ai_provider: $("settings-provider").value,
             openai_model: $("settings-openai-model").value.trim(),
@@ -168,8 +311,9 @@
             ollama_model: (modelSelect && modelSelect.value || preferredOllamaModel || "").trim(),
             openwebui_base_url: $("settings-openwebui-base-url").value.trim(),
             openwebui_model: $("settings-openwebui-model").value.trim(),
+            cursor_base_url: $("settings-cursor-base-url").value.trim(),
+            cursor_model: (cursorModelSelect && cursorModelSelect.value || preferredCursorModel || "").trim(),
             openai_max_num_of_reqs: parseInt($("settings-max-reqs").value, 10) || 10,
-            debug: parseInt($("settings-debug").value, 10) || 0,
             persist: persist !== false,
         };
 
@@ -188,6 +332,11 @@
             payload.openwebui_api_key = openwebuiKey;
         }
 
+        const cursorKey = $("settings-cursor-api-key").value.trim();
+        if (cursorKey && !cursorKey.includes(MASK_HINT)) {
+            payload.cursor_api_key = cursorKey;
+        }
+
         return payload;
     }
 
@@ -199,7 +348,7 @@
         }
         const settings = await response.json();
         applySettingsToForm(settings);
-        showStatus("Loaded from server / .env", false);
+        showStatus("Loaded from data/ai_settings.json and .env", false);
     }
 
     async function saveSettings() {
@@ -214,18 +363,18 @@
             throw new Error(data.error || "Save failed");
         }
         applySettingsToForm(data.settings);
-        showStatus("Saved to .env", false);
+        showStatus("Choices saved to JSON; API keys saved to .env", false);
     }
 
     async function reloadFromEnv() {
-        showStatus("Reloading from .env…", false);
+        showStatus("Reloading settings from disk…", false);
         const response = await fetch("/api/settings/reload", { method: "POST" });
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.error || "Reload failed");
         }
         applySettingsToForm(data.settings);
-        showStatus("Reloaded from .env", false);
+        showStatus("Reloaded JSON choices and .env API keys", false);
     }
 
     async function testConnection() {
@@ -253,6 +402,7 @@
     }
 
     function openSettings() {
+        closeAppSettings();
         const modal = $("settings-modal");
         if (!modal) return;
         modal.classList.add("open");
@@ -267,8 +417,75 @@
         modal.setAttribute("aria-hidden", "true");
     }
 
+    function showAppStatus(message, isError) {
+        const el = $("app-settings-status");
+        if (!el) return;
+        el.textContent = message;
+        el.className = "settings-status" + (isError ? " error" : " success");
+    }
+
+    function applyAppSettingsToForm(settings) {
+        const toggle = $("app-settings-show-prompts");
+        if (toggle) {
+            toggle.checked = !!Number(settings.debug);
+        }
+    }
+
+    async function loadAppSettings() {
+        showAppStatus("Loading…", false);
+        const response = await fetch("/api/settings");
+        if (!response.ok) {
+            throw new Error("Failed to load settings (" + response.status + ")");
+        }
+        const settings = await response.json();
+        applyAppSettingsToForm(settings);
+        showAppStatus("Loaded", false);
+    }
+
+    async function saveAppSettings() {
+        showAppStatus("Saving…", false);
+        const toggle = $("app-settings-show-prompts");
+        const response = await fetch("/api/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                debug: toggle && toggle.checked ? 1 : 0,
+                persist: true,
+            }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "Save failed");
+        }
+        applyAppSettingsToForm(data.settings || {});
+        showAppStatus(
+            (toggle && toggle.checked)
+                ? "Saved — AI prompts will show in the terminal"
+                : "Saved — AI prompts hidden in the terminal",
+            false
+        );
+    }
+
+    function openAppSettings() {
+        closeSettings();
+        const modal = $("app-settings-modal");
+        if (!modal) return;
+        modal.classList.add("open");
+        modal.setAttribute("aria-hidden", "false");
+        loadAppSettings().catch((err) => showAppStatus(err.message, true));
+    }
+
+    function closeAppSettings() {
+        const modal = $("app-settings-modal");
+        if (!modal) return;
+        modal.classList.remove("open");
+        modal.setAttribute("aria-hidden", "true");
+    }
+
     window.openSettings = openSettings;
     window.closeSettings = closeSettings;
+    window.openAppSettings = openAppSettings;
+    window.closeAppSettings = closeAppSettings;
 
     document.addEventListener("DOMContentLoaded", function () {
         const providerSelect = $("settings-provider");
@@ -307,6 +524,35 @@
             });
         }
 
+        const cursorApiKey = $("settings-cursor-api-key");
+        if (cursorApiKey) {
+            cursorApiKey.addEventListener("change", function () {
+                if (($("settings-provider") || {}).value === "cursor") {
+                    refreshCursorModels();
+                }
+            });
+            cursorApiKey.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    refreshCursorModels();
+                }
+            });
+        }
+
+        const cursorRefreshBtn = $("settings-cursor-refresh-models");
+        if (cursorRefreshBtn) {
+            cursorRefreshBtn.addEventListener("click", function () {
+                refreshCursorModels().catch((err) => showStatus(err.message, true));
+            });
+        }
+
+        const cursorModelSelect = $("settings-cursor-model");
+        if (cursorModelSelect) {
+            cursorModelSelect.addEventListener("change", function () {
+                preferredCursorModel = cursorModelSelect.value;
+            });
+        }
+
         const saveBtn = $("settings-save");
         if (saveBtn) {
             saveBtn.addEventListener("click", function () {
@@ -338,9 +584,27 @@
             backdrop.addEventListener("click", closeSettings);
         }
 
+        const appSaveBtn = $("app-settings-save");
+        if (appSaveBtn) {
+            appSaveBtn.addEventListener("click", function () {
+                saveAppSettings().catch((err) => showAppStatus(err.message, true));
+            });
+        }
+
+        const appCloseBtn = $("app-settings-close");
+        if (appCloseBtn) {
+            appCloseBtn.addEventListener("click", closeAppSettings);
+        }
+
+        const appBackdrop = $("app-settings-backdrop");
+        if (appBackdrop) {
+            appBackdrop.addEventListener("click", closeAppSettings);
+        }
+
         document.addEventListener("keydown", function (e) {
             if (e.key === "Escape") {
                 closeSettings();
+                closeAppSettings();
             }
         });
     });

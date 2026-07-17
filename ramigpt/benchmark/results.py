@@ -67,6 +67,10 @@ def enrich_target_from_events(item: Dict[str, Any], suite_dir: Optional[str]) ->
     got_root = out.get("got_root")
     commands: List[str] = list(out.get("commands") or [])
     ai_turn_count = 0
+    prompt_tokens_total = 0
+    completion_tokens_total = 0
+    tokens_total = 0
+    have_token_data = False
     started_ts = out.get("started_at")
     finished_ts = out.get("finished_at")
     for ev in events:
@@ -83,6 +87,14 @@ def enrich_target_from_events(item: Dict[str, Any], suite_dir: Optional[str]) ->
                 commands.append(str(cmd))
             provider = provider or str(details.get("provider") or "")
             model = model or str(details.get("model") or "")
+            pt = details.get("prompt_tokens")
+            ct = details.get("completion_tokens")
+            tt = details.get("total_tokens")
+            if pt is not None or ct is not None or tt is not None:
+                have_token_data = True
+                prompt_tokens_total += int(pt or 0)
+                completion_tokens_total += int(ct or 0)
+                tokens_total += int(tt) if tt is not None else int(pt or 0) + int(ct or 0)
         if kind == "SHELL_IO":
             cmd = details.get("command") or ""
             if cmd and cmd not in commands:
@@ -112,6 +124,14 @@ def enrich_target_from_events(item: Dict[str, Any], suite_dir: Optional[str]) ->
     out["commands_count"] = len(commands) if commands else ai_requests
     out["provider"] = provider
     out["model"] = model
+    if have_token_data:
+        out["prompt_tokens"] = prompt_tokens_total
+        out["completion_tokens"] = completion_tokens_total
+        out["tokens_total"] = tokens_total
+    else:
+        out.setdefault("prompt_tokens", out.get("prompt_tokens"))
+        out.setdefault("completion_tokens", out.get("completion_tokens"))
+        out.setdefault("tokens_total", out.get("tokens_total"))
     if started_ts:
         out["started_at"] = out.get("started_at") or started_ts
     if finished_ts:
@@ -183,6 +203,21 @@ def build_result_document(run_public: Dict[str, Any], *, settings: Optional[Dict
                 int(t["ai_requests"])
                 for t in targets
                 if t.get("ai_requests") is not None
+            ),
+            "prompt_tokens_total": sum(
+                int(t["prompt_tokens"])
+                for t in targets
+                if t.get("prompt_tokens") is not None
+            ),
+            "completion_tokens_total": sum(
+                int(t["completion_tokens"])
+                for t in targets
+                if t.get("completion_tokens") is not None
+            ),
+            "tokens_total": sum(
+                int(t["tokens_total"])
+                for t in targets
+                if t.get("tokens_total") is not None
             ),
             "tools_used_any": sorted(
                 {tool for t in targets for tool in (t.get("tools_used") or [])}
@@ -257,6 +292,7 @@ def write_benchmark_result(
             f"elapsed={t.get('elapsed_seconds')}s "
             f"commands={t.get('commands_count') if t.get('commands_count') is not None else t.get('ai_requests')} "
             f"ai_requests={t.get('ai_requests')} "
+            f"tokens={t.get('tokens_total')} (prompt={t.get('prompt_tokens')}, completion={t.get('completion_tokens')}) "
             f"tools={t.get('tools_used')} "
             f"model={t.get('provider')}/{t.get('model')} "
             f"got_root={t.get('got_root')} "

@@ -349,6 +349,18 @@ def _connect_session(session_id: str) -> None:
             priv.add_hint(hint)
         for avoid in saved.avoids:
             priv.add_avoid(avoid)
+        seed = _hooks.get("seed_prompt_history")
+        if callable(seed):
+            try:
+                seed(session_id, priv)
+            except Exception as exc:  # noqa: BLE001
+                debug_logger.warning(f"benchmark history seed: {exc}")
+        else:
+            try:
+                from ramigpt.utils.session_logging import load_shell_command_history
+                priv.merge_history_entries(load_shell_command_history(session_id))
+            except Exception:  # noqa: BLE001
+                pass
         prompts[session_id] = priv
         prompt_delimiters[session_id] = b"$ "
         store.touch_recent(session_id)

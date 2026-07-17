@@ -7,6 +7,7 @@ from typing import List, Optional
 from openai import OpenAI
 
 from ramigpt.ai.base import AIProvider, ChatMessage
+from ramigpt.ai.providers.compat import usage_from_completion
 from ramigpt.config import Settings
 
 
@@ -33,5 +34,6 @@ class OpenAIProvider(AIProvider):
             model=self._model,
             messages=messages,
         )
+        self.last_usage = usage_from_completion(completion)
         content = completion.choices[0].message.content
         return (content or "").strip()

@@ -317,12 +317,20 @@ class SessionLogger:
         source: str = "full_ai",
         model: str = "",
         provider: str = "",
+        usage: Optional[Dict[str, Any]] = None,
     ) -> None:
         meta = []
         if provider:
             meta.append(f"provider: {provider}")
         if model:
             meta.append(f"model: {model}")
+        prompt_tokens = (usage or {}).get("prompt_tokens")
+        completion_tokens = (usage or {}).get("completion_tokens")
+        total_tokens = (usage or {}).get("total_tokens")
+        if total_tokens is not None:
+            meta.append(
+                f"tokens: {total_tokens} (prompt={prompt_tokens}, completion={completion_tokens})"
+            )
         self.block(
             f"AI_TURN #{request_n} ({source})",
             "\n".join(
@@ -364,6 +372,9 @@ class SessionLogger:
                     "prompt_chars": len(prompt or ""),
                     "raw_response": raw_response,
                     "filtered_command": filtered_command,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
                 },
             }
         )
@@ -685,6 +696,60 @@ def get_terminal_history(session_id: str, *, limit: int = 800) -> List[Dict[str,
         if buf:
             return list(buf)[-lim:]
     return []
+
+
+def load_shell_command_history(
+    session_id: str, *, limit: int = 40
+) -> List[Dict[str, str]]:
+    """
+    Rebuild command/output pairs from SHELL_IO events across all runs.
+
+    Used to reseeds Full AI prompt history after reconnect / app restart so the
+    model does not repeat commands from earlier Full AI loops.
+    """
+    session_dir = _session_log_root(session_id)
+    if not session_dir.is_dir():
+        return []
+    run_dirs = sorted(
+        p
+        for p in session_dir.iterdir()
+        if p.is_dir() and re.match(r"^\d{3}_", p.name)
+    )
+    pairs: List[Dict[str, str]] = []
+    for run_dir in run_dirs:
+        events_path = run_dir / "events.jsonl"
+        if not events_path.is_file():
+            continue
+        try:
+            with events_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if ev.get("kind") != "SHELL_IO":
+                        continue
+                    details = ev.get("details") or {}
+                    cmd = (details.get("command") or "").strip()
+                    if not cmd:
+                        continue
+                    out = details.get("shell_output")
+                    if out is None:
+                        note = (details.get("note") or "").strip()
+                        out = (
+                            "(None — recv timed out / no prompt delimiter)"
+                            if not note
+                            else f"(None — {note})"
+                        )
+                    pairs.append({"command": cmd, "output": str(out)})
+        except OSError:
+            continue
+    if limit > 0 and len(pairs) > limit:
+        pairs = pairs[-limit:]
+    return pairs
 
 
 def get_session_logger(session_id: str) -> SessionLogger:

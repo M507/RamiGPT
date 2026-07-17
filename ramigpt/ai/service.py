@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from ramigpt.ai.base import AIProvider, ChatMessage
 from ramigpt.ai.factory import create_provider
@@ -40,6 +40,24 @@ def get_answer(
         {"role": "user", "content": user_prompt},
     ]
     return provider.create_completion(messages)
+
+
+def get_answer_with_usage(
+    system: str, prompt: str
+) -> Tuple[str, Optional[Dict[str, int]]]:
+    """
+    Like ``get_answer(system, prompt)`` but also returns token usage
+    (``{"prompt_tokens", "completion_tokens", "total_tokens"}``) when the
+    provider reports it, or ``None`` otherwise.
+    """
+    provider = create_provider()
+    messages: List[ChatMessage] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+    text = provider.create_completion(messages)
+    usage = getattr(provider, "last_usage", None)
+    return text, usage
 
 
 def complete(messages: List[ChatMessage], provider: Optional[AIProvider] = None) -> str:
