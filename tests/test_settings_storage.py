@@ -21,6 +21,8 @@ class SettingsStorageTests(unittest.TestCase):
                     {
                         "ai_provider": "cursor",
                         "cursor_model": "claude-4.6-sonnet-thinking",
+                        "history_include_outputs": 1,
+                        "history_output_edge_count": 7,
                         "openai_api_key": "must-not-load-from-json",
                     }
                 )
@@ -47,6 +49,8 @@ class SettingsStorageTests(unittest.TestCase):
             )
             self.assertEqual(manager.settings.openai_api_key, "env-secret")
             self.assertEqual(manager.settings.cursor_api_key, "cursor-env-secret")
+            self.assertEqual(manager.settings.history_include_outputs, 1)
+            self.assertEqual(manager.settings.history_output_edge_count, 7)
 
     def test_save_writes_choices_to_json_and_only_secrets_to_env(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -79,6 +83,8 @@ class SettingsStorageTests(unittest.TestCase):
                         "ai_provider": "cursor",
                         "cursor_model": "composer-2.5",
                         "cursor_api_key": "new-cursor-key",
+                        "history_include_outputs": 1,
+                        "history_output_edge_count": 0,
                     },
                     persist=True,
                 )
@@ -86,6 +92,8 @@ class SettingsStorageTests(unittest.TestCase):
             payload = json.loads(settings_path.read_text())
             self.assertEqual(payload["ai_provider"], "cursor")
             self.assertEqual(payload["cursor_model"], "composer-2.5")
+            self.assertEqual(payload["history_include_outputs"], 1)
+            self.assertEqual(payload["history_output_edge_count"], 0)
             self.assertNotIn("cursor_api_key", payload)
             self.assertNotIn("openai_api_key", payload)
 

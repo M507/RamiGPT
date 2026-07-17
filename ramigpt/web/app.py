@@ -181,6 +181,14 @@ def _debug_enabled() -> int:
     return get_settings().debug
 
 
+def _generate_ai_prompt(priv_esc) -> str:
+    settings = get_settings()
+    return priv_esc.generate_prompt(
+        include_history_outputs=bool(settings.history_include_outputs),
+        history_output_edge_count=settings.history_output_edge_count,
+    )
+
+
 app = Flask(
     __name__,
     template_folder=str(TEMPLATES_DIR),
@@ -873,7 +881,7 @@ def autonomous(session_data):
                 slog.info(f"AI request#{i}")
                 
                 # Create a prompt
-                prompt = priv_esc.generate_prompt()
+                prompt = _generate_ai_prompt(priv_esc)
                 if _debug_enabled():
                     emit_session(
                         session_id,
@@ -1125,7 +1133,7 @@ def autonomous(session_data):
                     f"history_command: {command}\n\nprocessed_output:\n{processed_output}",
                 )
                 
-                prompt = priv_esc.generate_prompt()
+                prompt = _generate_ai_prompt(priv_esc)
 
                 hostname = session_data.get('hostname')
                 # Prefer last line (real prompt / id). Never score every dump line —
@@ -2117,7 +2125,7 @@ def execute():
             return jsonify(error=str(e)), 500
 
         # Create a prompt
-        prompt = priv_esc.generate_prompt()
+        prompt = _generate_ai_prompt(priv_esc)
 
         command = request.json.get('command', '')
         from_ai = len(command) < 1
@@ -2317,6 +2325,8 @@ def update_ai_settings():
         "cursor_base_url",
         "openai_max_num_of_reqs",
         "debug",
+        "history_include_outputs",
+        "history_output_edge_count",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
     persist = bool(payload.get("persist", True))
@@ -2431,6 +2441,8 @@ def test_ai_settings():
         "cursor_base_url",
         "openai_max_num_of_reqs",
         "debug",
+        "history_include_outputs",
+        "history_output_edge_count",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 

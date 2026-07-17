@@ -33,6 +33,8 @@ JSON_SETTING_FIELDS = (
     "cursor_base_url",
     "openai_max_num_of_reqs",
     "debug",
+    "history_include_outputs",
+    "history_output_edge_count",
 )
 
 VALID_PROVIDERS = ("openai", "ollama", "openwebui", "cursor")
@@ -57,6 +59,8 @@ class Settings:
     cursor_base_url: str = ""  # empty → https://api.cursor.com
     openai_max_num_of_reqs: int = 10
     debug: int = 0
+    history_include_outputs: int = 0
+    history_output_edge_count: int = 4
 
     def active_api_key(self) -> str:
         if self.ai_provider == "ollama":
@@ -98,6 +102,8 @@ class Settings:
             "cursor_base_url": self.cursor_base_url,
             "openai_max_num_of_reqs": self.openai_max_num_of_reqs,
             "debug": self.debug,
+            "history_include_outputs": self.history_include_outputs,
+            "history_output_edge_count": self.history_output_edge_count,
             "providers": list(VALID_PROVIDERS),
         }
 
@@ -161,6 +167,8 @@ def _load_settings_from_env() -> Settings:
         cursor_base_url=(os.getenv("CURSOR_BASE_URL") or "").strip().rstrip("/"),
         openai_max_num_of_reqs=_env_int("OPENAI_MAX_NUM_OF_REQS", 10),
         debug=_env_int("DEBUG", 0),
+        history_include_outputs=_env_int("HISTORY_INCLUDE_OUTPUTS", 0),
+        history_output_edge_count=_env_int("HISTORY_OUTPUT_EDGE_COUNT", 4),
     )
 
 
@@ -183,8 +191,17 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             value = str(value).strip().lower()
             if value not in VALID_PROVIDERS:
                 raise ValueError(f"Invalid AI provider: {value}")
-        if key in ("openai_max_num_of_reqs", "debug"):
+        if key in (
+            "openai_max_num_of_reqs",
+            "debug",
+            "history_include_outputs",
+            "history_output_edge_count",
+        ):
             value = int(value)
+        if key == "history_include_outputs":
+            value = 1 if value else 0
+        if key == "history_output_edge_count" and not 0 <= value <= 40:
+            raise ValueError("History output count must be between 0 and 40.")
         if key in (
             "ollama_base_url",
             "openwebui_base_url",

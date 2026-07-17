@@ -425,9 +425,20 @@
     }
 
     function applyAppSettingsToForm(settings) {
-        const toggle = $("app-settings-show-prompts");
-        if (toggle) {
-            toggle.checked = !!Number(settings.debug);
+        const promptToggle = $("app-settings-show-prompts");
+        if (promptToggle) {
+            promptToggle.checked = !!Number(settings.debug);
+        }
+        const outputToggle = $("app-settings-history-outputs");
+        if (outputToggle) {
+            outputToggle.checked = !!Number(settings.history_include_outputs);
+        }
+        const outputCount = $("app-settings-history-output-count");
+        if (outputCount) {
+            outputCount.value = Number.isInteger(Number(settings.history_output_edge_count))
+                ? String(Number(settings.history_output_edge_count))
+                : "4";
+            outputCount.disabled = !(outputToggle && outputToggle.checked);
         }
     }
 
@@ -444,12 +455,20 @@
 
     async function saveAppSettings() {
         showAppStatus("Saving…", false);
-        const toggle = $("app-settings-show-prompts");
+        const promptToggle = $("app-settings-show-prompts");
+        const outputToggle = $("app-settings-history-outputs");
+        const outputCount = $("app-settings-history-output-count");
+        const edgeCount = Number(outputCount ? outputCount.value : 4);
+        if (!Number.isInteger(edgeCount) || edgeCount < 0 || edgeCount > 40) {
+            throw new Error("History output count must be an integer from 0 to 40.");
+        }
         const response = await fetch("/api/settings", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                debug: toggle && toggle.checked ? 1 : 0,
+                debug: promptToggle && promptToggle.checked ? 1 : 0,
+                history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
+                history_output_edge_count: edgeCount,
                 persist: true,
             }),
         });
@@ -458,12 +477,10 @@
             throw new Error(data.error || "Save failed");
         }
         applyAppSettingsToForm(data.settings || {});
-        showAppStatus(
-            (toggle && toggle.checked)
-                ? "Saved — AI prompts will show in the terminal"
-                : "Saved — AI prompts hidden in the terminal",
-            false
-        );
+        const historyStatus = outputToggle && outputToggle.checked
+            ? (edgeCount === 0 ? "all history outputs included" : `first/last ${edgeCount} outputs included`)
+            : "command-only history";
+        showAppStatus("Saved — " + historyStatus, false);
     }
 
     function openAppSettings() {
@@ -588,6 +605,14 @@
         if (appSaveBtn) {
             appSaveBtn.addEventListener("click", function () {
                 saveAppSettings().catch((err) => showAppStatus(err.message, true));
+            });
+        }
+
+        const historyOutputsToggle = $("app-settings-history-outputs");
+        if (historyOutputsToggle) {
+            historyOutputsToggle.addEventListener("change", function () {
+                const count = $("app-settings-history-output-count");
+                if (count) count.disabled = !historyOutputsToggle.checked;
             });
         }
 

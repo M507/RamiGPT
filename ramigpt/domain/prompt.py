@@ -293,39 +293,49 @@ class PrivEscPrompt:
         print("Summary report generated.")
         return report
 
-    def _history_block(self):
-        """Build history section; prefer recent entries if the block would grow too large."""
+    def _history_block(self, *, include_outputs=False, output_edge_count=4):
+        """
+        Build the command history section.
+
+        Commands are always included so the model can avoid repeating them.
+        Outputs are optional; when enabled, include only the first and last
+        ``output_edge_count`` entries. A count of zero includes every output.
+        """
         if not self.history:
             return ""
-        lines = []
-        for entry in self.history:
-            lines.append(entry["command"])
-            if entry.get("output"):
-                lines.append(entry["output"])
-        block = "\n".join(lines)
-        if len(block) <= _MAX_PROMPT_HISTORY_CHARS:
-            entries = self.history
+
+        entries = self.history
+        output_indexes = set()
+        if include_outputs:
+            count = max(0, int(output_edge_count))
+            if count == 0:
+                output_indexes = set(range(len(entries)))
+            else:
+                edge = min(count, len(entries))
+                output_indexes.update(range(edge))
+                output_indexes.update(range(len(entries) - edge, len(entries)))
+
+        selected_outputs = [
+            entry.get("output") or ""
+            for index, entry in enumerate(entries)
+            if index in output_indexes and entry.get("output")
+        ]
+        command_chars = sum(len(entry["command"]) + 1 for entry in entries)
+        output_budget = max(0, _MAX_PROMPT_HISTORY_CHARS - command_chars)
+        if selected_outputs:
+            per_output_limit = max(1, output_budget // len(selected_outputs))
         else:
-            # Keep newest commands until under budget.
-            entries = []
-            size = 0
-            for entry in reversed(self.history):
-                piece = entry["command"] + ("\n" + entry["output"] if entry.get("output") else "")
-                if entries and size + len(piece) > _MAX_PROMPT_HISTORY_CHARS:
-                    break
-                entries.append(entry)
-                size += len(piece)
-            entries.reverse()
+            per_output_limit = 0
 
         report = (
             "You already tried the following commands (none of them got "
             f"'{self.target_user}' — if any had, this session would have stopped):\n\n"
             "~~~ bash\n"
         )
-        for entry in entries:
+        for index, entry in enumerate(entries):
             report += f"{entry['command']}\n"
-            if entry.get("output"):
-                report += f"{entry['output']}\n"
+            if index in output_indexes and entry.get("output") and per_output_limit:
+                report += f"{truncate_output(entry['output'], per_output_limit)}\n"
         report += (
             "~~~\n\n"
             "Do not repeat already tried commands. Prefer a different enumeration "
@@ -333,7 +343,7 @@ class PrivEscPrompt:
         )
         return report
 
-    def generate_prompt(self):
+    def generate_prompt(self, *, include_history_outputs=False, history_output_edge_count=4):
         # Intentionally omit the account password from the model prompt:
         # including it caused the model to search for the password string itself
         # and leaked secrets into session logs.
@@ -349,7 +359,20 @@ class PrivEscPrompt:
             for capability in self.capabilities:
                 report += f"Name: {capability['name']} Command \nDescribe: {capability['description']}\n\n"
 
-        report += self._history_block()
+        # Tool findings (BeRoot, etc.) before history so the model sees scanner
+        # context before the "already tried" list.
+        if self.BeRoot:
+            report += "The following output is from BeRoot scanner:\n\n"
+            report += f"{self.BeRoot}\n"
+            report += f"\n"
+            # One-shot by default (saves tokens). Persist when Full AI should keep using findings.
+            if not getattr(self, "_beroot_persist", False):
+                self.set_BeRoot(None)
+
+        report += self._history_block(
+            include_outputs=include_history_outputs,
+            output_edge_count=history_output_edge_count,
+        )
 
         if self.facts:
             report += "You currently know the following about the target system:\n\n"
@@ -362,20 +385,12 @@ class PrivEscPrompt:
             for hint in self.hints:
                 report += f"- {hint}\n"
             report += f"\n"
-        
+
         if self.avoids:
             report += "Avoid the following:\n\n"
             for avoid in self.avoids:
                 report += f"- {avoid}\n"
             report += f"\n"
-        
-        if self.BeRoot:
-            report += "The following output is from BeRoot scanner:\n\n"
-            report += f"{self.BeRoot}\n"
-            report += f"\n"
-            # One-shot by default (saves tokens). Persist when Full AI should keep using findings.
-            if not getattr(self, "_beroot_persist", False):
-                self.set_BeRoot(None)
 
         report += (
             "State your next command only. Focus on enumeration and privilege escalation. "

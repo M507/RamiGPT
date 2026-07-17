@@ -38,8 +38,61 @@ class PromptHistoryTests(unittest.TestCase):
         self.assertEqual(len(priv.history), 1)
         self.assertEqual(priv.history[0]["command"], cmd)
         self.assertIn("stopped", priv.history[0]["output"])
-        block = priv._history_block()
+        block = priv._history_block(include_outputs=True)
         self.assertIn("none of them got 'bench-awk'", block)
+
+    def test_history_defaults_to_commands_without_outputs(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        priv.add_history("command-one", "output-one")
+        priv.add_history("command-two", "output-two")
+
+        prompt = priv.generate_prompt()
+
+        self.assertIn("command-one", prompt)
+        self.assertIn("command-two", prompt)
+        self.assertNotIn("output-one", prompt)
+        self.assertNotIn("output-two", prompt)
+
+    def test_history_outputs_include_first_and_last_n(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        for index in range(1, 7):
+            priv.add_history(f"command-{index}", f"output-{index}")
+
+        prompt = priv.generate_prompt(
+            include_history_outputs=True,
+            history_output_edge_count=2,
+        )
+
+        for index in range(1, 7):
+            self.assertIn(f"command-{index}", prompt)
+        for index in (1, 2, 5, 6):
+            self.assertIn(f"output-{index}", prompt)
+        for index in (3, 4):
+            self.assertNotIn(f"output-{index}", prompt)
+
+    def test_zero_history_output_count_includes_all_outputs(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        for index in range(1, 5):
+            priv.add_history(f"command-{index}", f"output-{index}")
+
+        prompt = priv.generate_prompt(
+            include_history_outputs=True,
+            history_output_edge_count=0,
+        )
+
+        for index in range(1, 5):
+            self.assertIn(f"output-{index}", prompt)
+
+    def test_beroot_comes_before_command_history(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        priv.set_BeRoot("SUID: /usr/bin/vim", persist=True)
+        priv.add_history("id", "uid=1001(lowpriv)")
+
+        prompt = priv.generate_prompt()
+        beroot_at = prompt.index("The following output is from BeRoot scanner:")
+        history_at = prompt.index("You already tried the following commands")
+        self.assertLess(beroot_at, history_at)
+        self.assertLess(prompt.index("SUID: /usr/bin/vim"), history_at)
 
     def test_empty_update_does_not_clobber_real_output(self):
         priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
