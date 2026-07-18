@@ -475,7 +475,7 @@ def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
         try:
             execute_beroot(session_data)
         except Exception as exc:  # noqa: BLE001
-            mark_full_ai_finished(session_id)
+            mark_full_ai_finished(session_id, stop_reason=f"BeRoot failed: {exc}")
             raise
         # If BeRoot path did not hand off to Full AI, avoid hanging the wait loop.
         if not full_ai_finished_by_session.get(session_id) and loop.get(session_id) == 0:
@@ -559,9 +559,8 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
                 _stop_full_ai(session_id)
                 break
             if full_ai_finished_by_session.get(session_id) and not root_won_by_session.get(session_id):
-                # Autonomous exited without root (max requests / error)
                 item.status = "failed"
-                item.message = "Full AI finished without root"
+                item.message = item.message or "Full AI finished without root"
                 break
             time.sleep(0.5)
         else:

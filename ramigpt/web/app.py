@@ -667,7 +667,10 @@ def _open_ssh_interactive_shell(ssh_conn):
 def get_or_create_ssh_shell(session_id, create_new=False):
     existing = ssh_shells.get(session_id)
     if existing is not None:
-        return existing
+        if create_new:
+            close_ssh_connection(session_id)
+        else:
+            return existing
     if not create_new:
         raise RuntimeError(
             f"No SSH shell for session {session_id}; connect this session first"
@@ -1530,7 +1533,10 @@ def execute_beroot(session_data):
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
-                    mark_full_ai_finished(session_id)
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason="BeRoot failed: no SSH connection",
+                    )
                 except Exception:
                     pass
             return
@@ -1570,7 +1576,10 @@ def execute_beroot(session_data):
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
-                    mark_full_ai_finished(session_id)
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason=f"BeRoot failed: {exc}",
+                    )
                 except Exception:
                     pass
             return
@@ -1621,7 +1630,10 @@ def execute_beroot(session_data):
             )
             try:
                 from ramigpt.benchmark.orchestrator import mark_full_ai_finished
-                mark_full_ai_finished(session_id)
+                mark_full_ai_finished(
+                    session_id,
+                    stop_reason="BeRoot failed: missing prompt or shell for Full AI handoff",
+                )
             except Exception:
                 pass
             return
