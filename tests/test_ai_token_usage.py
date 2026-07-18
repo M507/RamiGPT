@@ -12,7 +12,12 @@ from unittest import mock
 from ramigpt.ai import service as svc
 from ramigpt.ai.providers.compat import usage_from_completion
 from ramigpt.ai.providers.ollama_provider import OllamaProvider
-from ramigpt.benchmark.results import build_result_document, enrich_target_from_events
+from ramigpt.benchmark.results import (
+    BENCHMARK_RESULT_SCHEMA_VERSION,
+    _format_target_timing_summary,
+    build_result_document,
+    enrich_target_from_events,
+)
 from ramigpt.config import Settings
 from ramigpt.utils.session_logging import SessionLogger
 
@@ -215,6 +220,122 @@ class BenchmarkTokenAggregationTests(unittest.TestCase):
             }
             doc = build_result_document(run_public)
             self.assertEqual(doc["summary"]["tokens_total"], 0)
+
+    def test_timing_breakdown_from_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            suite_dir = Path(tmp)
+            target_dir = suite_dir / "sudo-vim" / "001_run"
+            target_dir.mkdir(parents=True)
+            events = [
+                {
+                    "ts": "2026-07-18T15:00:00+00:00",
+                    "kind": "BEROOT_START",
+                    "details": {"with_ai": True},
+                },
+                {
+                    "ts": "2026-07-18T15:00:45+00:00",
+                    "kind": "BEROOT_OK",
+                    "details": {"duration_seconds": 45.0, "with_ai": True},
+                },
+                {
+                    "ts": "2026-07-18T15:00:46+00:00",
+                    "kind": "FULL_AI_START",
+                    "details": {"provider": "ollama", "model": "qwen3:14b"},
+                },
+                {
+                    "ts": "2026-07-18T15:00:55+00:00",
+                    "kind": "AI_TURN",
+                    "details": {
+                        "request_n": 1,
+                        "filtered_command": "sudo vim",
+                        "duration_seconds": 8.5,
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                    },
+                },
+                {
+                    "ts": "2026-07-18T15:00:57+00:00",
+                    "kind": "SHELL_IO",
+                    "details": {
+                        "request_n": 1,
+                        "command": "sudo vim",
+                        "duration_seconds": 2.0,
+                    },
+                },
+                {
+                    "ts": "2026-07-18T15:01:00+00:00",
+                    "kind": "FULL_AI_END",
+                    "details": {"requests_run": 1, "got_root": True},
+                },
+            ]
+            (target_dir / "events.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+            )
+            item = {
+                "target_id": "sudo-vim",
+                "status": "passed",
+                "elapsed_seconds": 60.0,
+            }
+            out = enrich_target_from_events(item, str(suite_dir))
+            self.assertEqual(out["timing_summary"]["beroot_seconds"], 45.0)
+            self.assertEqual(out["timing_summary"]["ai_llm_seconds"], 8.5)
+            self.assertEqual(out["timing_summary"]["shell_seconds"], 2.0)
+            self.assertEqual(len(out["ai_turns"]), 1)
+            self.assertEqual(out["ai_turns"][0]["shell_duration_seconds"], 2.0)
+            self.assertEqual(out["tool_runs"][0]["tool"], "beroot")
+
+            doc = build_result_document(
+                {
+                    "id": "run3",
+                    "targets": [out],
+                    "log_dir": str(suite_dir),
+                    "phase": "done",
+                    "mode": "test",
+                    "host": "h",
+                }
+            )
+            self.assertEqual(doc["schema_version"], BENCHMARK_RESULT_SCHEMA_VERSION)
+            self.assertEqual(doc["summary"]["beroot_seconds_total"], 45.0)
+            self.assertEqual(doc["summary"]["ai_llm_seconds_total"], 8.5)
+            self.assertEqual(doc["summary"]["shell_seconds_total"], 2.0)
+            summary_txt = "\n".join(_format_target_timing_summary(out))
+            self.assertIn("beroot=45.0s", summary_txt)
+            self.assertIn("ai #1:", summary_txt)
+            self.assertIn("llm=8.5s", summary_txt)
+
+    def test_result_issues_when_events_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            suite_dir = Path(tmp)
+            item = {"target_id": "sudo-vim", "status": "passed", "elapsed_seconds": 10.0}
+            out = enrich_target_from_events(item, str(suite_dir))
+            self.assertTrue(out.get("issues"))
+            self.assertIn("no events.jsonl", out["issues"][0])
+
+    def test_diagnose_flags_missing_ai_timing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            suite_dir = Path(tmp)
+            target_dir = suite_dir / "sudo-awk" / "001_run"
+            target_dir.mkdir(parents=True)
+            events = [
+                {
+                    "ts": "2026-07-18T15:00:55+00:00",
+                    "kind": "AI_TURN",
+                    "details": {
+                        "request_n": 1,
+                        "filtered_command": "id",
+                    },
+                },
+            ]
+            (target_dir / "events.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+            )
+            item = {"target_id": "sudo-awk", "status": "failed", "elapsed_seconds": 5.0}
+            out = enrich_target_from_events(item, str(suite_dir))
+            joined = "\n".join(out.get("issues") or [])
+            self.assertIn("missing llm_duration_seconds", joined)
+            self.assertIn("missing token usage", joined)
+            self.assertIn("FULL_AI_END missing", joined)
 
 
 if __name__ == "__main__":

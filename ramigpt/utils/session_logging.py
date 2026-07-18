@@ -318,12 +318,15 @@ class SessionLogger:
         model: str = "",
         provider: str = "",
         usage: Optional[Dict[str, Any]] = None,
+        duration_seconds: Optional[float] = None,
     ) -> None:
         meta = []
         if provider:
             meta.append(f"provider: {provider}")
         if model:
             meta.append(f"model: {model}")
+        if duration_seconds is not None:
+            meta.append(f"duration: {duration_seconds}s")
         prompt_tokens = (usage or {}).get("prompt_tokens")
         completion_tokens = (usage or {}).get("completion_tokens")
         total_tokens = (usage or {}).get("total_tokens")
@@ -364,6 +367,7 @@ class SessionLogger:
                 "kind": "AI_TURN",
                 "message": f"request#{request_n}",
                 "details": {
+                    "request_n": request_n,
                     "source": source,
                     "provider": provider or None,
                     "model": model or None,
@@ -375,6 +379,7 @@ class SessionLogger:
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
+                    "duration_seconds": duration_seconds,
                 },
             }
         )
@@ -387,12 +392,16 @@ class SessionLogger:
         output: str,
         note: str = "",
         source: str = "full_ai",
+        duration_seconds: Optional[float] = None,
     ) -> None:
+        meta_note = note or ""
+        if duration_seconds is not None:
+            meta_note = f"{meta_note} duration={duration_seconds}s".strip()
         self.block(
             f"SHELL_IO #{request_n} ({source})",
             "\n".join(
                 [
-                    f"note: {note}" if note else "",
+                    f"note: {meta_note}" if meta_note else "",
                     "----- command executed -----",
                     command or "(empty)",
                     "",
@@ -409,10 +418,12 @@ class SessionLogger:
                 "kind": "SHELL_IO",
                 "message": f"request#{request_n}",
                 "details": {
+                    "request_n": request_n,
                     "source": source,
                     "command": command,
                     "shell_output": output if output is not None else None,
                     "note": note,
+                    "duration_seconds": duration_seconds,
                 },
             }
         )

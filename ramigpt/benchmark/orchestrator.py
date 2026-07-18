@@ -29,7 +29,12 @@ from ramigpt.benchmark.targets import (
     list_profiles,
     resolve_targets,
 )
-from ramigpt.benchmark.results import write_batch_summary, write_benchmark_result
+from ramigpt.benchmark.results import (
+    build_result_document,
+    enrich_target_from_events,
+    write_batch_summary,
+    write_benchmark_result,
+)
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
 from ramigpt.config import Settings, get_settings, get_settings_manager
 from ramigpt.domain import PrivEscPrompt
@@ -201,9 +206,22 @@ def get_status() -> Dict[str, Any]:
         remote_cfg = public_remote_config()
         batch_active = bool(_batch.get("active"))
         running = batch_active or bool(run and run.phase not in {"done", "error"})
+        run_dict = run.to_public_dict() if run else None
+        if run_dict and run_dict.get("log_dir"):
+            suite_dir = run_dict["log_dir"]
+            tools_cfg = run_dict.get("tools") or {}
+            run_dict["targets"] = [
+                enrich_target_from_events(dict(t), suite_dir, tools_configured=tools_cfg)
+                for t in run_dict.get("targets") or []
+            ]
+            issues = []
+            for t in run_dict["targets"]:
+                issues.extend(t.get("issues") or [])
+            if issues:
+                run_dict["issues"] = issues
         return {
             "running": running,
-            "run": run.to_public_dict() if run else None,
+            "run": run_dict,
             "batch": {
                 "active": batch_active,
                 "id": _batch.get("id"),
@@ -355,11 +373,12 @@ def _connect_session(session_id: str) -> None:
             set_status(session_id, "error", "SSH connect failed")
             raise RuntimeError(f"Failed to SSH to {saved.host}:{saved.port}")
 
+        # Privilege-escalation goal is root; hostname is only for logging/root detection.
         priv = PrivEscPrompt(
             saved.username,
             flask_session["password"],
             f"{saved.username}@{saved.host}",
-            saved.hostname or "pehost",
+            "root",
         )
         for fact in saved.facts:
             priv.add_facts(fact)
@@ -691,7 +710,14 @@ def _worker(run: BenchmarkRun) -> None:
         except Exception:  # noqa: BLE001
             pass
         with _lock:
-            _history.append(deepcopy(run.to_public_dict()))
+            _history.append(
+                deepcopy(
+                    build_result_document(
+                        run.to_public_dict(),
+                        settings={"provider": run.provider, "model": run.model},
+                    )
+                )
+            )
         if run.log_dir:
             try:
                 write_benchmark_suite_snapshot(
@@ -716,6 +742,12 @@ def _worker(run: BenchmarkRun) -> None:
             )
             run.result_dir = str(result_path.parent)
             _log(run, f"Results written → {result_path}")
+            try:
+                result_doc = json.loads(result_path.read_text(encoding="utf-8"))
+                for issue in result_doc.get("issues") or []:
+                    _log(run, f"Result issue: {issue}")
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as exc:  # noqa: BLE001
             debug_logger.exception(f"[benchmark] failed to write results: {exc}")
             _log(run, f"Failed to write results: {exc}")

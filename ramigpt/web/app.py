@@ -931,7 +931,9 @@ def autonomous(session_data):
                 slog.debug(f"prompt #{i}:\n{prompt}")
 
                 system = "You are an experienced pentester."
+                ai_started = time.monotonic()
                 response, usage = get_answer_with_usage(system, prompt)
+                ai_duration = round(time.monotonic() - ai_started, 3)
                 if stop_flag.is_set():
                     # LLM call already in flight isn't cancelled; discard the result.
                     stop_reason = "stopped"
@@ -956,6 +958,7 @@ def autonomous(session_data):
                     provider=settings.ai_provider,
                     model=settings.active_model(),
                     usage=usage,
+                    duration_seconds=ai_duration,
                 )
                 if not command:
                     slog.warning(f"AI returned empty/unusable command on request#{i}; skipping")
@@ -969,6 +972,7 @@ def autonomous(session_data):
                     slog = get_session_logger(session_id)
                     shell = ssh_shells.get(session_id)
                 delim = prompt_delimiter.decode('utf-8').strip() if isinstance(prompt_delimiter, (bytes, bytearray)) else str(prompt_delimiter).strip()
+                shell_exec_started = time.monotonic()
                 if use_session_v2:
                     slog.info("session_v2: interactive driver active")
                 else:
@@ -1008,9 +1012,15 @@ def autonomous(session_data):
                                 command=command,
                                 output="(None — session v2 returned no output)",
                                 note="session_v2_empty_output",
+                                duration_seconds=round(time.monotonic() - shell_exec_started, 3),
                             )
                         else:
-                            slog.shell_io(request_n=i, command=command, output=shell_output)
+                            slog.shell_io(
+                                request_n=i,
+                                command=command,
+                                output=shell_output,
+                                duration_seconds=round(time.monotonic() - shell_exec_started, 3),
+                            )
 
                         if run.got_root:
                             slog.root_check(
@@ -1104,9 +1114,15 @@ def autonomous(session_data):
                                 command=command,
                                 output="(None — recv timed out / no prompt delimiter)",
                                 note="shell_recvuntil_v4 returned None",
+                                duration_seconds=round(time.monotonic() - shell_exec_started, 3),
                             )
                         else:
-                            slog.shell_io(request_n=i, command=command, output=shell_output)
+                            slog.shell_io(
+                                request_n=i,
+                                command=command,
+                                output=shell_output,
+                                duration_seconds=round(time.monotonic() - shell_exec_started, 3),
+                            )
                     
                     # If it hangs (common after interactive priv-esc like vim/awk shells)
                     if not use_session_v2 and shell_output == None:
@@ -1567,12 +1583,14 @@ def execute_beroot(session_data):
         )
 
         try:
+            beroot_started = time.monotonic()
             beroot_string = upload_and_run_beroot(
                 ssh_conn,
                 password=password,
                 slog=slog,
                 timeout=180,
             )
+            beroot_duration = round(time.monotonic() - beroot_started, 3)
         except Exception as exc:  # noqa: BLE001
             debug_logger.exception(f"beroot.failed session_id={session_id!r}")
             slog.exception(f"beroot failed: {exc}")
@@ -1615,6 +1633,7 @@ def execute_beroot(session_data):
             f"Scan complete ({len(beroot_string)} chars)",
             local_file=local_filename,
             with_ai=with_ai,
+            duration_seconds=beroot_duration,
         )
         debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)} with_ai={with_ai}")
 

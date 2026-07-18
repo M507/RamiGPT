@@ -274,9 +274,15 @@
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
           : "";
+        const runIssues = (run.issues || []).length
+          ? `<div class="bench-issues muted small">${(run.issues || [])
+              .map((issue) => `<div>! ${escapeHtml(issue)}</div>`)
+              .join("")}</div>`
+          : "";
         results.innerHTML =
           modelLabel +
           resultDir +
+          runIssues +
           run.targets
             .map((t) => {
               const klass = t.status || "pending";
@@ -286,6 +292,36 @@
               const tools = (t.tools_used || []).length
                 ? `tools=${(t.tools_used || []).join(",")}`
                 : "";
+              const timing = t.timing_summary || {};
+              const timingParts = [];
+              if (timing.beroot_seconds != null) timingParts.push(`beroot=${timing.beroot_seconds}s`);
+              if (timing.ai_llm_seconds != null) timingParts.push(`ai=${timing.ai_llm_seconds}s`);
+              if (timing.shell_seconds != null) timingParts.push(`shell=${timing.shell_seconds}s`);
+              if (timing.other_seconds != null) timingParts.push(`other=${timing.other_seconds}s`);
+              const timingLine = timingParts.length
+                ? `<div class="muted small bench-timing">${escapeHtml(timingParts.join(" · "))}</div>`
+                : "";
+              const aiLines = (t.ai_turns || [])
+                .map((turn) => {
+                  const llm = turn.llm_duration_seconds != null ? `${turn.llm_duration_seconds}s llm` : "— llm";
+                  const shell =
+                    turn.shell_duration_seconds != null ? `${turn.shell_duration_seconds}s shell` : "— shell";
+                  const tok =
+                    turn.total_tokens != null
+                      ? `${turn.total_tokens} tok`
+                      : "— tok";
+                  return `<div class="muted small bench-ai-turn">#${turn.request}: ${escapeHtml(llm)} · ${escapeHtml(shell)} · ${escapeHtml(tok)} · <code>${escapeHtml(turn.command || "")}</code></div>`;
+                })
+                .join("");
+              const toolLines = (t.tool_runs || [])
+                .map((tool) => {
+                  const dur = tool.duration_seconds != null ? `${tool.duration_seconds}s` : "—";
+                  return `<div class="muted small bench-tool-run">${escapeHtml(tool.tool || "tool")}: ${escapeHtml(dur)}</div>`;
+                })
+                .join("");
+              const issueLines = (t.issues || [])
+                .map((issue) => `<div class="muted small bench-issue">! ${escapeHtml(issue)}</div>`)
+                .join("");
               const meta = [elapsed, cmds, tools, t.message || ""]
                 .filter(Boolean)
                 .join(" · ");
@@ -293,6 +329,7 @@
               <span class="bench-result-name">${escapeHtml(t.name)} <span class="muted">:${t.port}</span></span>
               <span class="bench-result-status">${escapeHtml(klass)}</span>
               <span class="bench-result-meta muted">${escapeHtml(meta)}</span>
+              ${timingLine}${toolLines}${aiLines}${issueLines}
             </div>`;
             })
             .join("");
