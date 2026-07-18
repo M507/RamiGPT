@@ -49,14 +49,13 @@ def normalize_run_plan(
     *,
     repetitions: int = 1,
 ) -> List[RunPlanEntry]:
-    """
-    Build a validated run plan.
-
-    Legacy ``repetitions=N`` → one entry using current AI Settings.
-    ``run_plan`` list → each item may set provider, model, repetitions.
-    """
+    """Build a validated run plan; every model uses the same run count."""
+    shared_reps = _clamp_reps(repetitions)
     entries: List[RunPlanEntry] = []
     if isinstance(run_plan, list) and run_plan:
+        first = run_plan[0]
+        if isinstance(first, dict) and first.get("repetitions") is not None:
+            shared_reps = _clamp_reps(first.get("repetitions"))
         for raw in run_plan:
             if not isinstance(raw, dict):
                 continue
@@ -66,18 +65,18 @@ def normalize_run_plan(
                 raise ValueError(f"Unsupported provider in run_plan: {provider}")
             entries.append(
                 RunPlanEntry(
-                    repetitions=_clamp_reps(raw.get("repetitions")),
+                    repetitions=shared_reps,
                     provider=provider,
                     model=model,
                 )
             )
     if not entries:
-        entries = [RunPlanEntry(repetitions=_clamp_reps(repetitions))]
+        entries = [RunPlanEntry(repetitions=shared_reps)]
 
     if len(entries) > MAX_PLAN_ENTRIES:
         raise ValueError(f"run_plan supports at most {MAX_PLAN_ENTRIES} model entries")
 
-    total = sum(entry.repetitions for entry in entries)
+    total = len(entries) * shared_reps
     if total > MAX_TOTAL_RUNS:
         raise ValueError(f"Total benchmark runs cannot exceed {MAX_TOTAL_RUNS} (got {total})")
     if total < 1:
@@ -133,5 +132,6 @@ def describe_run_plan(plan: List[RunPlanEntry]) -> Dict[str, Any]:
     return {
         "entries": models,
         "entry_count": len(plan),
-        "total_runs": sum(entry.repetitions for entry in plan),
+        "repetitions_per_model": plan[0].repetitions if plan else 1,
+        "total_runs": len(plan) * plan[0].repetitions if plan else 0,
     }

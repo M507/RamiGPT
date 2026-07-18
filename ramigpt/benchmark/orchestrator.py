@@ -29,6 +29,11 @@ from ramigpt.benchmark.targets import (
     list_profiles,
     resolve_targets,
 )
+from ramigpt.benchmark.batch_plan import (
+    BatchSlot,
+    describe_batch_plan,
+    normalize_batch_plans,
+)
 from ramigpt.benchmark.model_warmup import ModelWarmupResult, warmup_ai_model
 from ramigpt.benchmark.results import (
     build_result_document,
@@ -36,14 +41,11 @@ from ramigpt.benchmark.results import (
     write_batch_summary,
     write_benchmark_result,
 )
-from ramigpt.benchmark.run_plan import (
-    apply_plan_entry_model,
-    describe_run_plan,
-    flatten_run_plan,
-    normalize_run_plan,
-)
+from ramigpt.benchmark.role_plan import apply_plan_entry_role
+from ramigpt.benchmark.run_plan import apply_plan_entry_model
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
 from ramigpt.config import Settings, get_settings, get_settings_manager
+from ramigpt.config.settings import load_role_objectives
 from ramigpt.domain import PrivEscPrompt
 from ramigpt.paths import BENCHMARK_RESULTS_DIR
 from ramigpt.services.runtime_status import set_status
@@ -94,6 +96,7 @@ class TargetRunResult:
     tools_used: List[str] = field(default_factory=list)
     provider: str = ""
     model: str = ""
+    role_objective: str = ""
     got_root: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -124,6 +127,7 @@ class BenchmarkRun:
     repetitions: int = 1
     provider: str = ""
     model: str = ""
+    role_objective: str = ""
     result_dir: Optional[str] = None
     model_warmup: Optional[Dict[str, Any]] = None
 
@@ -151,8 +155,10 @@ _batch: Dict[str, Any] = {
     "repetition": 0,
     "repetitions": 1,
     "run_plan": None,
+    "role_plan": None,
     "current_provider": "",
     "current_model": "",
+    "current_role": "",
     "stop": False,
 }
 
@@ -239,8 +245,10 @@ def get_status() -> Dict[str, Any]:
                 "repetition": _batch.get("repetition"),
                 "repetitions": _batch.get("repetitions"),
                 "run_plan": _batch.get("run_plan"),
+                "role_plan": _batch.get("role_plan"),
                 "current_provider": _batch.get("current_provider"),
                 "current_model": _batch.get("current_model"),
+                "current_role": _batch.get("current_role"),
             },
             "targets": [t.to_dict() for t in TARGETS],
             "profiles": list_profiles(),
@@ -258,6 +266,8 @@ def get_status() -> Dict[str, Any]:
             "ai_settings": {
                 "provider": get_settings().ai_provider,
                 "model": get_settings().active_model(),
+                "role_objective": get_settings().role_objective,
+                "role_objective_options": list(load_role_objectives().keys()),
                 "saved_models": {
                     "ollama": get_settings().ollama_model,
                     "openai": get_settings().openai_model,
@@ -294,11 +304,20 @@ def _reload_ai_settings() -> Settings:
 
 
 def _sync_run_ai_settings(run: BenchmarkRun, settings: Optional[Settings] = None) -> Settings:
-    """Copy the active in-memory AI provider/model onto the run record."""
+    """Copy the active in-memory AI provider/model/role onto the run record."""
     cfg = settings or get_settings()
     run.provider = cfg.ai_provider
     run.model = cfg.active_model()
+    run.role_objective = cfg.role_objective
     return cfg
+
+
+def _format_slot_plan(slot: BatchSlot) -> str:
+    return (
+        f"model entry {slot.model_entry_idx + 1} loop {slot.model_rep}/"
+        f"{slot.model_entry.repetitions}, role entry {slot.role_entry_idx + 1} loop "
+        f"{slot.role_rep}/{slot.role_entry.repetitions}"
+    )
 
 
 def _log(run: BenchmarkRun, message: str) -> None:
@@ -628,16 +647,28 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
 
         _connect_session(session_id)
         planned_provider, planned_model = run.provider, run.model
+        planned_role = run.role_objective
         ai_cfg = _sync_run_ai_settings(run)
         item.provider = ai_cfg.ai_provider
         item.model = ai_cfg.active_model()
+        item.role_objective = ai_cfg.role_objective
         if (item.provider, item.model) != (planned_provider, planned_model):
             _log(
                 run,
                 f"Target {target.name}: WARNING model drift "
                 f"(queued {planned_provider}/{planned_model} → active {item.provider}/{item.model})",
             )
-        _log(run, f"Target {target.name}: AI Settings → {ai_cfg.ai_provider}/{ai_cfg.active_model()}")
+        if item.role_objective != planned_role and planned_role:
+            _log(
+                run,
+                f"Target {target.name}: WARNING role drift "
+                f"(queued {planned_role} → active {item.role_objective})",
+            )
+        _log(
+            run,
+            f"Target {target.name}: AI Settings → {ai_cfg.ai_provider}/"
+            f"{ai_cfg.active_model()} · role={ai_cfg.role_objective}",
+        )
         tool_ids = enabled_tool_ids(run.tools)
         if tool_ids:
             _log(
@@ -849,6 +880,7 @@ def _make_run(
         repetitions=repetitions,
         provider=settings.ai_provider,
         model=settings.active_model(),
+        role_objective=settings.role_objective,
     )
     suite_dir = begin_benchmark_suite_logs(
         run.id,
@@ -862,6 +894,7 @@ def _make_run(
             "repetitions": repetitions,
             "provider": run.provider,
             "model": run.model,
+            "role_objective": run.role_objective,
         },
     )
     run.log_dir = str(suite_dir)
@@ -876,6 +909,8 @@ def start_run(
     tools: Optional[Any] = None,
     repetitions: int = 1,
     run_plan: Optional[List[Any]] = None,
+    role_plan: Optional[List[Any]] = None,
+    role_repetitions: int = 1,
     target_ids: Optional[List[str]] = None,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
@@ -888,12 +923,16 @@ def start_run(
         timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
 
     try:
-        plan = normalize_run_plan(run_plan, repetitions=repetitions)
+        model_plan, role_plan_entries, slots = normalize_batch_plans(
+            run_plan=run_plan,
+            role_plan=role_plan,
+            repetitions=repetitions,
+            role_repetitions=role_repetitions,
+        )
     except ValueError as exc:
         raise ValueError(str(exc)) from None
-    slots = flatten_run_plan(plan)
     total_runs = len(slots)
-    plan_desc = describe_run_plan(plan)
+    plan_desc = describe_batch_plan(model_plan, role_plan_entries)
 
     # UI tools override JSON tools when provided; else JSON / defaults (BeRoot on).
     if tools is None:
@@ -936,8 +975,9 @@ def start_run(
     if missing:
         raise RuntimeError(f"Benchmark hooks not registered: {', '.join(missing)}")
 
-    first_entry, _, _ = slots[0]
-    ai_cfg = apply_plan_entry_model(first_entry)
+    first_slot = slots[0]
+    ai_cfg = apply_plan_entry_model(first_slot.model_entry)
+    role_cfg = apply_plan_entry_role(first_slot.role_entry)
 
     with _lock:
         if _batch.get("active") or (_current and _current.phase not in {"done", "error"}):
@@ -949,9 +989,11 @@ def start_run(
                 "id": batch_id,
                 "repetition": 1,
                 "repetitions": total_runs,
-                "run_plan": plan_desc,
+                "run_plan": plan_desc.get("model_plan"),
+                "role_plan": plan_desc.get("role_plan"),
                 "current_provider": ai_cfg.ai_provider,
                 "current_model": ai_cfg.active_model(),
+                "current_role": role_cfg.role_objective,
                 "stop": False,
             }
         )
@@ -965,6 +1007,9 @@ def start_run(
             repetitions=total_runs,
             suite_targets=suite_targets,
         )
+        first.provider = ai_cfg.ai_provider
+        first.model = ai_cfg.active_model()
+        first.role_objective = role_cfg.role_objective
         _current = first
 
     enabled = enabled_tool_ids(tools_cfg)
@@ -979,8 +1024,16 @@ def start_run(
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
         f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
         f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
-        f"run={1}/{total_runs}, logs={first.log_dir})",
+        f"role={role_cfg.role_objective}, "
+        f"run={1}/{total_runs} ({_format_slot_plan(first_slot)}), logs={first.log_dir})",
     )
+    if total_runs > 1:
+        _log(
+            first,
+            f"Batch plan ({total_runs} runs, model-major → role-major): "
+            f"{plan_desc.get('model_entry_count')} model entries, "
+            f"{plan_desc.get('role_entry_count')} role entries",
+        )
 
     def _batch_worker() -> None:
         global _current, run_batch_dir
@@ -997,18 +1050,21 @@ def start_run(
 
             last_warm: Optional[Tuple[str, str]] = None
 
-            for global_idx, (entry, within_idx, entry_idx) in enumerate(slots, start=1):
-                ai_cfg = apply_plan_entry_model(entry)
+            for global_idx, slot in enumerate(slots, start=1):
+                ai_cfg = apply_plan_entry_model(slot.model_entry)
+                role_cfg = apply_plan_entry_role(slot.role_entry)
                 with _lock:
                     if _batch.get("stop"):
                         break
                     _batch["repetition"] = global_idx
                     _batch["current_provider"] = ai_cfg.ai_provider
                     _batch["current_model"] = ai_cfg.active_model()
+                    _batch["current_role"] = role_cfg.role_objective
                     if global_idx == 1:
                         run = first
                         run.provider = ai_cfg.ai_provider
                         run.model = ai_cfg.active_model()
+                        run.role_objective = role_cfg.role_objective
                     else:
                         run = _make_run(
                             mode=mode,
@@ -1020,14 +1076,17 @@ def start_run(
                             repetitions=total_runs,
                             suite_targets=suite_targets,
                         )
+                        run.provider = ai_cfg.ai_provider
+                        run.model = ai_cfg.active_model()
+                        run.role_objective = role_cfg.role_objective
                         _current = run
                         _log(
                             run,
                             f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
                             f"targets={selected_ids}, timeout={run.timeout_seconds}s, "
                             f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
-                            f"run={global_idx}/{total_runs} "
-                            f"(plan entry {entry_idx + 1}, loop {within_idx}/{entry.repetitions}), "
+                            f"role={role_cfg.role_objective}, "
+                            f"run={global_idx}/{total_runs} ({_format_slot_plan(slot)}), "
                             f"logs={run.log_dir})",
                         )
 
@@ -1045,7 +1104,8 @@ def start_run(
 
                 debug_logger.info(
                     f"[benchmark] starting run {global_idx}/{total_runs} "
-                    f"model={ai_cfg.ai_provider}/{ai_cfg.active_model()} run_id={run.id}"
+                    f"model={ai_cfg.ai_provider}/{ai_cfg.active_model()} "
+                    f"role={role_cfg.role_objective} run_id={run.id}"
                 )
                 _worker(run)
                 # Capture result document path from run
@@ -1067,7 +1127,11 @@ def start_run(
             if batch_folder is not None and completed_docs:
                 try:
                     write_batch_summary(
-                        batch_folder, batch_id=batch_id, runs=completed_docs
+                        batch_folder,
+                        batch_id=batch_id,
+                        runs=completed_docs,
+                        model_plan=_batch.get("run_plan"),
+                        role_plan=_batch.get("role_plan"),
                     )
                 except Exception as exc:  # noqa: BLE001
                     debug_logger.warning(f"[benchmark] batch summary failed: {exc}")
@@ -1079,6 +1143,12 @@ def start_run(
                 get_settings_manager().reload()
             except Exception:  # noqa: BLE001
                 pass
+            for doc in completed_docs:
+                debug_logger.info(
+                    f"[benchmark] batch run {doc.get('repetition')}/{total_runs}: "
+                    f"{doc.get('provider')}/{doc.get('model')} "
+                    f"role={doc.get('role_objective') or '?'}"
+                )
             debug_logger.info(
                 f"[benchmark] batch finished id={batch_id[:8]} "
                 f"completed={len(completed_docs)}/{total_runs}"

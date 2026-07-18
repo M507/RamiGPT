@@ -23,27 +23,30 @@ def test_normalize_run_plan_entries():
     plan = normalize_run_plan(
         [
             {"repetitions": 2},
-            {"provider": "openai", "model": "gpt-4o", "repetitions": 1},
+            {"provider": "openai", "model": "gpt-4o", "repetitions": 99},
         ]
     )
     assert len(plan) == 2
     assert plan[0].repetitions == 2
     assert plan[1].provider == "openai"
     assert plan[1].model == "gpt-4o"
+    assert plan[1].repetitions == 2
 
 
 def test_flatten_run_plan():
     plan = normalize_run_plan(
         [
             {"repetitions": 2},
-            {"provider": "openai", "model": "gpt-4o", "repetitions": 1},
+            {"provider": "openai", "model": "gpt-4o"},
         ]
     )
     slots = flatten_run_plan(plan)
-    assert len(slots) == 3
+    assert len(slots) == 4
     assert slots[0][1] == 1
     assert slots[1][1] == 2
     assert slots[2][0].provider == "openai"
+    assert slots[2][1] == 1
+    assert slots[3][1] == 2
 
 
 def test_total_runs_cap():

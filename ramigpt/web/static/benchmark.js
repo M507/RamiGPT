@@ -22,6 +22,9 @@
   /** @type {Record<string, string>} */
   let savedModelsByProvider = {};
   let currentAiProvider = "ollama";
+  /** @type {string[]} */
+  let knownRoles = [];
+  let currentAiRole = "";
 
   async function api(path, options = {}) {
     const opts = {
@@ -277,7 +280,10 @@
         modelProvider || modelName
           ? ` · ${modelProvider || "?"}/${modelName || "?"}`
           : "";
-      const repLabel = reps > 1 ? ` · run ${rep}/${reps}${modelSuffix}` : modelSuffix;
+      const roleName =
+        (batch && batch.current_role) || (run && run.role_objective) || "";
+      const roleSuffix = roleName ? ` · ${roleName}` : "";
+      const repLabel = reps > 1 ? ` · run ${rep}/${reps}${modelSuffix}${roleSuffix}` : `${modelSuffix}${roleSuffix}`;
       phaseEl.className = "status-pill " + (run ? phase : "idle");
       phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? phase : "Idle")}${escapeHtml(repLabel)}`;
     }
@@ -291,6 +297,9 @@
           run.provider || run.model
             ? `<div class="muted small">Model: ${escapeHtml(run.provider || "?")}/${escapeHtml(run.model || "?")}</div>`
             : "";
+        const roleLabel = run.role_objective
+          ? `<div class="muted small">Role: ${escapeHtml(run.role_objective)}</div>`
+          : "";
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
           : "";
@@ -301,6 +310,7 @@
           : "";
         results.innerHTML =
           modelLabel +
+          roleLabel +
           resultDir +
           runIssues +
           run.targets
@@ -381,38 +391,154 @@
     return root ? Array.from(root.querySelectorAll(".bench-run-plan-row")) : [];
   }
 
+  function modelRepsEach() {
+    return clampReps($("bench-primary-reps")?.value);
+  }
+
+  function modelCount() {
+    return 1 + extraModelRows().length;
+  }
+
+  function modelRunsTotal() {
+    return modelCount() * modelRepsEach();
+  }
+
+  function roleRepsEach() {
+    return clampReps($("bench-primary-role-reps")?.value);
+  }
+
+  function roleCount() {
+    return 1 + extraRoleRows().length;
+  }
+
+  function roleRunsTotal() {
+    return roleCount() * roleRepsEach();
+  }
+
+  function countBatchSlots() {
+    return modelRunsTotal() * roleRunsTotal();
+  }
+
+  function extraRoleRows() {
+    const root = $("bench-role-plan-extra");
+    return root ? Array.from(root.querySelectorAll(".bench-run-plan-row")) : [];
+  }
+
   function updateRunPlanSummary() {
     const summary = $("bench-run-plan-summary");
     if (!summary) return;
-    const primary = clampReps($("bench-primary-reps")?.value);
-    const extra = extraModelRows().reduce(
-      (sum, row) => sum + clampReps(row.querySelector(".bench-plan-reps")?.value),
-      0
-    );
-    const total = primary + extra;
-    const models = 1 + extraModelRows().length;
+    const models = modelCount();
+    const repsEach = modelRepsEach();
     summary.textContent =
-      total === 1 && models === 1
-        ? "1 run · AI Settings model"
-        : `${total} run${total === 1 ? "" : "s"} · ${models} model${models === 1 ? "" : "s"}`;
+      models === 1 && repsEach === 1
+        ? "1 model · 1 run"
+        : `${models} model${models === 1 ? "" : "s"} · ${repsEach} run${repsEach === 1 ? "" : "s"} each`;
+    updateBatchPlanSummary();
+  }
+
+  function updateRolePlanSummary() {
+    const summary = $("bench-role-plan-summary");
+    if (!summary) return;
+    const roles = roleCount();
+    const repsEach = roleRepsEach();
+    summary.textContent =
+      roles === 1 && repsEach === 1
+        ? "1 role · 1 run"
+        : `${roles} role${roles === 1 ? "" : "s"} · ${repsEach} run${repsEach === 1 ? "" : "s"} each`;
+    updateBatchPlanSummary();
+  }
+
+  function updateBatchPlanSummary() {
+    const total = countBatchSlots();
+    const modelSummary = $("bench-run-plan-summary");
+    const roleSummary = $("bench-role-plan-summary");
     if (total > MAX_TOTAL_RUNS) {
-      summary.textContent += ` (max ${MAX_TOTAL_RUNS})`;
+      const suffix = ` (batch total ${total} > ${MAX_TOTAL_RUNS})`;
+      if (modelSummary && !modelSummary.textContent.includes("batch total")) {
+        modelSummary.textContent += suffix;
+      }
+      if (roleSummary && !roleSummary.textContent.includes("batch total")) {
+        roleSummary.textContent += suffix;
+      }
     }
   }
 
   function collectRunPlan() {
-    const primaryReps = clampReps($("bench-primary-reps")?.value);
+    const primaryReps = modelRepsEach();
     const plan = [{ repetitions: primaryReps }];
     extraModelRows().forEach((row) => {
       const provider = (row.querySelector(".bench-plan-provider")?.value || "").trim();
       const model = (row.querySelector(".bench-plan-model")?.value || "").trim();
-      const repetitions = clampReps(row.querySelector(".bench-plan-reps")?.value);
-      const entry = { repetitions };
+      const entry = {};
       if (provider) entry.provider = provider;
       if (model) entry.model = model;
       plan.push(entry);
     });
     return plan;
+  }
+
+  function collectRolePlan() {
+    const primaryReps = roleRepsEach();
+    const plan = [{ repetitions: primaryReps }];
+    extraRoleRows().forEach((row) => {
+      const role = (row.querySelector(".bench-plan-role")?.value || "").trim();
+      const entry = {};
+      if (role) entry.role = role;
+      plan.push(entry);
+    });
+    return plan;
+  }
+
+  function roleOptions(selected) {
+    const roles = knownRoles.length ? knownRoles : selected ? [selected] : [];
+    if (selected && roles.indexOf(selected) === -1) {
+      roles.unshift(selected);
+    }
+    if (!roles.length) {
+      return `<option value="">Configure roles in App Settings</option>`;
+    }
+    return roles
+      .map(
+        (name) =>
+          `<option value="${escapeHtml(name)}"${
+            name === selected ? " selected" : ""
+          }>${escapeHtml(name)}</option>`
+      )
+      .join("");
+  }
+
+  function addExtraRoleRow(preset) {
+    const root = $("bench-role-plan-extra");
+    const addBtn = $("bench-add-role-run");
+    if (!root) return;
+    if (1 + extraRoleRows().length >= MAX_PLAN_ENTRIES) {
+      setStatus(`At most ${MAX_PLAN_ENTRIES} role entries in the role plan.`, true);
+      return;
+    }
+    const role = (preset && preset.role) || currentAiRole || knownRoles[0] || "";
+    const row = document.createElement("div");
+    row.className = "bench-run-plan-row bench-run-plan-extra";
+    row.innerHTML = `
+      <label class="bench-run-plan-field bench-run-plan-model-field">Role
+        <select class="bench-plan-role">${roleOptions(role)}</select>
+      </label>
+      <span class="bench-plan-spacer"></span>
+      <button type="button" class="icon-btn bench-plan-remove" title="Remove role">&times;</button>`;
+    root.appendChild(row);
+    row.querySelector(".bench-plan-remove")?.addEventListener("click", () => {
+      row.remove();
+      root.dataset.userTouched = "1";
+      updateRolePlanSummary();
+      if (addBtn) addBtn.disabled = 1 + extraRoleRows().length >= MAX_PLAN_ENTRIES;
+    });
+    row.querySelectorAll("input, select").forEach((el) => {
+      el.addEventListener("input", () => {
+        root.dataset.userTouched = "1";
+        updateRolePlanSummary();
+      });
+    });
+    if (addBtn) addBtn.disabled = 1 + extraRoleRows().length >= MAX_PLAN_ENTRIES;
+    updateRolePlanSummary();
   }
 
   function populateModelSelect(select, models, preferred) {
@@ -561,7 +687,6 @@
       (preset && preset.model) ||
       savedModelsByProvider[provider] ||
       "";
-    const reps = clampReps((preset && preset.repetitions) || 1);
     const row = document.createElement("div");
     row.className = "bench-run-plan-row bench-run-plan-extra";
     row.innerHTML = `
@@ -576,10 +701,8 @@
           </button>
         </div>
       </label>
-      <label class="bench-run-plan-reps">Runs
-        <input type="number" class="bench-plan-reps" value="${reps}" min="1" max="50">
-      </label>
-      <button type="button" class="icon-btn bench-plan-remove" title="Remove model loop">&times;</button>`;
+      <span class="bench-plan-spacer"></span>
+      <button type="button" class="icon-btn bench-plan-remove" title="Remove model">&times;</button>`;
     row.dataset.preferredModel = model;
     root.appendChild(row);
     wireRunPlanRow(row);
@@ -594,19 +717,45 @@
     refreshRowModels(row, { force: false }).catch(() => {});
   }
 
+  function refreshRoleSelects() {
+    extraRoleRows().forEach((row) => {
+      const select = row.querySelector(".bench-plan-role");
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = roleOptions(current);
+    });
+  }
+
   function renderAiSettings(ai) {
-    const el = $("bench-ai-model-label");
-    if (!el) return;
-    if (!ai || (!ai.provider && !ai.model)) {
-      el.textContent = "AI Settings · —";
-      return;
+    const modelEl = $("bench-ai-model-label");
+    const roleEl = $("bench-ai-role-label");
+    if (ai) {
+      if (ai.provider) currentAiProvider = ai.provider;
+      if (ai.role_objective) currentAiRole = ai.role_objective;
+      if (Array.isArray(ai.role_objective_options)) {
+        knownRoles = ai.role_objective_options.slice();
+      }
+      if (ai.saved_models && typeof ai.saved_models === "object") {
+        savedModelsByProvider = { ...ai.saved_models };
+      }
     }
-    el.textContent = `AI Settings · ${ai.provider || "?"} / ${ai.model || "?"}`;
-    if (ai.provider) currentAiProvider = ai.provider;
-    if (ai.saved_models && typeof ai.saved_models === "object") {
-      savedModelsByProvider = { ...ai.saved_models };
+    if (modelEl) {
+      if (!ai || (!ai.provider && !ai.model)) {
+        modelEl.textContent = "AI Settings · —";
+      } else {
+        modelEl.textContent = `AI Settings · ${ai.provider || "?"} / ${ai.model || "?"}`;
+      }
     }
+    if (roleEl) {
+      if (!ai || !ai.role_objective) {
+        roleEl.textContent = "AI Settings · —";
+      } else {
+        roleEl.textContent = `AI Settings · ${ai.role_objective}`;
+      }
+    }
+    refreshRoleSelects();
     updateRunPlanSummary();
+    updateRolePlanSummary();
   }
 
   async function refresh() {
@@ -646,6 +795,7 @@
     }
     if (!data.running) {
       updateRunPlanSummary();
+      updateRolePlanSummary();
     }
     return data;
   }
@@ -701,16 +851,22 @@
       return;
     }
     const runPlan = collectRunPlan();
-    const totalRuns = runPlan.reduce((sum, entry) => sum + clampReps(entry.repetitions), 0);
-    if (totalRuns > MAX_TOTAL_RUNS) {
-      setStatus(`Run plan exceeds ${MAX_TOTAL_RUNS} total runs (got ${totalRuns}).`, true);
+    const rolePlan = collectRolePlan();
+    const totalSlots = countBatchSlots();
+    if (totalSlots > MAX_TOTAL_RUNS) {
+      setStatus(
+        `Batch plan exceeds ${MAX_TOTAL_RUNS} total runs (model × role = ${totalSlots}).`,
+        true
+      );
       return;
     }
     const payload = {
       mode: "remote",
       timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
       run_plan: runPlan,
-      repetitions: clampReps($("bench-primary-reps")?.value),
+      role_plan: rolePlan,
+      repetitions: modelRepsEach(),
+      role_repetitions: roleRepsEach(),
       tools: selectedTools(),
       target_ids: targetIds,
       remote: {
@@ -925,6 +1081,17 @@
     if (addModelBtn) {
       addModelBtn.addEventListener("click", () => addExtraModelRow());
     }
+    const primaryRoleReps = $("bench-primary-role-reps");
+    if (primaryRoleReps) {
+      primaryRoleReps.addEventListener("input", () => {
+        primaryRoleReps.dataset.touched = "1";
+        updateRolePlanSummary();
+      });
+    }
+    const addRoleBtn = $("bench-add-role-run");
+    if (addRoleBtn) {
+      addRoleBtn.addEventListener("click", () => addExtraRoleRow());
+    }
     const toolList = $("bench-tool-list");
     if (toolList) {
       toolList.addEventListener("change", () => {
@@ -970,6 +1137,7 @@
     if (verifyStop) verifyStop.addEventListener("click", stopVerify);
     if (copyLog) copyLog.addEventListener("click", copyRunLog);
     updateRunPlanSummary();
+    updateRolePlanSummary();
   }
 
   function invalidateModelCache() {

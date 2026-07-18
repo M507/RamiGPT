@@ -530,6 +530,9 @@
                 + historyStatus,
             false
         );
+        if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
+            window.BenchmarkUI.refresh().catch(function () {});
+        }
     }
 
     function openAppSettings() {

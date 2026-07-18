@@ -905,6 +905,8 @@ def write_batch_summary(
     *,
     batch_id: str,
     runs: List[Dict[str, Any]],
+    model_plan: Optional[Dict[str, Any]] = None,
+    role_plan: Optional[Dict[str, Any]] = None,
 ) -> Path:
     batch_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -950,10 +952,15 @@ def write_batch_summary(
                 "summary": r.get("summary"),
                 "provider": r.get("provider"),
                 "model": r.get("model"),
+                "role_objective": r.get("role_objective"),
             }
             for r in runs
         ],
     }
+    if model_plan is not None:
+        payload["model_plan"] = model_plan
+    if role_plan is not None:
+        payload["role_plan"] = role_plan
     path = batch_dir / "batch.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
     return path
