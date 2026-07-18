@@ -857,6 +857,9 @@ def autonomous(session_data):
         """Background task for a specific session using passed session data."""
         session_id = session_data['sid']
         slog = get_session_logger(session_id)
+        if session_data.get("from_benchmark"):
+            get_settings_manager().reload()
+        ai_settings = get_settings()
         max_reqs = _max_ai_requests()
         emit_session(session_id, f'Giving AI full freedom to send {max_reqs} commands', color="#58a6ff")
         debug_logger.info(
@@ -869,8 +872,8 @@ def autonomous(session_data):
             hostname=session_data.get("hostname"),
             server=session_data.get("server"),
             port=session_data.get("port"),
-            provider=get_settings().ai_provider,
-            model=get_settings().active_model(),
+            provider=ai_settings.ai_provider,
+            model=ai_settings.active_model(),
         )
         GlobalTimer.start(
             session_id,
@@ -940,7 +943,10 @@ def autonomous(session_data):
                 trimmed_ai_command = resolve_ai_command(response, priv_esc)
                 command = trimmed_ai_command
                 use_session_v2 = session_v2_enabled()
-                settings = get_settings()
+                if session_data.get("from_benchmark"):
+                    settings = get_settings_manager().reload()
+                else:
+                    settings = get_settings()
                 slog.ai_turn(
                     request_n=i,
                     system=system,
@@ -1649,6 +1655,11 @@ def execute_beroot(session_data):
             "[BeRoot] Handing off to Full AI with scanner findings…",
             color="#58a6ff",
         )
+        beroot_ai = (
+            get_settings_manager().reload()
+            if session_data.get("from_benchmark")
+            else get_settings()
+        )
         get_session_logger(session_id).event(
             "FULL_AI_REQUESTED",
             "Full AI started after BeRoot (AI checkbox)",
@@ -1656,8 +1667,8 @@ def execute_beroot(session_data):
             server=session_data.get("server"),
             port=session_data.get("port"),
             source="beroot",
-            provider=get_settings().ai_provider,
-            model=get_settings().active_model(),
+            provider=beroot_ai.ai_provider,
+            model=beroot_ai.active_model(),
         )
         start_autonomous_task(session_data)
 

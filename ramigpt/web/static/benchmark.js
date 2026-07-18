@@ -313,6 +313,16 @@
     if (run && run.error) setStatus(run.error, true);
   }
 
+  function renderAiSettings(ai) {
+    const el = $("bench-ai-model-label");
+    if (!el) return;
+    if (!ai || (!ai.provider && !ai.model)) {
+      el.textContent = "Model: —";
+      return;
+    }
+    el.textContent = `Model: ${ai.provider || "?"} / ${ai.model || "?"}`;
+  }
+
   async function refresh() {
     const data = await api("/api/benchmark/status");
     if (data.targets && data.targets.length) {
@@ -334,6 +344,7 @@
       renderTools(data.available_tools, data.defaults);
     }
     applyRemotePreset(data.remote_preset);
+    renderAiSettings(data.ai_settings);
     renderRun(data.run, data.running, data.batch);
     // Retune poll cadence when run activity changes.
     startPolling(!!data.running);

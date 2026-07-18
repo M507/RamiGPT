@@ -364,6 +364,9 @@
         }
         applySettingsToForm(data.settings);
         showStatus("Choices saved to JSON; API keys saved to .env", false);
+        if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
+            window.BenchmarkUI.refresh().catch(() => {});
+        }
     }
 
     async function reloadFromEnv() {
@@ -415,6 +418,9 @@
         if (!modal) return;
         modal.classList.remove("open");
         modal.setAttribute("aria-hidden", "true");
+        if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
+            window.BenchmarkUI.refresh().catch(() => {});
+        }
     }
 
     function showAppStatus(message, isError) {

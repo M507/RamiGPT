@@ -31,7 +31,7 @@ from ramigpt.benchmark.targets import (
 )
 from ramigpt.benchmark.results import write_batch_summary, write_benchmark_result
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
-from ramigpt.config import get_settings
+from ramigpt.config import Settings, get_settings, get_settings_manager
 from ramigpt.domain import PrivEscPrompt
 from ramigpt.paths import BENCHMARK_RESULTS_DIR
 from ramigpt.services.runtime_status import set_status
@@ -168,9 +168,9 @@ def mark_full_ai_finished(
         if not run:
             return
         if provider:
-            run.provider = run.provider or provider
+            run.provider = provider
         if model:
-            run.model = run.model or model
+            run.model = model
         for item in run.targets:
             if item.session_id != session_id:
                 continue
@@ -223,6 +223,10 @@ def get_status() -> Dict[str, Any]:
                 "target_ids": [t.id for t in TARGETS],
                 "tools": remote_cfg.get("tools") or default_tools(),
             },
+            "ai_settings": {
+                "provider": get_settings().ai_provider,
+                "model": get_settings().active_model(),
+            },
             "available_tools": AVAILABLE_TOOLS,
             "remote_preset": remote_cfg,
             "history": list(_history[-10:]),
@@ -244,6 +248,19 @@ def request_stop() -> Dict[str, Any]:
             if item.session_id and item.session_id in stop_flags:
                 stop_flags[item.session_id].set()
         return {"ok": True, "run": _current.to_public_dict()}
+
+
+def _reload_ai_settings() -> Settings:
+    """Reload AI Settings from disk so benchmarks use the latest saved provider/model."""
+    return get_settings_manager().reload()
+
+
+def _sync_run_ai_settings(run: BenchmarkRun, settings: Optional[Settings] = None) -> Settings:
+    """Copy the active AI provider/model onto the run record."""
+    cfg = settings or _reload_ai_settings()
+    run.provider = cfg.ai_provider
+    run.model = cfg.active_model()
+    return cfg
 
 
 def _log(run: BenchmarkRun, message: str) -> None:
@@ -534,6 +551,10 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
             )
 
         _connect_session(session_id)
+        ai_cfg = _sync_run_ai_settings(run)
+        item.provider = ai_cfg.ai_provider
+        item.model = ai_cfg.active_model()
+        _log(run, f"Target {target.name}: AI Settings → {ai_cfg.ai_provider}/{ai_cfg.active_model()}")
         tool_ids = enabled_tool_ids(run.tools)
         if tool_ids:
             _log(
@@ -664,11 +685,9 @@ def _worker(run: BenchmarkRun) -> None:
         _log(run, f"Benchmark failed: {exc}")
     finally:
         run.finished_at = _utcnow()
-        # Snapshot settings used for this run (provider/model).
+        # Final provider/model from AI Settings (may differ per target).
         try:
-            settings = get_settings()
-            run.provider = run.provider or settings.ai_provider
-            run.model = run.model or settings.active_model()
+            _sync_run_ai_settings(run)
         except Exception:  # noqa: BLE001
             pass
         with _lock:
@@ -714,7 +733,7 @@ def _make_run(
     repetitions: int,
     suite_targets: List[BenchmarkTarget],
 ) -> BenchmarkRun:
-    settings = get_settings()
+    settings = _reload_ai_settings()
     run = BenchmarkRun(
         id=str(uuid.uuid4()),
         mode=mode,
@@ -818,6 +837,8 @@ def start_run(
     if missing:
         raise RuntimeError(f"Benchmark hooks not registered: {', '.join(missing)}")
 
+    ai_cfg = _reload_ai_settings()
+
     with _lock:
         if _batch.get("active") or (_current and _current.phase not in {"done", "error"}):
             raise RuntimeError("A benchmark run is already in progress")
@@ -854,6 +875,7 @@ def start_run(
         first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
         f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
+        f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
         f"run={1}/{reps}, logs={first.log_dir})",
     )
 
