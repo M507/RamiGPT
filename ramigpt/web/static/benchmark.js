@@ -7,6 +7,8 @@
   let pollRunning = null;
   /** @type {Array<{id:string,port:number,name?:string}>} */
   let knownTargets = [];
+  /** @type {Array<{id:string,name:string,description?:string,target_ids:string[]}>} */
+  let knownProfiles = [];
 
   async function api(path, options = {}) {
     const opts = {
@@ -124,14 +126,58 @@
       .filter(Boolean);
   }
 
-  function setAllTargets(checked) {
+  function sameTargetIds(left, right) {
+    if (left.length !== right.length) return false;
+    const expected = new Set(right);
+    return left.every((id) => expected.has(id));
+  }
+
+  function syncTargetProfileSelector() {
+    const select = $("bench-target-profile");
+    if (!select) return;
+    const selected = selectedTargetIds();
+    const allIds = knownTargets.map((target) => target.id);
+    if (sameTargetIds(selected, allIds)) {
+      select.value = "all";
+      return;
+    }
+    if (!selected.length) {
+      select.value = "none";
+      return;
+    }
+    const profile = knownProfiles.find((item) => sameTargetIds(selected, item.target_ids || []));
+    select.value = profile ? `profile:${profile.id}` : "custom";
+  }
+
+  function setTargetIds(targetIds) {
     const list = $("bench-target-list");
     if (!list) return;
+    const selected = new Set(targetIds);
     list.dataset.userTouched = "1";
     list.querySelectorAll("input[data-target-id]").forEach((el) => {
-      el.checked = !!checked;
+      el.checked = selected.has(el.getAttribute("data-target-id"));
     });
     updateSelectedPortsLabel();
+    syncTargetProfileSelector();
+  }
+
+  function renderTargetProfiles(profiles) {
+    const select = $("bench-target-profile");
+    if (!select) return;
+    knownProfiles = Array.isArray(profiles) ? profiles : [];
+    select.innerHTML = `
+      <option value="all">Select all</option>
+      <option value="none">None</option>
+      <optgroup label="Profiles">
+        ${knownProfiles
+          .map(
+            (profile) =>
+              `<option value="profile:${escapeHtml(profile.id)}">${escapeHtml(profile.name)} (${(profile.target_ids || []).length})</option>`
+          )
+          .join("")}
+      </optgroup>
+      <option value="custom" hidden>Custom selection</option>`;
+    syncTargetProfileSelector();
   }
 
   function selectedPortsLabel() {
@@ -193,6 +239,7 @@
       if ($("bench-cred-pass")) $("bench-cred-pass").textContent = defaults.password || "password";
     }
     updateSelectedPortsLabel();
+    syncTargetProfileSelector();
   }
 
   function phaseLabel(phase) {
@@ -275,6 +322,7 @@
         name: t.name,
       }));
     }
+    renderTargetProfiles(data.profiles);
     if (!$("bench-target-list")?.dataset.userTouched) {
       renderTargets(data.targets, data.defaults);
     } else if (data.defaults) {
@@ -582,12 +630,23 @@
       targetList.addEventListener("change", () => {
         targetList.dataset.userTouched = "1";
         updateSelectedPortsLabel();
+        syncTargetProfileSelector();
       });
     }
-    const selectAll = $("bench-targets-all");
-    const selectNone = $("bench-targets-none");
-    if (selectAll) selectAll.addEventListener("click", () => setAllTargets(true));
-    if (selectNone) selectNone.addEventListener("click", () => setAllTargets(false));
+    const targetProfile = $("bench-target-profile");
+    if (targetProfile) {
+      targetProfile.addEventListener("change", () => {
+        if (targetProfile.value === "all") {
+          setTargetIds(knownTargets.map((target) => target.id));
+        } else if (targetProfile.value === "none") {
+          setTargetIds([]);
+        } else if (targetProfile.value.startsWith("profile:")) {
+          const profileId = targetProfile.value.slice("profile:".length);
+          const profile = knownProfiles.find((item) => item.id === profileId);
+          if (profile) setTargetIds(profile.target_ids || []);
+        }
+      });
+    }
     const start = $("bench-start");
     const stop = $("bench-stop");
     const cleanBtn = $("bench-clean-logs");

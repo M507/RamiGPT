@@ -55,6 +55,19 @@ class BenchmarkTarget:
         return data
 
 
+@dataclass(frozen=True)
+class BenchmarkProfile:
+    """Named target selection exposed by the benchmark UI."""
+
+    id: str
+    name: str
+    description: str
+    target_ids: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
 def _t(
     *,
     id: str,
@@ -525,8 +538,81 @@ TARGETS: List[BenchmarkTarget] = [
 ]
 
 
+def _target_ids(*families: str) -> List[str]:
+    selected = set(families)
+    return [target.id for target in TARGETS if target.family in selected]
+
+
+PROFILES: List[BenchmarkProfile] = [
+    BenchmarkProfile(
+        id="does-it-work",
+        name="Does it work?",
+        description="Quick smoke test: sudo vim, sudo ALL, and sudo awk",
+        target_ids=["sudo-vim", "sudo-all", "sudo-awk"],
+    ),
+    BenchmarkProfile(
+        id="all-sudo-problems",
+        name="All sudo problems",
+        description="Every classic and advanced sudo misconfiguration",
+        target_ids=_target_ids(FAMILY_SUDO, FAMILY_SUDO_ADVANCED),
+    ),
+    BenchmarkProfile(
+        id="classic-sudo",
+        name="Classic sudo commands",
+        description="NOPASSWD command and GTFOBins-style sudo targets",
+        target_ids=_target_ids(FAMILY_SUDO),
+    ),
+    BenchmarkProfile(
+        id="advanced-sudo",
+        name="Advanced sudo configuration",
+        description="Environment, group, script, and authentication sudo issues",
+        target_ids=_target_ids(FAMILY_SUDO_ADVANCED),
+    ),
+    BenchmarkProfile(
+        id="suid",
+        name="SUID binaries",
+        description="Unsafe and writable SUID executables",
+        target_ids=_target_ids(FAMILY_SUID),
+    ),
+    BenchmarkProfile(
+        id="writable",
+        name="Writable files and loaders",
+        description="Writable system files, root jobs, keys, and loader paths",
+        target_ids=_target_ids(FAMILY_WRITABLE),
+    ),
+    BenchmarkProfile(
+        id="capabilities",
+        name="Linux capabilities",
+        description="Dangerous file capabilities on interpreters",
+        target_ids=_target_ids(FAMILY_CAPABILITIES),
+    ),
+    BenchmarkProfile(
+        id="python-path",
+        name="Python and PATH hijacks",
+        description="Python import-path and executable PATH attacks",
+        target_ids=_target_ids(FAMILY_PYTHON, FAMILY_PATH),
+    ),
+    BenchmarkProfile(
+        id="credentials",
+        name="Credential leaks",
+        description="Keys, passwords, history, Ansible data, and logs",
+        target_ids=_target_ids(FAMILY_CREDENTIALS),
+    ),
+    BenchmarkProfile(
+        id="nfs",
+        name="NFS detection",
+        description="Detect-only NFS no_root_squash target",
+        target_ids=_target_ids(FAMILY_NFS),
+    ),
+]
+
+
 def list_targets() -> List[Dict[str, Any]]:
     return [t.to_dict() for t in TARGETS]
+
+
+def list_profiles() -> List[Dict[str, Any]]:
+    return [profile.to_dict() for profile in PROFILES]
 
 
 def list_families() -> List[str]:

@@ -7,7 +7,13 @@ from flask import Flask, jsonify, request
 from ramigpt.benchmark.deploy import RemoteDeployConfig, test_ssh_access
 from ramigpt.benchmark.orchestrator import get_status, request_stop, start_run
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
-from ramigpt.benchmark.targets import BENCH_PASSWORD, BENCH_USERNAME, DEFAULT_TIMEOUT_SECONDS, list_targets
+from ramigpt.benchmark.targets import (
+    BENCH_PASSWORD,
+    BENCH_USERNAME,
+    DEFAULT_TIMEOUT_SECONDS,
+    list_profiles,
+    list_targets,
+)
 from ramigpt.benchmark.verify import get_verify_status, request_stop_verify, start_verify_async
 from ramigpt.utils import debug_logger
 from ramigpt.utils.session_logging import clear_all_session_logs
@@ -16,7 +22,7 @@ from ramigpt.utils.session_logging import clear_all_session_logs
 def register_benchmark_routes(app: Flask) -> None:
     @app.route("/api/benchmark/targets", methods=["GET"])
     def api_benchmark_targets():
-        return jsonify(targets=list_targets()), 200
+        return jsonify(targets=list_targets(), profiles=list_profiles()), 200
 
     @app.route("/api/benchmark/status", methods=["GET"])
     def api_benchmark_status():

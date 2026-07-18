@@ -27,6 +27,7 @@ from ramigpt.benchmark.targets import (
     DEFAULT_TIMEOUT_SECONDS,
     TARGETS,
     BenchmarkTarget,
+    list_profiles,
     resolve_targets,
 )
 from ramigpt.benchmark.results import write_batch_summary, write_benchmark_result
@@ -211,6 +212,7 @@ def get_status() -> Dict[str, Any]:
                 "repetitions": _batch.get("repetitions"),
             },
             "targets": [t.to_dict() for t in TARGETS],
+            "profiles": list_profiles(),
             "defaults": {
                 "timeout_seconds": int(
                     remote_cfg.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS
