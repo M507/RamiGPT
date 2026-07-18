@@ -471,6 +471,10 @@
                 : "4";
             outputCount.disabled = !(outputToggle && outputToggle.checked);
         }
+        const advancedToggle = $("app-settings-advanced-mode");
+        if (advancedToggle) {
+            advancedToggle.checked = !!Number(settings.advanced_mode);
+        }
     }
 
     async function loadAppSettings() {
@@ -492,6 +496,7 @@
         const sessionV2Toggle = $("app-settings-upgraded-session-v2");
         const outputToggle = $("app-settings-history-outputs");
         const outputCount = $("app-settings-history-output-count");
+        const advancedToggle = $("app-settings-advanced-mode");
         const edgeCount = Number(outputCount ? outputCount.value : 4);
         if (!Number.isInteger(edgeCount) || edgeCount < 0 || edgeCount > 40) {
             throw new Error("History output count must be an integer from 0 to 40.");
@@ -508,6 +513,7 @@
                 debug: promptToggle && promptToggle.checked ? 1 : 0,
                 history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
                 history_output_edge_count: edgeCount,
+                advanced_mode: advancedToggle && advancedToggle.checked ? 1 : 0,
                 persist: true,
             }),
         });

@@ -57,6 +57,14 @@
     el.style.color = isError ? "var(--danger)" : "var(--muted)";
   }
 
+  function syncAdvancedControls(advancedMode) {
+    const resetBtn = $("bench-reset-results");
+    if (!resetBtn) return;
+    const enabled = !!Number(advancedMode);
+    resetBtn.hidden = !enabled;
+    if (!enabled) resetBtn.disabled = true;
+  }
+
   function openModal() {
     const modal = $("benchmark-modal");
     if (!modal) return;
@@ -133,6 +141,16 @@
       out.beroot = true;
     }
     return out;
+  }
+
+  function enabledToolIds(tools) {
+    if (Array.isArray(tools)) {
+      return tools.filter(Boolean);
+    }
+    if (!tools || typeof tools !== "object") {
+      return [];
+    }
+    return Object.keys(tools).filter((id) => tools[id]);
   }
 
   function selectedTargetIds() {
@@ -297,8 +315,29 @@
           run.provider || run.model
             ? `<div class="muted small">Model: ${escapeHtml(run.provider || "?")}/${escapeHtml(run.model || "?")}</div>`
             : "";
+        const modelKeyLabel = run.model_key_name
+          ? `<div class="muted small">Model key: <code>${escapeHtml(run.model_key_name)}</code></div>`
+          : "";
+        const profileLabel = run.profile_label
+          ? `<div class="muted small">Profile: ${escapeHtml(run.profile_label)}</div>`
+          : "";
+        const hardware = run.hardware || {};
+        const vramLabel =
+          hardware.gpu_vram != null && hardware.gpu_vram !== ""
+            ? `${/^\d+$/.test(String(hardware.gpu_vram)) ? `${hardware.gpu_vram} MiB` : hardware.gpu_vram}`
+            : "?";
+        const hardwareLabel =
+          !run.profile_label && hardware.gpu_name
+            ? `<div class="muted small">GPU: ${escapeHtml(hardware.gpu_name)} · VRAM ${escapeHtml(vramLabel)}${
+                hardware.cuda_version ? ` · CUDA ${escapeHtml(hardware.cuda_version)}` : ""
+              }</div>`
+            : "";
         const roleLabel = run.role_objective
           ? `<div class="muted small">Role: ${escapeHtml(run.role_objective)}</div>`
+          : "";
+        const runToolIds = enabledToolIds(run.tools);
+        const toolsLabel = runToolIds.length
+          ? `<div class="muted small">Tools: ${escapeHtml(runToolIds.join(", "))}</div>`
           : "";
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
@@ -310,7 +349,11 @@
           : "";
         results.innerHTML =
           modelLabel +
+          modelKeyLabel +
+          profileLabel +
+          hardwareLabel +
           roleLabel +
+          toolsLabel +
           resultDir +
           runIssues +
           run.targets
@@ -319,12 +362,8 @@
               const elapsed = t.elapsed_seconds != null ? `${t.elapsed_seconds}s` : "—";
               const cmds =
                 t.ai_requests != null ? `${t.ai_requests} cmds` : "";
-              const tools = (t.tools_used || []).length
-                ? `tools=${(t.tools_used || []).join(",")}`
-                : "";
               const timing = t.timing_summary || {};
               const timingParts = [];
-              if (timing.beroot_seconds != null) timingParts.push(`beroot=${timing.beroot_seconds}s`);
               if (timing.ai_llm_seconds != null) timingParts.push(`ai=${timing.ai_llm_seconds}s`);
               if (timing.shell_seconds != null) timingParts.push(`shell=${timing.shell_seconds}s`);
               if (timing.other_seconds != null) timingParts.push(`other=${timing.other_seconds}s`);
@@ -352,7 +391,7 @@
               const issueLines = (t.issues || [])
                 .map((issue) => `<div class="muted small bench-issue">! ${escapeHtml(issue)}</div>`)
                 .join("");
-              const meta = [elapsed, cmds, tools, t.message || ""]
+              const meta = [elapsed, cmds, t.message || ""]
                 .filter(Boolean)
                 .join(" · ");
               return `<div class="bench-result-row status-${escapeHtml(klass)}">
@@ -376,6 +415,8 @@
     if (stopBtn) stopBtn.disabled = !running;
     const cleanBtn = $("bench-clean-logs");
     if (cleanBtn) cleanBtn.disabled = !!running;
+    const resetBtn = $("bench-reset-results");
+    if (resetBtn) resetBtn.disabled = !!running || resetBtn.hidden;
 
     if (run && run.error) setStatus(run.error, true);
   }
@@ -780,6 +821,7 @@
     }
     applyRemotePreset(data.remote_preset);
     renderAiSettings(data.ai_settings);
+    syncAdvancedControls(data.ai_settings && data.ai_settings.advanced_mode);
     renderRun(data.run, data.running, data.batch);
     // Retune poll cadence when run activity changes.
     startPolling(!!data.running);
@@ -914,6 +956,22 @@
       if (window.Workspace && typeof window.Workspace.refreshInventory === "function") {
         window.Workspace.refreshInventory();
       }
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  async function resetResults() {
+    const ok = window.confirm(
+      "Reset all benchmark results?\n\nThis deletes every result sheet under data/benchmark/results/, rebuilds an empty master.json, and resets the README stats section. Session logs are kept."
+    );
+    if (!ok) return;
+    setStatus("Resetting benchmark results…");
+    try {
+      const data = await api("/api/benchmark/results/reset", { method: "POST", body: {} });
+      const removed = data.removed != null ? data.removed : "?";
+      setStatus(`Benchmark results reset (${removed} item(s) removed).`);
+      await refresh();
     } catch (err) {
       setStatus(err.message || String(err), true);
     }
@@ -1123,6 +1181,7 @@
     const start = $("bench-start");
     const stop = $("bench-stop");
     const cleanBtn = $("bench-clean-logs");
+    const resetBtn = $("bench-reset-results");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
     const verifyBtn = $("bench-verify-targets");
@@ -1131,6 +1190,7 @@
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
+    if (resetBtn) resetBtn.addEventListener("click", resetResults);
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);

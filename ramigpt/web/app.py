@@ -2551,6 +2551,7 @@ def update_ai_settings():
         "role_objective",
         "rotate_role_objectives",
         "upgraded_session_v2",
+        "advanced_mode",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
     persist = bool(payload.get("persist", True))
@@ -2670,6 +2671,7 @@ def test_ai_settings():
         "role_objective",
         "rotate_role_objectives",
         "upgraded_session_v2",
+        "advanced_mode",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 

@@ -208,6 +208,31 @@ UI Benchmark modal → **Test targets (get root)** runs the same probes against 
 4. Set per-target timeout (default **60s**).
 5. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
 
+### Collaborative benchmark results
+
+**Live stats only** — the section below is rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
+
+**How collaborative merge works:** each run is a sheet under `data/benchmark/results/`. When the master is rebuilt, runs **merge into the same stats** when they share:
+
+- **Model `key_name`** — weights + modelfile params (registry under [`data/benchmark/models/`](data/benchmark/models/))
+- **Hardware lab profile** — `BENCHMARK_GPU_*` in `.env` (GPU name, VRAM MiB, driver, CUDA)
+- **Scenario** — role, target, and tools
+
+`BENCHMARK_GPU_POWER_LIMIT` is recorded on each run sheet but does **not** affect merge keys (same GPU lab profile merges even if watt cap differs).
+
+The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile + scenario → merged stats. Different model config or GPU lab → separate profile row.
+
+Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
+
+<!-- benchmark-master:start -->
+_Last updated: 2026-07-18T17:43:46.526931+00:00 · 0 run(s) · [full JSON](data/benchmark/results/master.json)_
+
+_No benchmark runs yet._
+
+Run the suite from the **Benchmark** UI to create per-run sheets under `data/benchmark/results/` and populate this section. See [`data/benchmark/examples/`](data/benchmark/examples/) for sample file formats only.
+
+<!-- benchmark-master:end -->
+
 ### Remote deploy (Ansible)
 
 ```sh

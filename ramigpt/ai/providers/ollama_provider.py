@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
 from openai import OpenAI
@@ -30,14 +30,14 @@ def _ollama_origin(base_url: str) -> str:
     return url
 
 
-def list_ollama_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
-    """
-    Fetch installed model names from an Ollama host via ``GET /api/tags``.
-
-    Returns a de-duplicated, sorted list of model names (e.g. ``qwen3:14b``).
-    Raises ``RuntimeError`` / ``ValueError`` when the host is unreachable or
-    the URL is invalid.
-    """
+def _ollama_api_request(
+    base_url: str,
+    path: str,
+    *,
+    method: str = "GET",
+    body: Optional[Dict[str, Any]] = None,
+    timeout: float = 8.0,
+) -> Dict[str, Any]:
     origin = _ollama_origin(base_url)
     if not origin:
         raise ValueError("Ollama base URL is empty")
@@ -46,19 +46,35 @@ def list_ollama_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"Invalid Ollama base URL: {base_url!r}")
 
-    tags_url = urlunparse((parsed.scheme, parsed.netloc, "/api/tags", "", "", ""))
-    req = urllib.request.Request(tags_url, method="GET")
+    url = urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+    data = None
+    headers = {}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Ollama /api/tags HTTP {exc.code} at {tags_url}") from exc
+        raise RuntimeError(f"Ollama {path} HTTP {exc.code} at {url}") from exc
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Failed to list Ollama models at {tags_url}: {exc}") from exc
+        raise RuntimeError(f"Failed Ollama {path} at {url}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Unexpected Ollama {path} payload from {url}")
+    return payload
 
-    models = payload.get("models") if isinstance(payload, dict) else None
+
+def list_ollama_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
+    """
+    Fetch installed model names from an Ollama host via ``GET /api/tags``.
+
+    Returns a de-duplicated, sorted list of model names (e.g. ``qwen3:14b``).
+    """
+    payload = _ollama_api_request(base_url, "/api/tags", timeout=timeout)
+    models = payload.get("models")
     if not isinstance(models, list):
-        raise RuntimeError(f"Unexpected Ollama /api/tags payload from {tags_url}")
+        raise RuntimeError("Unexpected Ollama /api/tags payload")
 
     names: List[str] = []
     seen = set()
@@ -74,43 +90,6 @@ def list_ollama_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
     return names
 
 
-def list_ollama_running_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
-    """Return model names currently loaded in Ollama memory (``GET /api/ps``)."""
-    origin = _ollama_origin(base_url)
-    if not origin:
-        raise ValueError("Ollama base URL is empty")
-
-    parsed = urlparse(origin if "://" in origin else f"http://{origin}")
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(f"Invalid Ollama base URL: {base_url!r}")
-
-    ps_url = urlunparse((parsed.scheme, parsed.netloc, "/api/ps", "", "", ""))
-    req = urllib.request.Request(ps_url, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Ollama /api/ps HTTP {exc.code} at {ps_url}") from exc
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Failed to list running Ollama models at {ps_url}: {exc}") from exc
-
-    models = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(models, list):
-        raise RuntimeError(f"Unexpected Ollama /api/ps payload from {ps_url}")
-
-    names: List[str] = []
-    seen = set()
-    for item in models:
-        if not isinstance(item, dict):
-            continue
-        name = (item.get("name") or item.get("model") or "").strip()
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        names.append(name)
-    return names
-
-
 def ollama_model_names_match(expected: str, running: str) -> bool:
     """True when ``expected`` and ``running`` refer to the same Ollama model tag."""
     exp = (expected or "").strip().lower()
@@ -123,10 +102,60 @@ def ollama_model_names_match(expected: str, running: str) -> bool:
     run_base, _, run_tag = run.partition(":")
     if exp_base != run_base:
         return False
-    # Same base; match when either side omits the tag (e.g. qwen3 vs qwen3:14b).
     if not exp_tag or not run_tag:
         return True
     return exp_tag == run_tag
+
+
+def fetch_ollama_tag_info(base_url: str, model: str, *, timeout: float = 8.0) -> Dict[str, Any]:
+    """Return the ``/api/tags`` entry for ``model`` (digest, size, modified_at, …)."""
+    payload = _ollama_api_request(base_url, "/api/tags", timeout=timeout)
+    models = payload.get("models")
+    if not isinstance(models, list):
+        raise RuntimeError("Unexpected Ollama /api/tags payload")
+
+    target = (model or "").strip()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or item.get("model") or "").strip()
+        if name == target or ollama_model_names_match(target, name):
+            return dict(item)
+    raise RuntimeError(f"Model {target!r} not found in Ollama /api/tags")
+
+
+def fetch_ollama_show(base_url: str, model: str, *, timeout: float = 12.0) -> Dict[str, Any]:
+    """Fetch model metadata from ``POST /api/show``."""
+    target = (model or "").strip()
+    if not target:
+        raise ValueError("Ollama model name is empty")
+    return _ollama_api_request(
+        base_url,
+        "/api/show",
+        method="POST",
+        body={"name": target},
+        timeout=timeout,
+    )
+
+
+def list_ollama_running_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
+    """Return model names currently loaded in Ollama memory (``GET /api/ps``)."""
+    payload = _ollama_api_request(base_url, "/api/ps", timeout=timeout)
+    models = payload.get("models")
+    if not isinstance(models, list):
+        raise RuntimeError("Unexpected Ollama /api/ps payload")
+
+    names: List[str] = []
+    seen = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or item.get("model") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
 
 
 class OllamaProvider(AIProvider):

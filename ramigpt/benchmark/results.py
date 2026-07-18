@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ramigpt.benchmark.profile import collaborative_profile_key, profile_display_label
+from ramigpt.benchmark.tools import enabled_tool_ids, normalize_tools
 from ramigpt.paths import BENCHMARK_RESULTS_DIR, ensure_runtime_dirs
 from ramigpt.utils import debug_logger
 
@@ -43,13 +45,14 @@ def _empty_target_timing() -> Dict[str, Any]:
     }
 
 
-def clear_benchmark_results() -> int:
+def clear_benchmark_results(*, results_dir: Optional[Path] = None) -> int:
     """Remove all persisted benchmark result folders and index files."""
     ensure_runtime_dirs()
+    root = results_dir or BENCHMARK_RESULTS_DIR
     removed = 0
-    if not BENCHMARK_RESULTS_DIR.is_dir():
+    if not root.is_dir():
         return 0
-    for path in BENCHMARK_RESULTS_DIR.iterdir():
+    for path in root.iterdir():
         if path.name == ".gitkeep":
             continue
         if path.is_dir():
@@ -64,6 +67,10 @@ def clear_benchmark_results() -> int:
 def _safe_name(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", (value or "").strip())
     return cleaned or "run"
+
+
+def _utcnow_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _read_events(events_path: Path) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -638,7 +645,8 @@ def build_result_document(
     """Normalize a finished BenchmarkRun public dict into an analysis document."""
     settings = settings or {}
     suite_dir = run_public.get("log_dir") or run_public.get("suite_dir")
-    tools_configured = run_public.get("tools") or {}
+    tools_configured = normalize_tools(run_public.get("tools"))
+    run_tools = enabled_tool_ids(tools_configured)
     targets = [
         enrich_target_from_events(
             t,
@@ -664,9 +672,15 @@ def build_result_document(
 
     suite_provider = settings.get("provider") or ""
     suite_model = settings.get("model") or ""
+    suite_model_key_name = settings.get("model_key_name") or run_public.get("model_key_name") or ""
     for t in targets:
         suite_provider = suite_provider or (t.get("provider") or "")
         suite_model = suite_model or (t.get("model") or "")
+        if not suite_model_key_name:
+            suite_model_key_name = t.get("model_key_name") or ""
+        t.setdefault("model_key_name", suite_model_key_name or "")
+        t.setdefault("model", suite_model)
+        t.setdefault("provider", suite_provider)
 
     elapsed_total = 0.0
     for t in targets:
@@ -690,7 +704,24 @@ def build_result_document(
         "finished_at": run_public.get("finished_at"),
         "provider": suite_provider,
         "model": suite_model,
-        "tools_configured": run_public.get("tools") or {},
+        "model_key_name": suite_model_key_name,
+        "profile_key": collaborative_profile_key(
+            suite_model_key_name,
+            suite_provider,
+            suite_model,
+            run_public.get("hardware") or settings.get("hardware") or {},
+        ),
+        "profile_label": profile_display_label(
+            suite_model_key_name,
+            run_public.get("hardware") or settings.get("hardware") or {},
+            provider=suite_provider,
+            model=suite_model,
+        ),
+        "model_registry": run_public.get("model_registry") or settings.get("model_registry") or {},
+        "hardware": run_public.get("hardware") or settings.get("hardware") or {},
+        "role_objective": run_public.get("role_objective") or "",
+        "tools_configured": tools_configured,
+        "tools": run_tools,
         "targets": targets,
         "summary": {
             **counts,
@@ -832,6 +863,9 @@ def write_benchmark_result(
         f"Benchmark result {doc.get('id')}",
         f"phase={doc.get('phase')} mode={doc.get('mode')} host={doc.get('host')}",
         f"model={doc.get('provider')}/{doc.get('model')}",
+        f"model_key_name={doc.get('model_key_name') or '—'}",
+        f"profile_label={doc.get('profile_label') or '—'}",
+        f"hardware={json.dumps(doc.get('hardware') or {})}",
         f"started={doc.get('started_at')} finished={doc.get('finished_at')}",
         f"repetition={doc.get('repetition')}/{doc.get('repetitions')}",
         f"tools_configured={json.dumps(doc.get('tools_configured') or {})}",
@@ -880,6 +914,9 @@ def write_benchmark_result(
         "host": doc.get("host"),
         "provider": doc.get("provider"),
         "model": doc.get("model"),
+        "model_key_name": doc.get("model_key_name"),
+        "role_objective": doc.get("role_objective"),
+        "tools": doc.get("tools") or [],
         "summary": doc.get("summary"),
         "result_dir": str(result_dir),
         "result_json": str(result_path),
@@ -897,6 +934,12 @@ def write_benchmark_result(
         f"results written → {result_path} "
         f"(targets={len(doc.get('targets') or [])}, issues={len(doc.get('issues') or [])})"
     )
+    try:
+        from ramigpt.benchmark.master_results import update_master_results
+
+        update_master_results()
+    except Exception as exc:  # noqa: BLE001
+        _log_error("failed to update master results", exc=exc)
     return result_path
 
 
@@ -952,7 +995,9 @@ def write_batch_summary(
                 "summary": r.get("summary"),
                 "provider": r.get("provider"),
                 "model": r.get("model"),
+                "model_key_name": r.get("model_key_name"),
                 "role_objective": r.get("role_objective"),
+                "tools": enabled_tool_ids(normalize_tools(r.get("tools"))),
             }
             for r in runs
         ],
@@ -963,4 +1008,10 @@ def write_batch_summary(
         payload["role_plan"] = role_plan
     path = batch_dir / "batch.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+    try:
+        from ramigpt.benchmark.master_results import update_master_results
+
+        update_master_results()
+    except Exception as exc:  # noqa: BLE001
+        _log_error("failed to update master results after batch summary", exc=exc)
     return path

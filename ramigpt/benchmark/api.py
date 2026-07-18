@@ -196,3 +196,56 @@ def register_benchmark_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             debug_logger.exception("Failed to clean session logs")
             return jsonify(ok=False, error=str(exc)), 500
+
+    @app.route("/api/benchmark/results/master", methods=["GET"])
+    def api_benchmark_results_master():
+        from ramigpt.benchmark.master_results import load_master_results
+
+        master = load_master_results()
+        if master is None:
+            return jsonify(
+                ok=False,
+                error="No master results yet — run a benchmark or POST /api/benchmark/results/rebuild",
+            ), 404
+        return jsonify(ok=True, master=master), 200
+
+    @app.route("/api/benchmark/results/rebuild", methods=["POST"])
+    def api_benchmark_results_rebuild():
+        """Rebuild master.json from all result.json files (e.g. after pulling collaborators' runs)."""
+        from ramigpt.benchmark.master_results import build_master_document, write_master_results
+
+        try:
+            master = build_master_document()
+            path = write_master_results(master)
+            return jsonify(
+                ok=True,
+                path=str(path),
+                runs=master.get("source_runs_deduped"),
+                scenarios=len((master.get("aggregate") or {}).get("by_scenario") or {}),
+            ), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to rebuild master benchmark results")
+            return jsonify(ok=False, error=str(exc)), 500
+
+    @app.route("/api/benchmark/results/reset", methods=["POST"])
+    def api_benchmark_results_reset():
+        """Delete all benchmark result sheets and reset master.json + README stats."""
+        from ramigpt.benchmark.master_results import reset_benchmark_results
+
+        status = get_status()
+        if status.get("running"):
+            return jsonify(
+                ok=False,
+                error="Stop the active benchmark before resetting results",
+            ), 409
+        if not get_settings().advanced_mode:
+            return jsonify(
+                ok=False,
+                error="Enable Advanced in App Settings to reset benchmark results",
+            ), 403
+        try:
+            result = reset_benchmark_results()
+            return jsonify(ok=True, **result), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to reset benchmark results")
+            return jsonify(ok=False, error=str(exc)), 500

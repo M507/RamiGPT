@@ -35,6 +35,9 @@ from ramigpt.benchmark.batch_plan import (
     normalize_batch_plans,
 )
 from ramigpt.benchmark.model_warmup import ModelWarmupResult, warmup_ai_model
+from ramigpt.benchmark.hardware import load_benchmark_hardware
+from ramigpt.benchmark.profile import collaborative_profile_key, profile_display_label
+from ramigpt.benchmark.model_registry import resolve_model_identity
 from ramigpt.benchmark.results import (
     build_result_document,
     enrich_target_from_events,
@@ -128,6 +131,11 @@ class BenchmarkRun:
     provider: str = ""
     model: str = ""
     role_objective: str = ""
+    model_key_name: str = ""
+    profile_key: str = ""
+    profile_label: str = ""
+    model_registry: Optional[Dict[str, Any]] = None
+    hardware: Optional[Dict[str, Any]] = None
     result_dir: Optional[str] = None
     model_warmup: Optional[Dict[str, Any]] = None
 
@@ -268,6 +276,7 @@ def get_status() -> Dict[str, Any]:
                 "model": get_settings().active_model(),
                 "role_objective": get_settings().role_objective,
                 "role_objective_options": list(load_role_objectives().keys()),
+                "advanced_mode": get_settings().advanced_mode,
                 "saved_models": {
                     "ollama": get_settings().ollama_model,
                     "openai": get_settings().openai_model,
@@ -756,8 +765,62 @@ def _selected_suite_targets(run: BenchmarkRun) -> List[BenchmarkTarget]:
     return [t for t in TARGETS if t.id in wanted]
 
 
+def _attach_run_model_identity(run: BenchmarkRun) -> None:
+    """Resolve registry key_name + hardware profile for this run."""
+    try:
+        _sync_run_ai_settings(run)
+    except Exception:  # noqa: BLE001
+        pass
+    run.hardware = load_benchmark_hardware()
+    try:
+        identity = resolve_model_identity(get_settings())
+        run.model_key_name = str(identity.get("key_name") or "")
+        run.model_registry = identity
+        fp = identity.get("fingerprint") or {}
+        detail_bits = [
+            str(fp.get("parameter_size") or "").strip(),
+            str(fp.get("quantization_level") or "").strip(),
+        ]
+        detail_txt = " · ".join(bit for bit in detail_bits if bit)
+        _log(
+            run,
+            "Model identity "
+            f"{run.model_key_name} ({run.provider}/{run.model}"
+            f"{(' · ' + detail_txt) if detail_txt else ''}) "
+            f"→ {identity.get('registry_path') or '?'}",
+        )
+        for issue in identity.get("issues") or []:
+            _log(run, f"Model registry note: {issue}")
+    except Exception as exc:  # noqa: BLE001
+        run.model_key_name = ""
+        run.model_registry = {
+            "key_name": "",
+            "provider": run.provider,
+            "model": run.model,
+            "issues": [str(exc)],
+        }
+        _log(run, f"Model registry failed: {exc}")
+    run.profile_key = collaborative_profile_key(
+        run.model_key_name,
+        run.provider,
+        run.model,
+        run.hardware or {},
+    )
+    run.profile_label = profile_display_label(
+        run.model_key_name,
+        run.hardware or {},
+        provider=run.provider,
+        model=run.model,
+    )
+    if run.profile_label:
+        _log(run, f"Benchmark profile: {run.profile_label}")
+    if not run.hardware:
+        _log(run, "Benchmark hardware profile not configured (.env BENCHMARK_GPU_*)")
+
+
 def _worker(run: BenchmarkRun) -> None:
     try:
+        _attach_run_model_identity(run)
         def log_fn(msg: str) -> None:
             _log(run, msg)
 
@@ -809,7 +872,13 @@ def _worker(run: BenchmarkRun) -> None:
                 deepcopy(
                     build_result_document(
                         run.to_public_dict(),
-                        settings={"provider": run.provider, "model": run.model},
+                        settings={
+                            "provider": run.provider,
+                            "model": run.model,
+                            "model_key_name": run.model_key_name,
+                            "model_registry": run.model_registry,
+                            "hardware": run.hardware,
+                        },
                     )
                 )
             )
@@ -832,7 +901,13 @@ def _worker(run: BenchmarkRun) -> None:
         try:
             result_path = write_benchmark_result(
                 run.to_public_dict(),
-                settings={"provider": run.provider, "model": run.model},
+                settings={
+                    "provider": run.provider,
+                    "model": run.model,
+                    "model_key_name": run.model_key_name,
+                    "model_registry": run.model_registry,
+                    "hardware": run.hardware,
+                },
                 batch_dir=Path(run_batch_dir) if run_batch_dir else None,
             )
             run.result_dir = str(result_path.parent)
