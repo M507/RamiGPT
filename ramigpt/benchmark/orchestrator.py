@@ -256,6 +256,12 @@ def get_status() -> Dict[str, Any]:
             "ai_settings": {
                 "provider": get_settings().ai_provider,
                 "model": get_settings().active_model(),
+                "saved_models": {
+                    "ollama": get_settings().ollama_model,
+                    "openai": get_settings().openai_model,
+                    "openwebui": get_settings().openwebui_model,
+                    "cursor": get_settings().cursor_model,
+                },
             },
             "available_tools": AVAILABLE_TOOLS,
             "remote_preset": remote_cfg,

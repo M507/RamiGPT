@@ -17,6 +17,11 @@
   ];
   const MAX_PLAN_ENTRIES = 10;
   const MAX_TOTAL_RUNS = 50;
+  /** @type {Record<string, string[]>} */
+  const modelListCache = {};
+  /** @type {Record<string, string>} */
+  let savedModelsByProvider = {};
+  let currentAiProvider = "ollama";
 
   async function api(path, options = {}) {
     const opts = {
@@ -410,6 +415,130 @@
     return plan;
   }
 
+  function populateModelSelect(select, models, preferred) {
+    if (!select) return;
+    const fetched = Array.isArray(models) ? models.slice() : [];
+    let list = fetched.slice();
+    const keep = (preferred || select.value || "").trim();
+    select.innerHTML = "";
+
+    if (!list.length) {
+      const opt = document.createElement("option");
+      opt.value = keep;
+      opt.textContent = keep
+        ? `${keep} (saved — refresh to list)`
+        : "No models — configure AI or refresh";
+      select.appendChild(opt);
+      select.value = keep;
+      select.disabled = !keep;
+      return;
+    }
+
+    if (keep && list.indexOf(keep) === -1) {
+      list.unshift(keep);
+    }
+
+    list.forEach((id) => {
+      const opt = document.createElement("option");
+      opt.value = id;
+      const notListed = fetched.length > 0 && fetched.indexOf(id) === -1;
+      if (notListed) {
+        opt.textContent = `${id} (saved)`;
+      } else if (id === "default" || id === "auto") {
+        opt.textContent = "Auto (account default)";
+      } else {
+        opt.textContent = id;
+      }
+      select.appendChild(opt);
+    });
+    select.disabled = false;
+    select.value = keep && list.indexOf(keep) !== -1 ? keep : list[0];
+  }
+
+  async function fetchModelsForProvider(provider, { force = false } = {}) {
+    const key = (provider || "").trim().toLowerCase();
+    if (!key) return { models: [], saved_model: "" };
+    if (!force && modelListCache[key]) {
+      return { models: modelListCache[key], saved_model: savedModelsByProvider[key] || "" };
+    }
+    const data = await api("/api/benchmark/models", {
+      method: "POST",
+      body: { provider: key },
+    });
+    if (data.success && Array.isArray(data.models)) {
+      modelListCache[key] = data.models;
+    }
+    if (data.saved_model) {
+      savedModelsByProvider[key] = data.saved_model;
+    }
+    return {
+      models: data.models || [],
+      saved_model: data.saved_model || savedModelsByProvider[key] || "",
+      error: data.success ? "" : data.error || "Could not load models",
+    };
+  }
+
+  async function refreshRowModels(row, { force = true } = {}) {
+    const provider = (row.querySelector(".bench-plan-provider")?.value || "").trim().toLowerCase();
+    const select = row.querySelector(".bench-plan-model");
+    const refreshBtn = row.querySelector(".bench-plan-refresh-models");
+    if (!select || !provider) return;
+
+    const preferred =
+      (select.value || "").trim() ||
+      (row.dataset.preferredModel || "").trim() ||
+      savedModelsByProvider[provider] ||
+      "";
+
+    select.disabled = true;
+    if (refreshBtn) refreshBtn.disabled = true;
+    populateModelSelect(select, preferred ? [preferred] : [], preferred);
+
+    try {
+      const result = await fetchModelsForProvider(provider, { force });
+      populateModelSelect(select, result.models, preferred || result.saved_model);
+      if (result.error && force) {
+        row.title = result.error;
+      } else {
+        row.title = "";
+      }
+    } catch (err) {
+      populateModelSelect(select, preferred ? [preferred] : [], preferred);
+      row.title = err.message || "Failed to load models";
+    } finally {
+      if (refreshBtn) refreshBtn.disabled = false;
+    }
+  }
+
+  function wireRunPlanRow(row) {
+    const root = $("bench-run-plan-extra");
+    const providerSelect = row.querySelector(".bench-plan-provider");
+    const refreshBtn = row.querySelector(".bench-plan-refresh-models");
+
+    providerSelect?.addEventListener("change", () => {
+      if (root) root.dataset.userTouched = "1";
+      row.dataset.preferredModel = savedModelsByProvider[providerSelect.value] || "";
+      refreshRowModels(row, { force: true }).catch(() => {});
+    });
+
+    refreshBtn?.addEventListener("click", () => {
+      refreshRowModels(row, { force: true }).catch((err) => setStatus(err.message, true));
+    });
+
+    row.querySelectorAll("input, select").forEach((el) => {
+      if (el.classList.contains("bench-plan-provider") || el.classList.contains("bench-plan-model")) {
+        return;
+      }
+      el.addEventListener("input", () => {
+        if (root) root.dataset.userTouched = "1";
+        updateRunPlanSummary();
+      });
+    });
+    row.querySelector(".bench-plan-model")?.addEventListener("change", () => {
+      if (root) root.dataset.userTouched = "1";
+    });
+  }
+
   function providerOptions(selected) {
     return PLAN_PROVIDERS.map(
       (item) =>
@@ -427,8 +556,11 @@
       setStatus(`At most ${MAX_PLAN_ENTRIES} model entries in the run plan.`, true);
       return;
     }
-    const provider = (preset && preset.provider) || "ollama";
-    const model = (preset && preset.model) || "";
+    const provider = (preset && preset.provider) || currentAiProvider || "ollama";
+    const model =
+      (preset && preset.model) ||
+      savedModelsByProvider[provider] ||
+      "";
     const reps = clampReps((preset && preset.repetitions) || 1);
     const row = document.createElement("div");
     row.className = "bench-run-plan-row bench-run-plan-extra";
@@ -436,20 +568,21 @@
       <label class="bench-run-plan-field">Provider
         <select class="bench-plan-provider">${providerOptions(provider)}</select>
       </label>
-      <label class="bench-run-plan-field">Model
-        <input type="text" class="bench-plan-model" placeholder="model id" value="${escapeHtml(model)}">
+      <label class="bench-run-plan-field bench-run-plan-model-field">Model
+        <div class="bench-model-picker">
+          <select class="bench-plan-model" disabled><option value="">Loading…</option></select>
+          <button type="button" class="icon-btn bench-plan-refresh-models" title="Refresh models">
+            <i class="fas fa-sync-alt" aria-hidden="true"></i>
+          </button>
+        </div>
       </label>
       <label class="bench-run-plan-reps">Runs
         <input type="number" class="bench-plan-reps" value="${reps}" min="1" max="50">
       </label>
       <button type="button" class="icon-btn bench-plan-remove" title="Remove model loop">&times;</button>`;
+    row.dataset.preferredModel = model;
     root.appendChild(row);
-    row.querySelectorAll("input, select").forEach((el) => {
-      el.addEventListener("input", () => {
-        root.dataset.userTouched = "1";
-        updateRunPlanSummary();
-      });
-    });
+    wireRunPlanRow(row);
     row.querySelector(".bench-plan-remove")?.addEventListener("click", () => {
       row.remove();
       root.dataset.userTouched = "1";
@@ -458,6 +591,7 @@
     });
     if (addBtn) addBtn.disabled = 1 + extraModelRows().length >= MAX_PLAN_ENTRIES;
     updateRunPlanSummary();
+    refreshRowModels(row, { force: false }).catch(() => {});
   }
 
   function renderAiSettings(ai) {
@@ -468,6 +602,10 @@
       return;
     }
     el.textContent = `AI Settings · ${ai.provider || "?"} / ${ai.model || "?"}`;
+    if (ai.provider) currentAiProvider = ai.provider;
+    if (ai.saved_models && typeof ai.saved_models === "object") {
+      savedModelsByProvider = { ...ai.saved_models };
+    }
     updateRunPlanSummary();
   }
 
@@ -834,7 +972,16 @@
     updateRunPlanSummary();
   }
 
-  window.BenchmarkUI = { open: openModal, close: closeModal, refresh };
+  function invalidateModelCache() {
+    Object.keys(modelListCache).forEach((key) => {
+      delete modelListCache[key];
+    });
+    extraModelRows().forEach((row) => {
+      refreshRowModels(row, { force: true }).catch(() => {});
+    });
+  }
+
+  window.BenchmarkUI = { open: openModal, close: closeModal, refresh, invalidateModelCache };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bind);

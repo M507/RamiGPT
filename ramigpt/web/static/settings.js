@@ -367,6 +367,9 @@
         if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
             window.BenchmarkUI.refresh().catch(() => {});
         }
+        if (window.BenchmarkUI && typeof window.BenchmarkUI.invalidateModelCache === "function") {
+            window.BenchmarkUI.invalidateModelCache();
+        }
     }
 
     async function reloadFromEnv() {
@@ -420,6 +423,9 @@
         modal.setAttribute("aria-hidden", "true");
         if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
             window.BenchmarkUI.refresh().catch(() => {});
+        }
+        if (window.BenchmarkUI && typeof window.BenchmarkUI.invalidateModelCache === "function") {
+            window.BenchmarkUI.invalidateModelCache();
         }
     }
 

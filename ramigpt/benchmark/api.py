@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 from ramigpt.benchmark.deploy import RemoteDeployConfig, test_ssh_access
 from ramigpt.benchmark.orchestrator import get_status, request_stop, start_run
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
+from ramigpt.ai.model_catalog import list_models_for_provider, saved_model_for_provider
 from ramigpt.benchmark.targets import (
     BENCH_PASSWORD,
     BENCH_USERNAME,
@@ -15,6 +16,7 @@ from ramigpt.benchmark.targets import (
     list_targets,
 )
 from ramigpt.benchmark.verify import get_verify_status, request_stop_verify, start_verify_async
+from ramigpt.config import get_settings
 from ramigpt.utils import debug_logger
 from ramigpt.utils.session_logging import clear_all_session_logs
 
@@ -27,6 +29,29 @@ def register_benchmark_routes(app: Flask) -> None:
     @app.route("/api/benchmark/status", methods=["GET"])
     def api_benchmark_status():
         return jsonify(get_status()), 200
+
+    @app.route("/api/benchmark/models", methods=["POST"])
+    def api_benchmark_models():
+        """List models for a provider using saved AI settings credentials."""
+        body = request.get_json(silent=True) or {}
+        provider = (body.get("provider") or "").strip().lower()
+        if not provider:
+            return jsonify(success=False, error="provider is required", models=[], count=0), 400
+        try:
+            models = list_models_for_provider(provider)
+            cfg = get_settings()
+            return jsonify(
+                success=True,
+                provider=provider,
+                models=models,
+                count=len(models),
+                saved_model=saved_model_for_provider(cfg, provider),
+            ), 200
+        except ValueError as exc:
+            return jsonify(success=False, error=str(exc), models=[], count=0), 400
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.warning(f"benchmark.list_models failed provider={provider}: {exc}")
+            return jsonify(success=False, error=str(exc), models=[], count=0), 400
 
     @app.route("/api/benchmark/remote-config", methods=["GET"])
     def api_benchmark_remote_config():
