@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from flask import Flask
 
@@ -29,6 +29,7 @@ from ramigpt.benchmark.targets import (
     list_profiles,
     resolve_targets,
 )
+from ramigpt.benchmark.model_warmup import ModelWarmupResult, warmup_ai_model
 from ramigpt.benchmark.results import (
     build_result_document,
     enrich_target_from_events,
@@ -124,6 +125,7 @@ class BenchmarkRun:
     provider: str = ""
     model: str = ""
     result_dir: Optional[str] = None
+    model_warmup: Optional[Dict[str, Any]] = None
 
     def to_public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -292,8 +294,8 @@ def _reload_ai_settings() -> Settings:
 
 
 def _sync_run_ai_settings(run: BenchmarkRun, settings: Optional[Settings] = None) -> Settings:
-    """Copy the active AI provider/model onto the run record."""
-    cfg = settings or _reload_ai_settings()
+    """Copy the active in-memory AI provider/model onto the run record."""
+    cfg = settings or get_settings()
     run.provider = cfg.ai_provider
     run.model = cfg.active_model()
     return cfg
@@ -309,6 +311,43 @@ def _log(run: BenchmarkRun, message: str) -> None:
     if callable(emit):
         try:
             emit(message)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _log_model_warmup(run: BenchmarkRun, warm: ModelWarmupResult) -> None:
+    for line in warm.log_lines:
+        _log(run, line)
+    run.model_warmup = warm.to_dict()
+
+
+def _finish_warmup_failed_run(run: BenchmarkRun, warm: ModelWarmupResult) -> None:
+    run.phase = "error"
+    run.error = warm.error or "AI model warmup failed"
+    run.finished_at = _utcnow()
+    for item in run.targets:
+        item.status = "skipped"
+        item.message = "Skipped — model warmup failed"
+        item.finished_at = run.finished_at
+    with _lock:
+        _history.append(
+            deepcopy(
+                build_result_document(
+                    run.to_public_dict(),
+                    settings={"provider": run.provider, "model": run.model},
+                )
+            )
+        )
+    if run.log_dir:
+        try:
+            write_benchmark_suite_snapshot(
+                Path(run.log_dir),
+                {
+                    **run.to_public_dict(),
+                    "suite_dir": run.log_dir,
+                    "finished_at": run.finished_at,
+                },
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -588,9 +627,16 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
             )
 
         _connect_session(session_id)
+        planned_provider, planned_model = run.provider, run.model
         ai_cfg = _sync_run_ai_settings(run)
         item.provider = ai_cfg.ai_provider
         item.model = ai_cfg.active_model()
+        if (item.provider, item.model) != (planned_provider, planned_model):
+            _log(
+                run,
+                f"Target {target.name}: WARNING model drift "
+                f"(queued {planned_provider}/{planned_model} → active {item.provider}/{item.model})",
+            )
         _log(run, f"Target {target.name}: AI Settings → {ai_cfg.ai_provider}/{ai_cfg.active_model()}")
         tool_ids = enabled_tool_ids(run.tools)
         if tool_ids:
@@ -783,7 +829,7 @@ def _make_run(
     repetitions: int,
     suite_targets: List[BenchmarkTarget],
 ) -> BenchmarkRun:
-    settings = _reload_ai_settings()
+    settings = get_settings()
     run = BenchmarkRun(
         id=str(uuid.uuid4()),
         mode=mode,
@@ -949,6 +995,8 @@ def start_run(
             else:
                 run_batch_dir = None
 
+            last_warm: Optional[Tuple[str, str]] = None
+
             for global_idx, (entry, within_idx, entry_idx) in enumerate(slots, start=1):
                 ai_cfg = apply_plan_entry_model(entry)
                 with _lock:
@@ -982,6 +1030,19 @@ def start_run(
                             f"(plan entry {entry_idx + 1}, loop {within_idx}/{entry.repetitions}), "
                             f"logs={run.log_dir})",
                         )
+
+                warm = warmup_ai_model(ai_cfg, last_warm=last_warm)
+                _log_model_warmup(run, warm)
+                if not warm.ok:
+                    _finish_warmup_failed_run(run, warm)
+                    completed_docs.append(run.to_public_dict())
+                    with _lock:
+                        if _batch.get("stop"):
+                            break
+                    continue
+                if not warm.skipped:
+                    last_warm = (ai_cfg.ai_provider, ai_cfg.active_model())
+
                 debug_logger.info(
                     f"[benchmark] starting run {global_idx}/{total_runs} "
                     f"model={ai_cfg.ai_provider}/{ai_cfg.active_model()} run_id={run.id}"

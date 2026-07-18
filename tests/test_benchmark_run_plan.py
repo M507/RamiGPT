@@ -11,6 +11,7 @@ from ramigpt.benchmark.run_plan import (
     flatten_run_plan,
     normalize_run_plan,
 )
+from ramigpt.config import get_settings
 
 
 def test_normalize_legacy_repetitions():
@@ -55,7 +56,66 @@ def test_total_runs_cap():
         )
 
 
-def test_apply_plan_entry_model_switches_provider(monkeypatch):
+def test_apply_plan_survives_get_settings_without_reload():
+    """Run-plan model must stay in memory; reload() in the worker wiped it (bug fix)."""
+    from ramigpt.config import get_settings_manager
+
+    mgr = get_settings_manager()
+    original = mgr.reload()
+    try:
+        mgr.update({"ai_provider": "ollama", "ollama_model": "qwen3:14b"}, persist=False)
+        apply_plan_entry_model(
+            RunPlanEntry(repetitions=1, provider="ollama", model="deepseek-r1:14b")
+        )
+        assert get_settings().ollama_model == "deepseek-r1:14b"
+        # Old code called reload() here via _sync_run_ai_settings / _make_run.
+        assert get_settings().ollama_model == "deepseek-r1:14b"
+    finally:
+        mgr.update(
+            {
+                "ai_provider": original.ai_provider,
+                "ollama_model": original.ollama_model,
+                "openai_model": original.openai_model,
+                "openwebui_model": original.openwebui_model,
+                "cursor_model": original.cursor_model,
+            },
+            persist=False,
+        )
+        mgr.reload()
+
+
+def test_sync_run_ai_settings_uses_memory_not_disk():
+    from ramigpt.benchmark.orchestrator import BenchmarkRun, _sync_run_ai_settings
+    from ramigpt.config import get_settings_manager
+
+    mgr = get_settings_manager()
+    original = mgr.reload()
+    try:
+        mgr.update({"ai_provider": "ollama", "ollama_model": "qwen3:14b"}, persist=False)
+        apply_plan_entry_model(
+            RunPlanEntry(repetitions=1, provider="ollama", model="deepseek-r1:14b")
+        )
+        run = BenchmarkRun(id="test", mode="remote", timeout_seconds=60)
+        run.provider = "ollama"
+        run.model = "deepseek-r1:14b"
+        cfg = _sync_run_ai_settings(run)
+        assert cfg.ollama_model == "deepseek-r1:14b"
+        assert run.model == "deepseek-r1:14b"
+    finally:
+        mgr.update(
+            {
+                "ai_provider": original.ai_provider,
+                "ollama_model": original.ollama_model,
+                "openai_model": original.openai_model,
+                "openwebui_model": original.openwebui_model,
+                "cursor_model": original.cursor_model,
+            },
+            persist=False,
+        )
+        mgr.reload()
+
+
+def test_apply_plan_entry_model_switches_provider():
     from ramigpt.config import get_settings_manager
 
     mgr = get_settings_manager()

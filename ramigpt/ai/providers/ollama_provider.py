@@ -74,6 +74,61 @@ def list_ollama_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
     return names
 
 
+def list_ollama_running_models(base_url: str, *, timeout: float = 8.0) -> List[str]:
+    """Return model names currently loaded in Ollama memory (``GET /api/ps``)."""
+    origin = _ollama_origin(base_url)
+    if not origin:
+        raise ValueError("Ollama base URL is empty")
+
+    parsed = urlparse(origin if "://" in origin else f"http://{origin}")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"Invalid Ollama base URL: {base_url!r}")
+
+    ps_url = urlunparse((parsed.scheme, parsed.netloc, "/api/ps", "", "", ""))
+    req = urllib.request.Request(ps_url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Ollama /api/ps HTTP {exc.code} at {ps_url}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Failed to list running Ollama models at {ps_url}: {exc}") from exc
+
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        raise RuntimeError(f"Unexpected Ollama /api/ps payload from {ps_url}")
+
+    names: List[str] = []
+    seen = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or item.get("model") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def ollama_model_names_match(expected: str, running: str) -> bool:
+    """True when ``expected`` and ``running`` refer to the same Ollama model tag."""
+    exp = (expected or "").strip().lower()
+    run = (running or "").strip().lower()
+    if not exp or not run:
+        return False
+    if exp == run:
+        return True
+    exp_base, _, exp_tag = exp.partition(":")
+    run_base, _, run_tag = run.partition(":")
+    if exp_base != run_base:
+        return False
+    # Same base; match when either side omits the tag (e.g. qwen3 vs qwen3:14b).
+    if not exp_tag or not run_tag:
+        return True
+    return exp_tag == run_tag
+
+
 class OllamaProvider(AIProvider):
     """Talks to Ollama's OpenAI-compatible API (default port 11434 → ``/v1``)."""
 

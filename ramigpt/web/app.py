@@ -857,8 +857,6 @@ def autonomous(session_data):
         """Background task for a specific session using passed session data."""
         session_id = session_data['sid']
         slog = get_session_logger(session_id)
-        if session_data.get("from_benchmark"):
-            get_settings_manager().reload()
         ai_settings = get_settings()
         max_reqs = _max_ai_requests()
         emit_session(session_id, f'Giving AI full freedom to send {max_reqs} commands', color="#58a6ff")
@@ -945,10 +943,7 @@ def autonomous(session_data):
                 trimmed_ai_command = resolve_ai_command(response, priv_esc)
                 command = trimmed_ai_command
                 use_session_v2 = session_v2_enabled()
-                if session_data.get("from_benchmark"):
-                    settings = get_settings_manager().reload()
-                else:
-                    settings = get_settings()
+                settings = get_settings()
                 slog.ai_turn(
                     request_n=i,
                     system=system,
@@ -1674,11 +1669,7 @@ def execute_beroot(session_data):
             "[BeRoot] Handing off to Full AI with scanner findings…",
             color="#58a6ff",
         )
-        beroot_ai = (
-            get_settings_manager().reload()
-            if session_data.get("from_benchmark")
-            else get_settings()
-        )
+        beroot_ai = get_settings()
         get_session_logger(session_id).event(
             "FULL_AI_REQUESTED",
             "Full AI started after BeRoot (AI checkbox)",
