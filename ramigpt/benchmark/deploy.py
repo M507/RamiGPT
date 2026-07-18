@@ -7,11 +7,12 @@ import shutil
 import socket
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from ramigpt.benchmark.targets import TARGETS
+from ramigpt.benchmark.targets import BENCH_PASSWORD, BENCH_USERNAME, TARGETS
 from ramigpt.paths import PROJECT_ROOT
 from ramigpt.utils import debug_logger
 
@@ -219,22 +220,158 @@ def deploy_remote(
     return cfg.host
 
 
+def _tcp_port_open(host: str, port: int, *, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def check_target_ports(
     host: str,
     log: LogFn = _default_log,
     targets: Optional[Sequence] = None,
+    *,
+    parallel: bool = True,
 ) -> List[dict]:
-    results = []
-    for target in targets if targets is not None else TARGETS:
-        open_ = False
-        try:
-            with socket.create_connection((host, target.port), timeout=2.0):
-                open_ = True
-        except OSError:
-            open_ = False
-        results.append({"id": target.id, "host": host, "port": target.port, "open": open_})
-        log(f"Port check {host}:{target.port} → {'open' if open_ else 'closed'}")
+    selected = list(targets if targets is not None else TARGETS)
+
+    def _check_one(target) -> dict:
+        open_ = _tcp_port_open(host, int(target.port))
+        return {"id": target.id, "host": host, "port": target.port, "open": open_}
+
+    if not selected:
+        return []
+
+    if parallel and len(selected) > 1:
+        results_by_id: Dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as pool:
+            futures = {pool.submit(_check_one, t): t for t in selected}
+            for future in as_completed(futures):
+                item = future.result()
+                results_by_id[item["id"]] = item
+        results = [results_by_id[t.id] for t in selected]
+    else:
+        results = [_check_one(t) for t in selected]
+
+    for item in results:
+        log(f"Port check {host}:{item['port']} → {'open' if item['open'] else 'closed'}")
     return results
+
+
+def _probe_target_ssh(host: str, target, *, log: LogFn = _default_log) -> bool:
+    """Verify lowpriv SSH login on a benchmark target port."""
+    try:
+        from pwn import ssh as pwn_ssh
+    except Exception as exc:  # noqa: BLE001
+        log(f"SSH probe {host}:{target.port} ({target.id}): pwntools unavailable ({exc})")
+        return False
+
+    conn = None
+    try:
+        conn = pwn_ssh(
+            user=BENCH_USERNAME,
+            host=host,
+            port=int(target.port),
+            password=BENCH_PASSWORD,
+            timeout=10,
+            ignore_config=True,
+        )
+        tube = conn.run("id -u && whoami", timeout=10)
+        if tube is None:
+            log(f"SSH probe {host}:{target.port} ({target.id}): no shell")
+            return False
+        out = tube.recvall(timeout=10).decode(errors="replace").strip().splitlines()
+        if len(out) < 2:
+            log(f"SSH probe {host}:{target.port} ({target.id}): unexpected output {out!r}")
+            return False
+        uid, user = out[0].strip(), out[-1].strip()
+        ok = uid != "0" and user == BENCH_USERNAME
+        if not ok:
+            log(
+                f"SSH probe {host}:{target.port} ({target.id}): "
+                f"expected {BENCH_USERNAME} (non-root), got uid={uid} user={user}"
+            )
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        log(f"SSH probe {host}:{target.port} ({target.id}) failed: {exc}")
+        return False
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def verify_targets_ssh(
+    host: str,
+    targets: Sequence,
+    log: LogFn = _default_log,
+    *,
+    parallel: bool = True,
+) -> Tuple[bool, List[str]]:
+    """Return (all_ok, list of target ids that failed SSH probe)."""
+    selected = list(targets)
+    if not selected:
+        return True, []
+
+    failed: List[str] = []
+
+    def _probe(target) -> Tuple[str, bool]:
+        return target.id, _probe_target_ssh(host, target, log=log)
+
+    if parallel and len(selected) > 1:
+        with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as pool:
+            for target_id, ok in pool.map(_probe, selected):
+                if not ok:
+                    failed.append(target_id)
+    else:
+        for target in selected:
+            _, ok = _probe(target)
+            if not ok:
+                failed.append(target.id)
+
+    if failed:
+        return False, failed
+    log(f"SSH OK on all {len(selected)} target port(s) as {BENCH_USERNAME}")
+    return True, []
+
+
+def ensure_remote_benchmark(
+    cfg: RemoteDeployConfig,
+    log: LogFn = _default_log,
+    targets: Optional[Sequence] = None,
+    *,
+    force_deploy: bool = False,
+) -> str:
+    """
+    Bring benchmark targets online on the remote lab host.
+
+    Fast path: when every selected SSH port is open and accepts lowpriv login,
+    skip Ansible entirely. Otherwise run the full playbook deploy.
+    """
+    selected = _selected_targets(targets)
+    host = cfg.host
+
+    if not force_deploy:
+        ports = check_target_ports(host, log=log, targets=selected)
+        if all(p["open"] for p in ports):
+            log(
+                f"All {len(selected)} target port(s) open on {host} — "
+                f"verifying benchmark SSH ({', '.join(t.id for t in selected)})"
+            )
+            ready, failed = verify_targets_ssh(host, selected, log=log)
+            if ready:
+                log(f"Benchmark targets ready on {host} — skipping Ansible deploy")
+                return host
+            log(f"SSH verify failed for {', '.join(failed)} — running full deploy")
+        else:
+            missing = [str(p["port"]) for p in ports if not p["open"]]
+            log(f"Closed port(s) on {host}: {', '.join(missing)} — running Ansible deploy")
+
+    return deploy_remote(cfg, log=log, targets=selected)
 
 
 def all_target_ports_open(

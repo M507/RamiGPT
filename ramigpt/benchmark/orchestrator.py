@@ -16,8 +16,7 @@ from flask import Flask
 
 from ramigpt.benchmark.deploy import (
     RemoteDeployConfig,
-    check_target_ports,
-    deploy_remote,
+    ensure_remote_benchmark,
 )
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.benchmark.targets import (
@@ -634,12 +633,9 @@ def _worker(run: BenchmarkRun) -> None:
         expected_host = str(run.remote["host"])
 
         run.phase = "deploying"
-        _log(
-            run,
-            f"Stopping all benchmark containers, then starting only "
-            f"{', '.join(t.id for t in selected)} on {expected_host}",
-        )
-        run.host = deploy_remote(
+        target_names = ", ".join(t.id for t in selected)
+        _log(run, f"Ensuring benchmark targets on {expected_host}: {target_names}")
+        run.host = ensure_remote_benchmark(
             RemoteDeployConfig(
                 host=run.remote["host"],
                 username=run.remote["username"],
@@ -649,10 +645,6 @@ def _worker(run: BenchmarkRun) -> None:
             log=log_fn,
             targets=selected,
         )
-        ports = check_target_ports(run.host, log=log_fn, targets=selected)
-        if not all(p["open"] for p in ports):
-            missing = [f"{p['port']}" for p in ports if not p["open"]]
-            raise RuntimeError(f"Benchmark SSH ports not open: {', '.join(missing)}")
 
         run.phase = "running"
         target_by_id = {t.id: t for t in selected}
