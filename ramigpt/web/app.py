@@ -45,6 +45,12 @@ from ramigpt.config import (
     get_settings,
     get_settings_manager,
 )
+from ramigpt.session_v2 import (
+    ShellBridge,
+    execute_command as session_v2_execute_command,
+    is_enabled as session_v2_enabled,
+    resolve_ai_command,
+)
 from ramigpt.paths import (
     BEROOT_DIR,
     BEROOT_DOWNLOADS_DIR,
@@ -928,8 +934,9 @@ def autonomous(session_data):
                         "Stop after AI response — discarding command, exiting",
                     )
                     break
-                trimmed_ai_command = priv_esc.filter_output(response)
-                command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
+                trimmed_ai_command = resolve_ai_command(response, priv_esc)
+                command = trimmed_ai_command
+                use_session_v2 = session_v2_enabled()
                 settings = get_settings()
                 slog.ai_turn(
                     request_n=i,
@@ -952,32 +959,148 @@ def autonomous(session_data):
                         break
                     slog = get_session_logger(session_id)
                     shell = ssh_shells.get(session_id)
-                shell.sendline(command)
                 delim = prompt_delimiter.decode('utf-8').strip() if isinstance(prompt_delimiter, (bytes, bytearray)) else str(prompt_delimiter).strip()
+                if use_session_v2:
+                    slog.info("session_v2: interactive driver active")
+                else:
+                    shell.sendline(command)
                 emit_session(session_id, f"{delim} {command}")
                 slog.info(f"sent to shell: {delim} {command}")
                 # Record immediately so a Stop / timeout still leaves the command
                 # in history for the next Full AI run ("Do not repeat…").
                 priv_esc.add_history(command, "")
 
-                if not just_got_root:  
-                    shell_output_bytes, \
-                    shell_output_lines, \
-                    shell_output_lines_string, \
-                    shell_output = shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=8, session=session_data, emit_func=socketio.emit)
+                shell_output_bytes = None
+                shell_output_lines = []
+                shell_output_lines_string = None
+                shell_output = None
+                last_line = ""
 
-                    if shell_output is None:
-                        slog.shell_io(
-                            request_n=i,
-                            command=command,
-                            output="(None — recv timed out / no prompt delimiter)",
-                            note="shell_recvuntil_v4 returned None",
+                if not just_got_root:
+                    if use_session_v2:
+                        run = session_v2_execute_command(
+                            shell,
+                            command,
+                            bridge=_session_v2_bridge(),
+                            hostname=session_data.get("hostname") or "",
+                            password=session_data.get("password") or "",
+                            timeout=12.0,
                         )
+                        if run.notes:
+                            slog.info(f"session_v2 notes: {', '.join(run.notes)}")
+                        shell_output = run.shell_output
+                        shell_output_lines = run.shell_output_lines
+                        last_line = run.last_line or (
+                            shell_output_lines[-1] if shell_output_lines else ""
+                        )
+                        if shell_output is None:
+                            slog.shell_io(
+                                request_n=i,
+                                command=command,
+                                output="(None — session v2 returned no output)",
+                                note="session_v2_empty_output",
+                            )
+                        else:
+                            slog.shell_io(request_n=i, command=command, output=shell_output)
+
+                        if run.got_root:
+                            slog.root_check(
+                                request_n=i,
+                                hostname=session_data.get("hostname") or "",
+                                last_line=last_line or "",
+                                shell_output=shell_output or "",
+                                won=True,
+                                reasons=diagnose_root(
+                                    session_data.get("hostname"), shell_output or last_line
+                                ),
+                            )
+                            if shell_output:
+                                emit_session(session_id, shell_output)
+                            emit_session(session_id, "pwned!", color="#ff0000")
+                            just_got_root = True
+                            stop_reason = "root"
+                            root_won_by_session[session_id] = True
+                            try:
+                                from ramigpt.benchmark.orchestrator import mark_root_won
+                                mark_root_won(session_id)
+                            except Exception:
+                                pass
+                            if last_line.endswith("#") or last_line == "#":
+                                prompt_delimiters[session_id] = b"# "
+                                prompt_delimiter = b"# "
+                            priv_esc.add_history(command, shell_output or "")
+                            summary = priv_esc.generate_summary()
+                            slog.block("SUMMARY", summary or "")
+                            emit_session(session_id, f"{summary}\n", color="#1E90FF")
+                            break
+
+                        if run.needs_reconnect:
+                            if stop_flag.is_set():
+                                stop_reason = "stopped"
+                                priv_esc.add_history(
+                                    command,
+                                    (shell_output or "")
+                                    + "\n[runner] command stopped / timed out",
+                                )
+                                slog.event("FULL_AI_STOP", "Stop during session v2 recovery — exiting")
+                                break
+                            dump_path = slog.breakage(
+                                "prompt_timeout_after_command",
+                                command=command,
+                                shell_output=shell_output,
+                                needs_reconnect=True,
+                                ai_request=i,
+                                hint="session_v2 could not restore prompt; reconnecting",
+                            )
+                            debug_logger.warning(
+                                f"[BREAKAGE] session={session_id} session_v2 needs reconnect command={command!r} dump={dump_path}"
+                            )
+                            emit_session(
+                                session_id,
+                                "[BREAKAGE] Shell desynced — reconnecting…",
+                                color="#f85149",
+                            )
+                            priv_esc.add_history(
+                                command,
+                                (shell_output or "") + "\n[runner] command hung / lost shell prompt",
+                            )
+                            if reconnect_budget > 0 and _reconnect_shell_for_session(session_id, session_data, slog):
+                                reconnect_budget -= 1
+                                slog = get_session_logger(session_id)
+                                shell = ssh_shells.get(session_id)
+                                prompt_delimiter = prompt_delimiters.get(session_id, prompt_delimiter)
+                                emit_session(
+                                    session_id,
+                                    f"[RECONNECT] Shell restored ({reconnect_budget} reconnect(s) left). Continuing Full AI…",
+                                    color="#58a6ff",
+                                )
+                                continue
+                            slog.event(
+                                "RECONNECT_EXHAUSTED",
+                                "Could not restore shell — stopping Full AI for this session",
+                                reconnect_budget=reconnect_budget,
+                            )
+                            emit_session(session_id, "[BREAKAGE] Reconnect failed — stopping Full AI", color="#f85149")
+                            stop_reason = "reconnect_exhausted"
+                            break
                     else:
-                        slog.shell_io(request_n=i, command=command, output=shell_output)
+                        shell_output_bytes, \
+                        shell_output_lines, \
+                        shell_output_lines_string, \
+                        shell_output = shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=8, session=session_data, emit_func=socketio.emit)
+
+                        if shell_output is None:
+                            slog.shell_io(
+                                request_n=i,
+                                command=command,
+                                output="(None — recv timed out / no prompt delimiter)",
+                                note="shell_recvuntil_v4 returned None",
+                            )
+                        else:
+                            slog.shell_io(request_n=i, command=command, output=shell_output)
                     
                     # If it hangs (common after interactive priv-esc like vim/awk shells)
-                    if shell_output == None:
+                    if not use_session_v2 and shell_output == None:
                         if stop_flag.is_set():
                             stop_reason = "stopped"
                             priv_esc.add_history(
@@ -1846,6 +1969,23 @@ def _try_quit_editor(shell) -> str:
     return _safe_decode(recv_for_duration(shell, 1.5)).strip()
 
 
+def _session_v2_bridge() -> ShellBridge:
+    """Wire Upgraded Session v2 to the existing PTY helpers in this module."""
+    return ShellBridge(
+        recv_until_v4=shell_recvuntil_v4,
+        interrupt_shell=_interrupt_shell,
+        is_prompt_line=_is_shell_prompt_line,
+        looks_like_editor_stuck=_looks_like_editor_stuck,
+        try_quit_editor=_try_quit_editor,
+        looks_like_password_prompt=_looks_like_password_prompt,
+        still_waiting_on_password=_still_waiting_on_password,
+        answer_password_prompt=_answer_password_prompt,
+        recv_for_duration=recv_for_duration,
+        safe_decode=_safe_decode,
+        sleep=_ai_sleep,
+    )
+
+
 def shell_recvuntil_v4(shell, prompt_delimiter, drop=False, timeout=timeout_default, session=None, emit_func=None):
     """
     Read until a real shell prompt appears as its own line.
@@ -2185,8 +2325,7 @@ def execute():
             prompt = _generate_ai_prompt(priv_esc)
             system = "You are an experienced pentester."
             response, usage = get_answer_with_usage(system, prompt)
-            trimmed_ai_command = priv_esc.filter_output(response)
-            trimmed_ai_command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
+            trimmed_ai_command = resolve_ai_command(response, priv_esc)
             command = trimmed_ai_command
             slog.ai_turn(
                 request_n=len(getattr(priv_esc, "history", []) or []) + 1,
@@ -2378,6 +2517,7 @@ def update_ai_settings():
         "history_output_edge_count",
         "role_objective",
         "rotate_role_objectives",
+        "upgraded_session_v2",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
     persist = bool(payload.get("persist", True))
@@ -2496,6 +2636,7 @@ def test_ai_settings():
         "history_output_edge_count",
         "role_objective",
         "rotate_role_objectives",
+        "upgraded_session_v2",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 

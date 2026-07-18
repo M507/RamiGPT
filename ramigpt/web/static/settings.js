@@ -440,6 +440,10 @@
         if (rotateRolesToggle) {
             rotateRolesToggle.checked = !!Number(settings.rotate_role_objectives);
         }
+        const sessionV2Toggle = $("app-settings-upgraded-session-v2");
+        if (sessionV2Toggle) {
+            sessionV2Toggle.checked = settings.upgraded_session_v2 !== 0;
+        }
         const promptToggle = $("app-settings-show-prompts");
         if (promptToggle) {
             promptToggle.checked = !!Number(settings.debug);
@@ -473,6 +477,7 @@
         const promptToggle = $("app-settings-show-prompts");
         const roleSelect = $("app-settings-role-objective");
         const rotateRolesToggle = $("app-settings-rotate-roles");
+        const sessionV2Toggle = $("app-settings-upgraded-session-v2");
         const outputToggle = $("app-settings-history-outputs");
         const outputCount = $("app-settings-history-output-count");
         const edgeCount = Number(outputCount ? outputCount.value : 4);
@@ -486,6 +491,8 @@
                 role_objective: roleSelect ? roleSelect.value : "",
                 rotate_role_objectives:
                     rotateRolesToggle && rotateRolesToggle.checked ? 1 : 0,
+                upgraded_session_v2:
+                    sessionV2Toggle && sessionV2Toggle.checked ? 1 : 0,
                 debug: promptToggle && promptToggle.checked ? 1 : 0,
                 history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
                 history_output_edge_count: edgeCount,
@@ -502,6 +509,9 @@
             : "command-only history";
         showAppStatus(
             "Saved — "
+                + (sessionV2Toggle && sessionV2Toggle.checked
+                    ? "Upgraded Session v2 on; "
+                    : "Upgraded Session v2 off; ")
                 + (rotateRolesToggle && rotateRolesToggle.checked
                     ? "rotating roles; "
                     : (roleSelect ? roleSelect.value + "; " : ""))

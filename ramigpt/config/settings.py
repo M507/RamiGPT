@@ -87,6 +87,7 @@ JSON_SETTING_FIELDS = (
     "history_output_edge_count",
     "role_objective",
     "rotate_role_objectives",
+    "upgraded_session_v2",
 )
 
 VALID_PROVIDERS = ("openai", "ollama", "openwebui", "cursor")
@@ -115,6 +116,7 @@ class Settings:
     history_output_edge_count: int = 4
     role_objective: str = DEFAULT_ROLE_OBJECTIVE
     rotate_role_objectives: int = 0
+    upgraded_session_v2: int = 1
 
     def active_api_key(self) -> str:
         if self.ai_provider == "ollama":
@@ -167,6 +169,7 @@ class Settings:
             "role_objective": selected_role,
             "role_objective_options": list(role_objectives),
             "rotate_role_objectives": self.rotate_role_objectives,
+            "upgraded_session_v2": self.upgraded_session_v2,
             "providers": list(VALID_PROVIDERS),
         }
 
@@ -236,6 +239,7 @@ def _load_settings_from_env() -> Settings:
             os.getenv("ROLE_OBJECTIVE") or DEFAULT_ROLE_OBJECTIVE
         ).strip(),
         rotate_role_objectives=_env_int("ROTATE_ROLE_OBJECTIVES", 0),
+        upgraded_session_v2=_env_int("UPGRADED_SESSION_V2", 1),
     )
 
 
@@ -264,9 +268,10 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             "history_include_outputs",
             "history_output_edge_count",
             "rotate_role_objectives",
+            "upgraded_session_v2",
         ):
             value = int(value)
-        if key in ("history_include_outputs", "rotate_role_objectives"):
+        if key in ("history_include_outputs", "rotate_role_objectives", "upgraded_session_v2"):
             value = 1 if value else 0
         if key == "history_output_edge_count" and not 0 <= value <= 40:
             raise ValueError("History output count must be between 0 and 40.")

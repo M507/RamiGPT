@@ -25,6 +25,7 @@ class SettingsStorageTests(unittest.TestCase):
                         "history_output_edge_count": 7,
                         "role_objective": "Enumeration-First Pentester",
                         "rotate_role_objectives": 1,
+                        "upgraded_session_v2": 0,
                         "openai_api_key": "must-not-load-from-json",
                     }
                 )
@@ -58,6 +59,7 @@ class SettingsStorageTests(unittest.TestCase):
                 "Enumeration-First Pentester",
             )
             self.assertEqual(manager.settings.rotate_role_objectives, 1)
+            self.assertEqual(manager.settings.upgraded_session_v2, 0)
 
     def test_save_writes_choices_to_json_and_only_secrets_to_env(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -94,6 +96,7 @@ class SettingsStorageTests(unittest.TestCase):
                         "history_output_edge_count": 0,
                         "role_objective": "Direct Privilege Escalation Operator",
                         "rotate_role_objectives": 1,
+                        "upgraded_session_v2": 1,
                     },
                     persist=True,
                 )
@@ -108,6 +111,7 @@ class SettingsStorageTests(unittest.TestCase):
                 "Direct Privilege Escalation Operator",
             )
             self.assertEqual(payload["rotate_role_objectives"], 1)
+            self.assertEqual(payload["upgraded_session_v2"], 1)
             self.assertNotIn("cursor_api_key", payload)
             self.assertNotIn("openai_api_key", payload)
 
