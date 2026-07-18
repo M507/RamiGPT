@@ -119,6 +119,7 @@ def register_benchmark_routes(app: Flask) -> None:
         remote = body.get("remote") or None
         tools = body.get("tools", preset.get("tools"))
         repetitions = body.get("repetitions", body.get("runs", body.get("run_times", 1)))
+        run_plan = body.get("run_plan")
         target_ids = body.get("target_ids", body.get("targets"))
         try:
             timeout_i = int(timeout)
@@ -131,6 +132,7 @@ def register_benchmark_routes(app: Flask) -> None:
                 remote=remote,
                 tools=tools,
                 repetitions=repetitions,
+                run_plan=run_plan if isinstance(run_plan, list) else None,
                 target_ids=target_ids,
             )
         except ValueError as exc:

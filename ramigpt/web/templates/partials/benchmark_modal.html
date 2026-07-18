@@ -41,22 +41,31 @@
           <label>Per-target timeout (seconds)
             <input type="number" id="bench-timeout" value="180" min="10" max="3600">
           </label>
-          <label>Run times
-            <input type="number" id="bench-runs" value="1" min="1" max="50" title="How many times to run the full suite">
-          </label>
-        </div>
-        <div class="form-row">
-          <label>AI Settings
-            <button type="button" class="btn btn-secondary" onclick="openSettings()">Configure AI</button>
-          </label>
-          <label class="muted small" id="bench-ai-model-label" style="justify-content:flex-end">
-            Model: —
-          </label>
-        </div>
-        <div class="form-row">
           <label class="muted small" style="justify-content:flex-end">
             Results saved under <code>data/benchmark/results/</code>
           </label>
+        </div>
+        <div class="bench-run-plan">
+          <div class="bench-tools-head">
+            <strong>Run plan</strong>
+            <span class="muted small" id="bench-run-plan-summary">1 run</span>
+            <span class="bench-run-plan-actions">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openSettings()">Configure AI</button>
+              <button type="button" class="btn-link" id="bench-add-model-run">+ Add model</button>
+            </span>
+          </div>
+          <div class="bench-run-plan-rows">
+            <div class="bench-run-plan-row bench-run-plan-primary">
+              <span class="bench-run-plan-label">
+                <strong>Primary</strong>
+                <span class="muted small" id="bench-ai-model-label">AI Settings · —</span>
+              </span>
+              <label class="bench-run-plan-reps">Runs
+                <input type="number" id="bench-primary-reps" class="bench-plan-reps" value="1" min="1" max="50" title="Times to run with the AI Settings model">
+              </label>
+            </div>
+          </div>
+          <div class="bench-run-plan-extra-list" id="bench-run-plan-extra"></div>
         </div>
         <div class="bench-tools">
           <div class="bench-tools-head">

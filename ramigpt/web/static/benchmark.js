@@ -9,6 +9,14 @@
   let knownTargets = [];
   /** @type {Array<{id:string,name:string,description?:string,target_ids:string[]}>} */
   let knownProfiles = [];
+  const PLAN_PROVIDERS = [
+    { id: "ollama", label: "Ollama" },
+    { id: "openai", label: "OpenAI" },
+    { id: "openwebui", label: "Open WebUI" },
+    { id: "cursor", label: "Cursor" },
+  ];
+  const MAX_PLAN_ENTRIES = 10;
+  const MAX_TOTAL_RUNS = 50;
 
   async function api(path, options = {}) {
     const opts = {
@@ -257,7 +265,14 @@
       const phase = run ? run.phase : "idle";
       const reps = (batch && batch.repetitions) || (run && run.repetitions) || 1;
       const rep = (batch && batch.repetition) || (run && run.repetition) || 1;
-      const repLabel = reps > 1 ? ` · run ${rep}/${reps}` : "";
+      const modelProvider =
+        (batch && batch.current_provider) || (run && run.provider) || "";
+      const modelName = (batch && batch.current_model) || (run && run.model) || "";
+      const modelSuffix =
+        modelProvider || modelName
+          ? ` · ${modelProvider || "?"}/${modelName || "?"}`
+          : "";
+      const repLabel = reps > 1 ? ` · run ${rep}/${reps}${modelSuffix}` : modelSuffix;
       phaseEl.className = "status-pill " + (run ? phase : "idle");
       phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? phase : "Idle")}${escapeHtml(repLabel)}`;
     }
@@ -350,14 +365,110 @@
     if (run && run.error) setStatus(run.error, true);
   }
 
+  function clampReps(value) {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(1, Math.min(50, n));
+  }
+
+  function extraModelRows() {
+    const root = $("bench-run-plan-extra");
+    return root ? Array.from(root.querySelectorAll(".bench-run-plan-row")) : [];
+  }
+
+  function updateRunPlanSummary() {
+    const summary = $("bench-run-plan-summary");
+    if (!summary) return;
+    const primary = clampReps($("bench-primary-reps")?.value);
+    const extra = extraModelRows().reduce(
+      (sum, row) => sum + clampReps(row.querySelector(".bench-plan-reps")?.value),
+      0
+    );
+    const total = primary + extra;
+    const models = 1 + extraModelRows().length;
+    summary.textContent =
+      total === 1 && models === 1
+        ? "1 run · AI Settings model"
+        : `${total} run${total === 1 ? "" : "s"} · ${models} model${models === 1 ? "" : "s"}`;
+    if (total > MAX_TOTAL_RUNS) {
+      summary.textContent += ` (max ${MAX_TOTAL_RUNS})`;
+    }
+  }
+
+  function collectRunPlan() {
+    const primaryReps = clampReps($("bench-primary-reps")?.value);
+    const plan = [{ repetitions: primaryReps }];
+    extraModelRows().forEach((row) => {
+      const provider = (row.querySelector(".bench-plan-provider")?.value || "").trim();
+      const model = (row.querySelector(".bench-plan-model")?.value || "").trim();
+      const repetitions = clampReps(row.querySelector(".bench-plan-reps")?.value);
+      const entry = { repetitions };
+      if (provider) entry.provider = provider;
+      if (model) entry.model = model;
+      plan.push(entry);
+    });
+    return plan;
+  }
+
+  function providerOptions(selected) {
+    return PLAN_PROVIDERS.map(
+      (item) =>
+        `<option value="${escapeHtml(item.id)}"${
+          item.id === selected ? " selected" : ""
+        }>${escapeHtml(item.label)}</option>`
+    ).join("");
+  }
+
+  function addExtraModelRow(preset) {
+    const root = $("bench-run-plan-extra");
+    const addBtn = $("bench-add-model-run");
+    if (!root) return;
+    if (1 + extraModelRows().length >= MAX_PLAN_ENTRIES) {
+      setStatus(`At most ${MAX_PLAN_ENTRIES} model entries in the run plan.`, true);
+      return;
+    }
+    const provider = (preset && preset.provider) || "ollama";
+    const model = (preset && preset.model) || "";
+    const reps = clampReps((preset && preset.repetitions) || 1);
+    const row = document.createElement("div");
+    row.className = "bench-run-plan-row bench-run-plan-extra";
+    row.innerHTML = `
+      <label class="bench-run-plan-field">Provider
+        <select class="bench-plan-provider">${providerOptions(provider)}</select>
+      </label>
+      <label class="bench-run-plan-field">Model
+        <input type="text" class="bench-plan-model" placeholder="model id" value="${escapeHtml(model)}">
+      </label>
+      <label class="bench-run-plan-reps">Runs
+        <input type="number" class="bench-plan-reps" value="${reps}" min="1" max="50">
+      </label>
+      <button type="button" class="icon-btn bench-plan-remove" title="Remove model loop">&times;</button>`;
+    root.appendChild(row);
+    row.querySelectorAll("input, select").forEach((el) => {
+      el.addEventListener("input", () => {
+        root.dataset.userTouched = "1";
+        updateRunPlanSummary();
+      });
+    });
+    row.querySelector(".bench-plan-remove")?.addEventListener("click", () => {
+      row.remove();
+      root.dataset.userTouched = "1";
+      updateRunPlanSummary();
+      if (addBtn) addBtn.disabled = 1 + extraModelRows().length >= MAX_PLAN_ENTRIES;
+    });
+    if (addBtn) addBtn.disabled = 1 + extraModelRows().length >= MAX_PLAN_ENTRIES;
+    updateRunPlanSummary();
+  }
+
   function renderAiSettings(ai) {
     const el = $("bench-ai-model-label");
     if (!el) return;
     if (!ai || (!ai.provider && !ai.model)) {
-      el.textContent = "Model: —";
+      el.textContent = "AI Settings · —";
       return;
     }
-    el.textContent = `Model: ${ai.provider || "?"} / ${ai.model || "?"}`;
+    el.textContent = `AI Settings · ${ai.provider || "?"} / ${ai.model || "?"}`;
+    updateRunPlanSummary();
   }
 
   async function refresh() {
@@ -395,11 +506,8 @@
         field.value = presetTimeout;
       }
     }
-    if (data.defaults && $("bench-runs") && !data.running) {
-      const runsField = $("bench-runs");
-      if (document.activeElement !== runsField && !runsField.dataset.touched) {
-        runsField.value = data.defaults.repetitions || 1;
-      }
+    if (!data.running) {
+      updateRunPlanSummary();
     }
     return data;
   }
@@ -454,10 +562,17 @@
       setStatus("Select at least one target to run.", true);
       return;
     }
+    const runPlan = collectRunPlan();
+    const totalRuns = runPlan.reduce((sum, entry) => sum + clampReps(entry.repetitions), 0);
+    if (totalRuns > MAX_TOTAL_RUNS) {
+      setStatus(`Run plan exceeds ${MAX_TOTAL_RUNS} total runs (got ${totalRuns}).`, true);
+      return;
+    }
     const payload = {
       mode: "remote",
       timeout_seconds: parseInt($("bench-timeout").value, 10) || 180,
-      repetitions: Math.max(1, Math.min(50, parseInt($("bench-runs")?.value, 10) || 1)),
+      run_plan: runPlan,
+      repetitions: clampReps($("bench-primary-reps")?.value),
       tools: selectedTools(),
       target_ids: targetIds,
       remote: {
@@ -661,11 +776,16 @@
         timeout.dataset.touched = "1";
       });
     }
-    const runs = $("bench-runs");
-    if (runs) {
-      runs.addEventListener("input", () => {
-        runs.dataset.touched = "1";
+    const primaryReps = $("bench-primary-reps");
+    if (primaryReps) {
+      primaryReps.addEventListener("input", () => {
+        primaryReps.dataset.touched = "1";
+        updateRunPlanSummary();
       });
+    }
+    const addModelBtn = $("bench-add-model-run");
+    if (addModelBtn) {
+      addModelBtn.addEventListener("click", () => addExtraModelRow());
     }
     const toolList = $("bench-tool-list");
     if (toolList) {
@@ -711,6 +831,7 @@
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);
     if (verifyStop) verifyStop.addEventListener("click", stopVerify);
     if (copyLog) copyLog.addEventListener("click", copyRunLog);
+    updateRunPlanSummary();
   }
 
   window.BenchmarkUI = { open: openModal, close: closeModal, refresh };

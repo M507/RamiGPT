@@ -35,6 +35,12 @@ from ramigpt.benchmark.results import (
     write_batch_summary,
     write_benchmark_result,
 )
+from ramigpt.benchmark.run_plan import (
+    apply_plan_entry_model,
+    describe_run_plan,
+    flatten_run_plan,
+    normalize_run_plan,
+)
 from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
 from ramigpt.config import Settings, get_settings, get_settings_manager
 from ramigpt.domain import PrivEscPrompt
@@ -142,6 +148,9 @@ _batch: Dict[str, Any] = {
     "id": None,
     "repetition": 0,
     "repetitions": 1,
+    "run_plan": None,
+    "current_provider": "",
+    "current_model": "",
     "stop": False,
 }
 
@@ -227,6 +236,9 @@ def get_status() -> Dict[str, Any]:
                 "id": _batch.get("id"),
                 "repetition": _batch.get("repetition"),
                 "repetitions": _batch.get("repetitions"),
+                "run_plan": _batch.get("run_plan"),
+                "current_provider": _batch.get("current_provider"),
+                "current_model": _batch.get("current_model"),
             },
             "targets": [t.to_dict() for t in TARGETS],
             "profiles": list_profiles(),
@@ -811,6 +823,7 @@ def start_run(
     remote: Optional[Dict[str, Any]] = None,
     tools: Optional[Any] = None,
     repetitions: int = 1,
+    run_plan: Optional[List[Any]] = None,
     target_ids: Optional[List[str]] = None,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
@@ -823,10 +836,12 @@ def start_run(
         timeout_seconds = int(preset.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
 
     try:
-        reps = int(repetitions or 1)
-    except (TypeError, ValueError):
-        raise ValueError("repetitions must be an integer") from None
-    reps = max(1, min(reps, 50))
+        plan = normalize_run_plan(run_plan, repetitions=repetitions)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    slots = flatten_run_plan(plan)
+    total_runs = len(slots)
+    plan_desc = describe_run_plan(plan)
 
     # UI tools override JSON tools when provided; else JSON / defaults (BeRoot on).
     if tools is None:
@@ -869,7 +884,8 @@ def start_run(
     if missing:
         raise RuntimeError(f"Benchmark hooks not registered: {', '.join(missing)}")
 
-    ai_cfg = _reload_ai_settings()
+    first_entry, _, _ = slots[0]
+    ai_cfg = apply_plan_entry_model(first_entry)
 
     with _lock:
         if _batch.get("active") or (_current and _current.phase not in {"done", "error"}):
@@ -880,7 +896,10 @@ def start_run(
                 "active": True,
                 "id": batch_id,
                 "repetition": 1,
-                "repetitions": reps,
+                "repetitions": total_runs,
+                "run_plan": plan_desc,
+                "current_provider": ai_cfg.ai_provider,
+                "current_model": ai_cfg.active_model(),
                 "stop": False,
             }
         )
@@ -891,7 +910,7 @@ def start_run(
             merged_remote=merged_remote,
             batch_id=batch_id,
             repetition=1,
-            repetitions=reps,
+            repetitions=total_runs,
             suite_targets=suite_targets,
         )
         _current = first
@@ -901,14 +920,14 @@ def start_run(
     debug_logger.info(
         f"[benchmark] suite logs → {first.log_dir}/ "
         f"(run.log + per-target events under <target_id>/) "
-        f"repetitions={reps} batch={batch_id[:8]} targets={selected_ids}"
+        f"runs={total_runs} batch={batch_id[:8]} targets={selected_ids}"
     )
     _log(
         first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
         f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
         f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
-        f"run={1}/{reps}, logs={first.log_dir})",
+        f"run={1}/{total_runs}, logs={first.log_dir})",
     )
 
     def _batch_worker() -> None:
@@ -916,7 +935,7 @@ def start_run(
         batch_folder: Optional[Path] = None
         completed_docs: List[Dict[str, Any]] = []
         try:
-            if reps > 1:
+            if total_runs > 1:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
                 batch_folder = BENCHMARK_RESULTS_DIR / f"batch_{stamp}_{batch_id[:8]}"
                 batch_folder.mkdir(parents=True, exist_ok=True)
@@ -924,13 +943,18 @@ def start_run(
             else:
                 run_batch_dir = None
 
-            for rep in range(1, reps + 1):
+            for global_idx, (entry, within_idx, entry_idx) in enumerate(slots, start=1):
+                ai_cfg = apply_plan_entry_model(entry)
                 with _lock:
                     if _batch.get("stop"):
                         break
-                    _batch["repetition"] = rep
-                    if rep == 1:
+                    _batch["repetition"] = global_idx
+                    _batch["current_provider"] = ai_cfg.ai_provider
+                    _batch["current_model"] = ai_cfg.active_model()
+                    if global_idx == 1:
                         run = first
+                        run.provider = ai_cfg.ai_provider
+                        run.model = ai_cfg.active_model()
                     else:
                         run = _make_run(
                             mode=mode,
@@ -938,8 +962,8 @@ def start_run(
                             tools_cfg=tools_cfg,
                             merged_remote=merged_remote,
                             batch_id=batch_id,
-                            repetition=rep,
-                            repetitions=reps,
+                            repetition=global_idx,
+                            repetitions=total_runs,
                             suite_targets=suite_targets,
                         )
                         _current = run
@@ -947,10 +971,14 @@ def start_run(
                             run,
                             f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
                             f"targets={selected_ids}, timeout={run.timeout_seconds}s, "
-                            f"run={rep}/{reps}, logs={run.log_dir})",
+                            f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
+                            f"run={global_idx}/{total_runs} "
+                            f"(plan entry {entry_idx + 1}, loop {within_idx}/{entry.repetitions}), "
+                            f"logs={run.log_dir})",
                         )
                 debug_logger.info(
-                    f"[benchmark] starting repetition {rep}/{reps} run_id={run.id}"
+                    f"[benchmark] starting run {global_idx}/{total_runs} "
+                    f"model={ai_cfg.ai_provider}/{ai_cfg.active_model()} run_id={run.id}"
                 )
                 _worker(run)
                 # Capture result document path from run
@@ -980,9 +1008,13 @@ def start_run(
                 _batch["active"] = False
                 _batch["stop"] = False
             run_batch_dir = None
+            try:
+                get_settings_manager().reload()
+            except Exception:  # noqa: BLE001
+                pass
             debug_logger.info(
                 f"[benchmark] batch finished id={batch_id[:8]} "
-                f"completed={len(completed_docs)}/{reps}"
+                f"completed={len(completed_docs)}/{total_runs}"
             )
 
     thread = threading.Thread(
