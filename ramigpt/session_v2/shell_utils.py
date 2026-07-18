@@ -76,4 +76,10 @@ def output_indicates_root(hostname: str, text: str) -> bool:
 
 def recv_chunk(shell: Any, bridge_recv_for_duration: Callable[..., Any], seconds: float) -> str:
     raw = bridge_recv_for_duration(shell, seconds)
-    return normalize_terminal_text(raw).strip()
+    if isinstance(raw, (bytes, bytearray)):
+        text = raw.decode("utf-8", errors="replace")
+    elif raw is None:
+        text = ""
+    else:
+        text = str(raw)
+    return normalize_terminal_text(text).strip()

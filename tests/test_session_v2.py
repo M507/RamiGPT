@@ -48,8 +48,28 @@ class SessionV2NormalizeTests(unittest.TestCase):
         self.assertEqual(prepare_command("sudo su -"), "sudo -n id")
         self.assertEqual(prepare_command("sudo bash"), 'sudo -n bash -c "id; cat /root/flag.txt 2>/dev/null"')
 
+    def test_rewrites_malformed_awk_shell_drop(self):
+        raw = (
+            "sudo awk -f /dev/null '/./{print(\"UID=\",$1); "
+            'system(sprintf("/bin/sh",))};'
+            "'"
+        )
+        self.assertEqual(
+            prepare_command(raw),
+            """sudo /usr/bin/awk 'BEGIN {system("id")}'""",
+        )
+
     def test_rewrites_visudo(self):
-        self.assertEqual(prepare_command("sudo visudo"), "sudo -n id")
+        prepared = prepare_command("sudo visudo")
+        self.assertIn("/usr/bin/vim", prepared)
+        self.assertIn("-es", prepared)
+        self.assertIn(":!id", prepared)
+
+    def test_adds_ex_mode_to_vim_command(self):
+        prepared = prepare_command(
+            "sudo /usr/bin/vim -c ':!id' -c ':q!' /dev/null"
+        )
+        self.assertIn("-es", prepared)
 
     def test_rewrites_bare_sudo_vim(self):
         prepared = prepare_command("sudo vim /etc/passwd")
