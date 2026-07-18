@@ -425,6 +425,21 @@
     }
 
     function applyAppSettingsToForm(settings) {
+        const roleSelect = $("app-settings-role-objective");
+        if (roleSelect) {
+            roleSelect.innerHTML = "";
+            (settings.role_objective_options || []).forEach(function (name) {
+                const option = document.createElement("option");
+                option.value = name;
+                option.textContent = name;
+                roleSelect.appendChild(option);
+            });
+            roleSelect.value = settings.role_objective || "";
+        }
+        const rotateRolesToggle = $("app-settings-rotate-roles");
+        if (rotateRolesToggle) {
+            rotateRolesToggle.checked = !!Number(settings.rotate_role_objectives);
+        }
         const promptToggle = $("app-settings-show-prompts");
         if (promptToggle) {
             promptToggle.checked = !!Number(settings.debug);
@@ -456,6 +471,8 @@
     async function saveAppSettings() {
         showAppStatus("Saving…", false);
         const promptToggle = $("app-settings-show-prompts");
+        const roleSelect = $("app-settings-role-objective");
+        const rotateRolesToggle = $("app-settings-rotate-roles");
         const outputToggle = $("app-settings-history-outputs");
         const outputCount = $("app-settings-history-output-count");
         const edgeCount = Number(outputCount ? outputCount.value : 4);
@@ -466,6 +483,9 @@
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+                role_objective: roleSelect ? roleSelect.value : "",
+                rotate_role_objectives:
+                    rotateRolesToggle && rotateRolesToggle.checked ? 1 : 0,
                 debug: promptToggle && promptToggle.checked ? 1 : 0,
                 history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
                 history_output_edge_count: edgeCount,
@@ -480,7 +500,14 @@
         const historyStatus = outputToggle && outputToggle.checked
             ? (edgeCount === 0 ? "all history outputs included" : `first/last ${edgeCount} outputs included`)
             : "command-only history";
-        showAppStatus("Saved — " + historyStatus, false);
+        showAppStatus(
+            "Saved — "
+                + (rotateRolesToggle && rotateRolesToggle.checked
+                    ? "rotating roles; "
+                    : (roleSelect ? roleSelect.value + "; " : ""))
+                + historyStatus,
+            false
+        );
     }
 
     function openAppSettings() {

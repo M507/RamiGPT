@@ -13,6 +13,20 @@ from ramigpt.utils import session_logging as sl
 
 
 class PromptHistoryTests(unittest.TestCase):
+    def test_custom_role_objective_renders_session_placeholders(self):
+        priv = PrivEscPrompt("lowpriv", "secret", "Linux", "root")
+
+        prompt = priv.generate_prompt(
+            role_objective=(
+                "Operate as {username} on {system}; become {target_user}."
+            )
+        )
+
+        self.assertTrue(
+            prompt.startswith("Operate as lowpriv on Linux; become root.")
+        )
+        self.assertNotIn("You are a low-privilege user", prompt)
+
     def test_prompt_states_history_did_not_get_root(self):
         priv = PrivEscPrompt("lowpriv", "secret", "Linux", "root")
         priv.add_history("id", "uid=1001(lowpriv)")

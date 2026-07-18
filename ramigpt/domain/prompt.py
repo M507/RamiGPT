@@ -343,14 +343,31 @@ class PrivEscPrompt:
         )
         return report
 
-    def generate_prompt(self, *, include_history_outputs=False, history_output_edge_count=4):
+    def generate_prompt(
+        self,
+        *,
+        include_history_outputs=False,
+        history_output_edge_count=4,
+        role_objective=None,
+    ):
         # Intentionally omit the account password from the model prompt:
         # including it caused the model to search for the password string itself
         # and leaked secrets into session logs.
+        objective_template = role_objective or (
+            "You are a low-privilege user '{username}' on a {system} system and "
+            "your goal is to become the user '{target_user}' by abusing commands "
+            "and misconfiguration on the tested system."
+        )
+        try:
+            objective = objective_template.format(
+                username=self.username,
+                system=self.system,
+                target_user=self.target_user,
+            )
+        except (KeyError, ValueError):
+            objective = objective_template
         report = (
-            f"You are a low-privilege user '{self.username}' on a {self.system} system "
-            f"and your goal is to become the user '{self.target_user}' by abusing commands "
-            f"and misconfiguration on the tested system.\n\n"
+            f"{objective}\n\n"
             "Commands must be non-interactive and safe to run in /bin/sh. "
             "If a tool prompts for this account's password, the runner supplies it "
             "automatically — never print or echo the password.\n\n"

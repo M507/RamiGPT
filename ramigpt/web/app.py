@@ -39,7 +39,12 @@ from ramigpt.utils import (
     start_session_log_run,
 )
 from ramigpt.utils.session_logging import load_shell_command_history
-from ramigpt.config import get_settings, get_settings_manager
+from ramigpt.config import (
+    get_role_objective,
+    get_rotated_role_objective,
+    get_settings,
+    get_settings_manager,
+)
 from ramigpt.paths import (
     BEROOT_DIR,
     BEROOT_DOWNLOADS_DIR,
@@ -183,9 +188,25 @@ def _debug_enabled() -> int:
 
 def _generate_ai_prompt(priv_esc) -> str:
     settings = get_settings()
+    role_objective = get_role_objective(settings.role_objective)
+    if settings.rotate_role_objectives:
+        rotation_base = getattr(priv_esc, "_role_rotation_base", None)
+        if rotation_base != settings.role_objective:
+            priv_esc._role_rotation_base = settings.role_objective
+            priv_esc._role_rotation_offset = 0
+        offset = getattr(priv_esc, "_role_rotation_offset", 0)
+        _, role_objective = get_rotated_role_objective(
+            settings.role_objective,
+            offset,
+        )
+        priv_esc._role_rotation_offset = offset + 1
+    else:
+        priv_esc._role_rotation_base = settings.role_objective
+        priv_esc._role_rotation_offset = 0
     return priv_esc.generate_prompt(
         include_history_outputs=bool(settings.history_include_outputs),
         history_output_edge_count=settings.history_output_edge_count,
+        role_objective=role_objective,
     )
 
 
@@ -870,11 +891,12 @@ def autonomous(session_data):
         slog.info(f"initial shell={bool(shell)} prompt_delimiter={prompt_delimiter!r} priv_esc={bool(priv_esc)}")
         
         while i < max_reqs:  # Ensure the loop runs only if it's enabled
-            if stop_flag.is_set():
+            # Interruptible delay: Stop during this wait must not start the next LLM call
+            # (previously checked only *before* a blind sleep — race in session 002_…64518Z).
+            if _wait_or_stop(stop_flag, 1):
                 stop_reason = "stopped"
                 slog.event("FULL_AI_STOP", "Stop flag set — exiting autonomous loop")
                 break
-            _ai_sleep(1)
             i += 1
             try:
                 emit_session(session_id, f"AI request#{i}======================================================================", color="#f85149")
@@ -882,6 +904,10 @@ def autonomous(session_data):
                 
                 # Create a prompt
                 prompt = _generate_ai_prompt(priv_esc)
+                if stop_flag.is_set():
+                    stop_reason = "stopped"
+                    slog.event("FULL_AI_STOP", "Stop before AI request — exiting")
+                    break
                 if _debug_enabled():
                     emit_session(
                         session_id,
@@ -894,6 +920,14 @@ def autonomous(session_data):
 
                 system = "You are an experienced pentester."
                 response, usage = get_answer_with_usage(system, prompt)
+                if stop_flag.is_set():
+                    # LLM call already in flight isn't cancelled; discard the result.
+                    stop_reason = "stopped"
+                    slog.event(
+                        "FULL_AI_STOP",
+                        "Stop after AI response — discarding command, exiting",
+                    )
+                    break
                 trimmed_ai_command = priv_esc.filter_output(response)
                 command = normalize_ai_command(remove_matching_quotes(trimmed_ai_command))
                 settings = get_settings()
@@ -1132,9 +1166,6 @@ def autonomous(session_data):
                     f"HISTORY_APPEND #{i}",
                     f"history_command: {command}\n\nprocessed_output:\n{processed_output}",
                 )
-                
-                prompt = _generate_ai_prompt(priv_esc)
-
                 hostname = session_data.get('hostname')
                 # Prefer last line (real prompt / id). Never score every dump line —
                 # a lone `#` comment mid-/etc would false-trigger root.
@@ -1281,6 +1312,26 @@ def _ai_sleep(seconds: float) -> None:
         socketio.sleep(seconds)
     except Exception:  # noqa: BLE001
         time.sleep(seconds)
+
+
+def _wait_or_stop(stop_flag: threading.Event, seconds: float) -> bool:
+    """Wait up to ``seconds``; return True if stop was requested (possibly early).
+
+    Used between Full AI iterations so Stop wakes the inter-request delay instead
+    of letting the next LLM call start after a blind sleep.
+    """
+    if stop_flag.is_set():
+        return True
+    if getattr(_ai_tls, "use_time_sleep", False):
+        return bool(stop_flag.wait(timeout=seconds))
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    while True:
+        if stop_flag.is_set():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return bool(stop_flag.is_set())
+        _ai_sleep(min(0.05, remaining))
 
 
 def start_autonomous_task(session_data: dict):
@@ -2124,9 +2175,6 @@ def execute():
             slog.exception(f"execute() setup failed: {e}")
             return jsonify(error=str(e)), 500
 
-        # Create a prompt
-        prompt = _generate_ai_prompt(priv_esc)
-
         command = request.json.get('command', '')
         from_ai = len(command) < 1
         if command == "exit":
@@ -2134,6 +2182,7 @@ def execute():
             return recreate_shell(socketio.emit, session_id)
 
         if from_ai:
+            prompt = _generate_ai_prompt(priv_esc)
             system = "You are an experienced pentester."
             response, usage = get_answer_with_usage(system, prompt)
             trimmed_ai_command = priv_esc.filter_output(response)
@@ -2327,6 +2376,8 @@ def update_ai_settings():
         "debug",
         "history_include_outputs",
         "history_output_edge_count",
+        "role_objective",
+        "rotate_role_objectives",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
     persist = bool(payload.get("persist", True))
@@ -2443,6 +2494,8 @@ def test_ai_settings():
         "debug",
         "history_include_outputs",
         "history_output_edge_count",
+        "role_objective",
+        "rotate_role_objectives",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 
