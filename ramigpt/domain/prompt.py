@@ -107,6 +107,10 @@ class PrivEscPrompt:
         self.target_user = target_user
         self.BeRoot = None
         self._beroot_persist = False
+        self.LinEnum = None
+        self._linenum_persist = False
+        self.LinPEAS = None
+        self._linpeas_persist = False
         self.capabilities = []  # This will now be a list of dictionaries
         self.history = []
         self.facts = []  # List to store multiple facts
@@ -121,6 +125,22 @@ class PrivEscPrompt:
         """Attach BeRoot scanner output. If persist=True, keep it across Full AI turns."""
         self.BeRoot = BeRoot
         self._beroot_persist = bool(persist) and BeRoot is not None
+
+    def set_LinEnum(self, LinEnum, *, persist: bool = False):
+        """Attach LinEnum scanner output. If persist=True, keep it across Full AI turns."""
+        self.LinEnum = LinEnum
+        self._linenum_persist = bool(persist) and LinEnum is not None
+
+    def set_LinPEAS(self, LinPEAS, *, persist: bool = False):
+        """Attach LinPEAS scanner output. If persist=True, keep it across Full AI turns."""
+        self.LinPEAS = LinPEAS
+        self._linpeas_persist = bool(persist) and LinPEAS is not None
+
+    def clear_scanner_findings(self) -> None:
+        """Remove all pre-tool scanner outputs from the prompt context."""
+        self.set_BeRoot(None)
+        self.set_LinEnum(None)
+        self.set_LinPEAS(None)
 
     def get_BeRoot(self, capabilities):
         # Capabilities are expected to be a list of dictionaries with 'name' and 'description'
@@ -385,6 +405,20 @@ class PrivEscPrompt:
             # One-shot by default (saves tokens). Persist when Full AI should keep using findings.
             if not getattr(self, "_beroot_persist", False):
                 self.set_BeRoot(None)
+
+        if self.LinEnum:
+            report += "The following output is from LinEnum scanner:\n\n"
+            report += f"{self.LinEnum}\n"
+            report += f"\n"
+            if not getattr(self, "_linenum_persist", False):
+                self.set_LinEnum(None)
+
+        if self.LinPEAS:
+            report += "The following output is from LinPEAS scanner:\n\n"
+            report += f"{self.LinPEAS}\n"
+            report += f"\n"
+            if not getattr(self, "_linpeas_persist", False):
+                self.set_LinPEAS(None)
 
         report += self._history_block(
             include_outputs=include_history_outputs,

@@ -77,6 +77,8 @@
                                 <!-- Dropdown for selecting tools -->
                                 <select id="toolSelector"  class="queue-select">
                                     <option value="beRoot">BeRoot</option>
+                                    <option value="linEnum">LinEnum</option>
+                                    <option value="linPeas">LinPEAS</option>
                                     <option value="import">Import</option>
                                     <option value="export">Export</option>
                                     <!-- Add more tools as needed -->
@@ -111,10 +113,13 @@
     <script>
 function runSelectedTool() {
     var tool = document.getElementById('toolSelector').value;
+    var toolIds = { beRoot: "beroot", linEnum: "linenum", linPeas: "linpeas" };
     
     switch(tool) {
         case 'beRoot':
-            action3();  // Assuming 'action3' is the function for BeRoot
+        case 'linEnum':
+        case 'linPeas':
+            action3(true, toolIds[tool] || 'beroot');
             break;
         case 'import':
             action4();  // Assuming 'action4' is the function for Import
@@ -148,7 +153,7 @@ function runSelectedTool() {
         }
 
         // Define the action3 function for starting or stopping
-        async function action3(start) {
+        async function action3(start, toolId) {
             const method = start ? "POST" : "DELETE";
             const aiBox = document.getElementById("toolAiCheckbox");
             const withAi = !(aiBox && !aiBox.checked);
@@ -157,7 +162,7 @@ function runSelectedTool() {
                 headers: {
                     "Content-Type": "application/json"
                 },
-                body: JSON.stringify({ action: "start", ai: withAi })
+                body: JSON.stringify({ action: "start", ai: withAi, tool: toolId || "beroot" })
             });
 
             if (response.ok) {

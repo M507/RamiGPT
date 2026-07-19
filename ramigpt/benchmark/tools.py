@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-# Ids must match /action3 tool selector values (e.g. BeRoot → "beroot").
+# Ids must match tool selector / POST /action3 "tool" values (e.g. BeRoot → "beroot").
 AVAILABLE_TOOLS: List[Dict[str, Any]] = [
     {
         "id": "beroot",
@@ -12,7 +12,22 @@ AVAILABLE_TOOLS: List[Dict[str, Any]] = [
         "description": "Upload & scan, then Full AI uses findings until root",
         "default": True,
     },
+    {
+        "id": "linenum",
+        "name": "LinEnum",
+        "description": "Upload & run LinEnum.sh (-t), then Full AI uses findings until root",
+        "default": False,
+    },
+    {
+        "id": "linpeas",
+        "name": "LinPEAS",
+        "description": "Upload & run linpeas.sh (fast mode, -P), then Full AI uses findings until root",
+        "default": False,
+    },
 ]
+
+# When multiple pre-tools are checked, only the first in this list runs per target.
+TOOL_RUN_ORDER: List[str] = [t["id"] for t in AVAILABLE_TOOLS]
 
 
 def default_tools() -> Dict[str, bool]:
@@ -52,3 +67,12 @@ def normalize_tools(raw: Any) -> Dict[str, bool]:
 
 def enabled_tool_ids(tools: Dict[str, bool]) -> List[str]:
     return [tid for tid, on in (tools or {}).items() if on]
+
+
+def pick_benchmark_tool(tools: Dict[str, bool]) -> Optional[str]:
+    """Return the single pre-tool to run for a benchmark target, if any."""
+    enabled = set(enabled_tool_ids(tools))
+    for tid in TOOL_RUN_ORDER:
+        if tid in enabled:
+            return tid
+    return None

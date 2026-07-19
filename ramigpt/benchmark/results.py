@@ -158,6 +158,8 @@ def _build_target_timing(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     shell_runs: List[Dict[str, Any]] = []
 
     beroot_start_ts: Optional[str] = None
+    linenum_start_ts: Optional[str] = None
+    linpeas_start_ts: Optional[str] = None
     full_ai_start_ts: Optional[str] = None
     last_event_ts: Optional[str] = None
     pending_ai: Optional[Dict[str, Any]] = None
@@ -212,6 +214,84 @@ def _build_target_timing(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             }
             tool_runs.append(tool)
             _append_timeline({"phase": "beroot_failed", "type": "tool", **tool})
+            continue
+
+        if kind == "LINENUM_START":
+            linenum_start_ts = ts or linenum_start_ts
+            _append_timeline(
+                {
+                    "phase": "linenum_start",
+                    "type": "phase",
+                    "ts": ts,
+                }
+            )
+            continue
+
+        if kind == "LINENUM_OK":
+            duration = _float_or_none(details.get("duration_seconds"))
+            if duration is None:
+                duration = _seconds_between(linenum_start_ts, ts)
+            tool = {
+                "tool": "linenum",
+                "started_at": linenum_start_ts,
+                "finished_at": ts,
+                "duration_seconds": duration,
+                "with_ai": details.get("with_ai"),
+            }
+            tool_runs.append(tool)
+            _append_timeline({"phase": "linenum", "type": "tool", **tool})
+            continue
+
+        if kind in {"LINENUM_FAILED"}:
+            duration = _seconds_between(linenum_start_ts, ts)
+            tool = {
+                "tool": "linenum",
+                "started_at": linenum_start_ts,
+                "finished_at": ts,
+                "duration_seconds": duration,
+                "status": "failed",
+            }
+            tool_runs.append(tool)
+            _append_timeline({"phase": "linenum_failed", "type": "tool", **tool})
+            continue
+
+        if kind == "LINPEAS_START":
+            linpeas_start_ts = ts or linpeas_start_ts
+            _append_timeline(
+                {
+                    "phase": "linpeas_start",
+                    "type": "phase",
+                    "ts": ts,
+                }
+            )
+            continue
+
+        if kind == "LINPEAS_OK":
+            duration = _float_or_none(details.get("duration_seconds"))
+            if duration is None:
+                duration = _seconds_between(linpeas_start_ts, ts)
+            tool = {
+                "tool": "linpeas",
+                "started_at": linpeas_start_ts,
+                "finished_at": ts,
+                "duration_seconds": duration,
+                "with_ai": details.get("with_ai"),
+            }
+            tool_runs.append(tool)
+            _append_timeline({"phase": "linpeas", "type": "tool", **tool})
+            continue
+
+        if kind in {"LINPEAS_FAILED"}:
+            duration = _seconds_between(linpeas_start_ts, ts)
+            tool = {
+                "tool": "linpeas",
+                "started_at": linpeas_start_ts,
+                "finished_at": ts,
+                "duration_seconds": duration,
+                "status": "failed",
+            }
+            tool_runs.append(tool)
+            _append_timeline({"phase": "linpeas_failed", "type": "tool", **tool})
             continue
 
         if kind in {"FULL_AI_START", "FULL_AI_REQUESTED"}:
@@ -445,8 +525,26 @@ def _diagnose_target(
     if tools_configured and tools_configured.get("beroot"):
         if "BEROOT_START" in kinds and "BEROOT_OK" not in kinds and "BEROOT_FAILED" not in kinds:
             issues.append(f"{prefix}: BeRoot started but no BEROOT_OK/BEROOT_FAILED event")
-        if "beroot" in (target.get("tools_used") or []) and not tool_runs:
+        if "beroot" in (target.get("tools_used") or []) and not any(
+            t.get("tool") == "beroot" for t in tool_runs
+        ):
             issues.append(f"{prefix}: BeRoot listed in tools_used but no tool_runs timing")
+
+    if tools_configured and tools_configured.get("linenum"):
+        if "LINENUM_START" in kinds and "LINENUM_OK" not in kinds and "LINENUM_FAILED" not in kinds:
+            issues.append(f"{prefix}: LinEnum started but no LINENUM_OK/LINENUM_FAILED event")
+        if "linenum" in (target.get("tools_used") or []) and not any(
+            t.get("tool") == "linenum" for t in tool_runs
+        ):
+            issues.append(f"{prefix}: LinEnum listed in tools_used but no tool_runs timing")
+
+    if tools_configured and tools_configured.get("linpeas"):
+        if "LINPEAS_START" in kinds and "LINPEAS_OK" not in kinds and "LINPEAS_FAILED" not in kinds:
+            issues.append(f"{prefix}: LinPEAS started but no LINPEAS_OK/LINPEAS_FAILED event")
+        if "linpeas" in (target.get("tools_used") or []) and not any(
+            t.get("tool") == "linpeas" for t in tool_runs
+        ):
+            issues.append(f"{prefix}: LinPEAS listed in tools_used but no tool_runs timing")
 
     ai_requests = target.get("ai_requests")
     if ai_requests is not None and ai_turns and int(ai_requests) != len(ai_turns):
@@ -554,6 +652,12 @@ def enrich_target_from_events(
         if kind in {"BEROOT_START", "BEROOT_OK", "BEROOT_FULL_AI"}:
             if "beroot" not in tools_used:
                 tools_used.append("beroot")
+        if kind in {"LINENUM_START", "LINENUM_OK", "LINENUM_FULL_AI"}:
+            if "linenum" not in tools_used:
+                tools_used.append("linenum")
+        if kind in {"LINPEAS_START", "LINPEAS_OK", "LINPEAS_FULL_AI"}:
+            if "linpeas" not in tools_used:
+                tools_used.append("linpeas")
         if kind == "AI_TURN":
             ai_turn_count += 1
             cmd = details.get("filtered_command") or details.get("command") or ""
@@ -589,6 +693,10 @@ def enrich_target_from_events(
             model = model or str(details.get("model") or "")
             started_ts = started_ts or ts
         if kind == "BEROOT_START":
+            started_ts = started_ts or ts
+        if kind == "LINENUM_START":
+            started_ts = started_ts or ts
+        if kind == "LINPEAS_START":
             started_ts = started_ts or ts
     if ai_requests is None and ai_turn_count:
         ai_requests = ai_turn_count

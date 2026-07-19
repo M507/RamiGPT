@@ -115,6 +115,18 @@
         description: "Scan first, then Full AI uses findings until root",
         default: true,
       },
+      {
+        id: "linenum",
+        name: "LinEnum",
+        description: "Run LinEnum.sh (-t), then Full AI uses findings until root",
+        default: false,
+      },
+      {
+        id: "linpeas",
+        name: "LinPEAS",
+        description: "Run linpeas.sh (fast mode, -P), then Full AI uses findings until root",
+        default: false,
+      },
     ];
     const selected = (defaults && defaults.tools) || {};
     list.innerHTML = tools

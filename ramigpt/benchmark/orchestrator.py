@@ -46,7 +46,13 @@ from ramigpt.benchmark.results import (
 )
 from ramigpt.benchmark.role_plan import apply_plan_entry_role
 from ramigpt.benchmark.run_plan import apply_plan_entry_model
-from ramigpt.benchmark.tools import AVAILABLE_TOOLS, default_tools, enabled_tool_ids, normalize_tools
+from ramigpt.benchmark.tools import (
+    AVAILABLE_TOOLS,
+    default_tools,
+    enabled_tool_ids,
+    normalize_tools,
+    pick_benchmark_tool,
+)
 from ramigpt.config import Settings, get_settings, get_settings_manager
 from ramigpt.config.settings import load_role_objectives
 from ramigpt.domain import PrivEscPrompt
@@ -563,10 +569,21 @@ def _session_data(session_id: str) -> Dict[str, Any]:
 
 def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
     """
-    Run enabled tools first (BeRoot with AI on → Full AI loop), or plain Full AI
-    when no tools are selected.
+    Run one enabled pre-tool first (BeRoot or LinEnum with AI on → Full AI loop),
+    or plain Full AI when no tools are selected.
+
+    When multiple tools are checked, ``TOOL_RUN_ORDER`` picks a single runner
+    (BeRoot before LinEnum).
     """
     enabled = enabled_tool_ids(run.tools)
+    tool_id = pick_benchmark_tool(run.tools)
+    if len(enabled) > 1 and tool_id:
+        skipped = [t for t in enabled if t != tool_id]
+        _log(
+            run,
+            f"Multiple pre-tools selected {enabled!r} — running {tool_id!r} only "
+            f"(skipped: {', '.join(skipped)})",
+        )
     root_won_by_session[session_id] = False
     full_ai_finished_by_session[session_id] = False
     stop_flags = _hooks["stop_full_ai_by_session"]
@@ -576,18 +593,15 @@ def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
     loop[session_id] = 1
 
     session_data = _session_data(session_id)
+    session_data["with_ai"] = True
+    session_data["from_benchmark"] = True
+    session_data["use_os_thread"] = True
 
-    if "beroot" in enabled:
+    if tool_id == "beroot":
         execute_beroot = _hooks.get("execute_beroot")
         if not callable(execute_beroot):
             raise RuntimeError("execute_beroot hook not registered")
         _log(run, "Running BeRoot (AI on) — scan then Full AI until root")
-        session_data["with_ai"] = True
-        # Run Full AI on an OS thread (time.sleep). start_background_task from
-        # this benchmark worker never executes under eventlet.
-        session_data["from_benchmark"] = True
-        session_data["use_os_thread"] = True
-        # Record tool usage on the matching target.
         with _lock:
             for item in run.targets:
                 if item.session_id == session_id and "beroot" not in item.tools_used:
@@ -597,16 +611,48 @@ def _start_tools_then_full_ai(run: BenchmarkRun, session_id: str) -> None:
         except Exception as exc:  # noqa: BLE001
             mark_full_ai_finished(session_id, stop_reason=f"BeRoot failed: {exc}")
             raise
-        # If BeRoot path did not hand off to Full AI, avoid hanging the wait loop.
         if not full_ai_finished_by_session.get(session_id) and loop.get(session_id) == 0:
-            # Scan-only / failed handoff — mark finished so the target exits cleanly.
             if not root_won_by_session.get(session_id):
                 mark_full_ai_finished(session_id)
         return
 
-    if enabled:
-        unknown = ", ".join(enabled)
-        _log(run, f"Unknown tools {unknown!r} — falling back to Full AI only")
+    if tool_id == "linenum":
+        execute_linenum = _hooks.get("execute_linenum")
+        if not callable(execute_linenum):
+            raise RuntimeError("execute_linenum hook not registered")
+        _log(run, "Running LinEnum (AI on) — scan then Full AI until root")
+        with _lock:
+            for item in run.targets:
+                if item.session_id == session_id and "linenum" not in item.tools_used:
+                    item.tools_used.append("linenum")
+        try:
+            execute_linenum(session_data)
+        except Exception as exc:  # noqa: BLE001
+            mark_full_ai_finished(session_id, stop_reason=f"LinEnum failed: {exc}")
+            raise
+        if not full_ai_finished_by_session.get(session_id) and loop.get(session_id) == 0:
+            if not root_won_by_session.get(session_id):
+                mark_full_ai_finished(session_id)
+        return
+
+    if tool_id == "linpeas":
+        execute_linpeas = _hooks.get("execute_linpeas")
+        if not callable(execute_linpeas):
+            raise RuntimeError("execute_linpeas hook not registered")
+        _log(run, "Running LinPEAS (AI on) — scan then Full AI until root")
+        with _lock:
+            for item in run.targets:
+                if item.session_id == session_id and "linpeas" not in item.tools_used:
+                    item.tools_used.append("linpeas")
+        try:
+            execute_linpeas(session_data)
+        except Exception as exc:  # noqa: BLE001
+            mark_full_ai_finished(session_id, stop_reason=f"LinPEAS failed: {exc}")
+            raise
+        if not full_ai_finished_by_session.get(session_id) and loop.get(session_id) == 0:
+            if not root_won_by_session.get(session_id):
+                mark_full_ai_finished(session_id)
+        return
 
     _log(run, "Starting Full AI (no pre-tools)")
     _start_full_ai(session_id)
@@ -1040,6 +1086,8 @@ def start_run(
         "start_shell_listener",
         "autonomous",
         "execute_beroot",
+        "execute_linenum",
+        "execute_linpeas",
         "prompts",
         "prompt_delimiters",
         "stop_full_ai_by_session",

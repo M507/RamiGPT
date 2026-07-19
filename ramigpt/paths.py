@@ -11,6 +11,10 @@ CERTS_DIR = PROJECT_ROOT / "certs"
 TOOLS_DIR = PROJECT_ROOT / "tools"
 BEROOT_DIR = TOOLS_DIR / "beroot" / "Linux"
 BEROOT_DOWNLOADS_DIR = BEROOT_DIR / "downloaded"
+LINENUM_SCRIPT = TOOLS_DIR / "linenum" / "LinEnum.sh"
+LINENUM_DOWNLOADS_DIR = TOOLS_DIR / "linenum" / "downloaded"
+LINPEAS_SCRIPT = TOOLS_DIR / "linpeas" / "linpeas.sh"
+LINPEAS_DOWNLOADS_DIR = TOOLS_DIR / "linpeas" / "downloaded"
 DATA_DIR = PROJECT_ROOT / "data"
 LOGS_DIR = DATA_DIR / "logs"
 SESSIONS_DIR = DATA_DIR / "sessions"
@@ -45,6 +49,8 @@ def ensure_runtime_dirs() -> None:
         BENCHMARK_RESULTS_DIR,
         BENCHMARK_MODELS_DIR,
         BEROOT_DOWNLOADS_DIR,
+        LINENUM_DOWNLOADS_DIR,
+        LINPEAS_DOWNLOADS_DIR,
         CERTS_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

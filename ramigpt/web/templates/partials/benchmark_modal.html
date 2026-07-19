@@ -12,7 +12,7 @@
         Deploys <strong>only the selected</strong> LPE labs on a remote host via Ansible
         (sudo, SUID, writable paths, capabilities, Python hijack, NFS exports — see
         <code>docker/benchmark/misconfigs.md</code>), optionally runs selected <strong>tools</strong> first
-        (BeRoot + AI), then Full AI until root. Port checks, deploy, verify, and AI runs
+        (BeRoot, LinEnum + AI), then Full AI until root. Port checks, deploy, verify, and AI runs
         are limited to checked targets. Timeout covers tools + AI per target.
       </p>
 
@@ -95,13 +95,7 @@
             <span class="muted small">Run before Full AI (AI on). Checked by default.</span>
           </div>
           <div class="bench-tool-list" id="bench-tool-list">
-            <label class="bench-tool-check">
-              <input type="checkbox" data-tool-id="beroot" checked>
-              <span>
-                <strong>BeRoot</strong>
-                <small>Scan first, then Full AI uses findings until root</small>
-              </span>
-            </label>
+            <!-- Populated from /api/benchmark/status available_tools -->
           </div>
         </div>
         <div class="bench-creds muted small">

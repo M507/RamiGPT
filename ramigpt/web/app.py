@@ -45,6 +45,8 @@ from ramigpt.config import (
     get_settings,
     get_settings_manager,
 )
+from ramigpt.tools.linenum import sanitize_linenum_for_prompt, upload_and_run_linenum
+from ramigpt.tools.linpeas import sanitize_linpeas_for_prompt, upload_and_run_linpeas
 from ramigpt.session_v2 import (
     ShellBridge,
     execute_command as session_v2_execute_command,
@@ -54,6 +56,8 @@ from ramigpt.session_v2 import (
 from ramigpt.paths import (
     BEROOT_DIR,
     BEROOT_DOWNLOADS_DIR,
+    LINENUM_DOWNLOADS_DIR,
+    LINPEAS_DOWNLOADS_DIR,
     CERTS_DIR,
     SESSIONS_DIR,
     STATIC_DIR,
@@ -249,6 +253,8 @@ loop = {}
 # session_id -> monotonic epoch so stale shell_interaction tasks exit quietly
 shell_listener_epoch = {}
 beroots = {}
+linenums = {}
+linpeas_reports = {}
 last_commands = {}
 # session_id -> history list stashed across disconnect/reconnect
 _prompt_history_stash = {}
@@ -300,6 +306,8 @@ def close_ssh_connection(session_id):
     prompt_delimiters.pop(session_id, None)
     last_commands.pop(session_id, None)
     beroots.pop(session_id, None)
+    linenums.pop(session_id, None)
+    linpeas_reports.pop(session_id, None)
     loop.pop(session_id, None)
     flag = stop_full_ai_by_session.pop(session_id, None)
     if flag:
@@ -619,6 +627,89 @@ def upload_and_run_beroot(ssh_conn, *, password: str, slog=None, timeout: int = 
         slog.info(f"beroot: scan finished ({len(text)} chars)")
         slog.block("BEROOT_OUTPUT", text[:20000])
     return text
+
+
+def _run_linenum_on_remote(ssh_conn, *, password: str, slog=None, timeout: int = 300) -> str:
+    """Run LinEnum on the remote host via the shared tools.linenum runner."""
+    return upload_and_run_linenum(
+        ssh_conn,
+        password=password,
+        sh_quote=_sh_single_quote,
+        ssh_run=_ssh_run_or_shell,
+        slog=slog,
+        timeout=timeout,
+    )
+
+
+def _run_linpeas_on_remote(ssh_conn, *, password: str, slog=None, timeout: int = 600) -> str:
+    """Run LinPEAS on the remote host via the shared tools.linpeas runner."""
+    return upload_and_run_linpeas(
+        ssh_conn,
+        password=password,
+        sh_quote=_sh_single_quote,
+        ssh_run=_ssh_run_or_shell,
+        slog=slog,
+        timeout=timeout,
+    )
+
+
+def _handoff_scanner_to_full_ai(session_data, *, source: str, tool_label: str, slog) -> None:
+    """After a pre-tool scan, optionally start the Full AI loop with findings in context."""
+    session_id = session_data["sid"]
+    with_ai = bool(session_data.get("with_ai", True))
+
+    if not with_ai:
+        loop[session_id] = 0
+        emit_session(
+            session_id,
+            f"[{tool_label}] Done (AI off) — findings saved for later Full AI / Guide Me.",
+            color="#8b949e",
+        )
+        return
+
+    priv_esc = prompts.get(session_id)
+    shell = ssh_shells.get(session_id)
+    if priv_esc is None or shell is None:
+        loop[session_id] = 0
+        emit_session(
+            session_id,
+            f"[{tool_label}] Scan saved but cannot start Full AI (missing prompt or shell).",
+            color="#f85149",
+        )
+        try:
+            from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+
+            mark_full_ai_finished(
+                session_id,
+                stop_reason=f"{tool_label} failed: missing prompt or shell for Full AI handoff",
+            )
+        except Exception:
+            pass
+        return
+
+    flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
+    flag.clear()
+    root_won_by_session[session_id] = False
+    loop[session_id] = 1
+    full_ai_event = f"{source.upper()}_FULL_AI"
+    slog.event(full_ai_event, f"{tool_label} finished — starting Full AI loop with scanner findings")
+    emit_session(
+        session_id,
+        f"[{tool_label}] Handing off to Full AI with scanner findings…",
+        color="#58a6ff",
+    )
+    ai_cfg = get_settings()
+    get_session_logger(session_id).event(
+        "FULL_AI_REQUESTED",
+        f"Full AI started after {tool_label} (AI checkbox)",
+        hostname=session_data.get("hostname"),
+        server=session_data.get("server"),
+        port=session_data.get("port"),
+        source=source,
+        provider=ai_cfg.ai_provider,
+        model=ai_cfg.active_model(),
+    )
+    start_autonomous_task(session_data)
 
 
 def _require_live_shell(shell, *, where: str = "shell op"):
@@ -1542,7 +1633,6 @@ def execute_beroot(session_data):
         with_ai = bool(session_data.get("with_ai", True))
         slog = get_session_logger(session_id)
         ssh_conn = ssh_ssh_conns.get(session_id)
-        shell = ssh_shells.get(session_id)
 
         if ssh_conn is None:
             emit_session(session_id, "[BeRoot] No SSH connection — connect first.", color="#f85149")
@@ -1616,7 +1706,7 @@ def execute_beroot(session_data):
         beroots[session_id] = local_filename
         priv_esc = prompts.get(session_id)
         if priv_esc is not None:
-            # Persist BeRoot findings across Full AI turns when AI checkbox is on.
+            priv_esc.clear_scanner_findings()
             priv_esc.set_BeRoot(beroot_for_ai, persist=with_ai)
 
         preview = beroot_for_ai if len(beroot_for_ai) < 12000 else (
@@ -1631,56 +1721,234 @@ def execute_beroot(session_data):
             duration_seconds=beroot_duration,
         )
         debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)} with_ai={with_ai}")
+        _handoff_scanner_to_full_ai(session_data, source="beroot", tool_label="BeRoot", slog=slog)
 
-        if not with_ai:
+
+def execute_linenum(session_data):
+    """
+    Background task: upload LinEnum to the target, run it, attach findings to the
+    session prompt, then optionally hand off to Full AI (when with_ai=True).
+    """
+    with app.app_context():
+        session_id = session_data["sid"]
+        with_ai = bool(session_data.get("with_ai", True))
+        slog = get_session_logger(session_id)
+        ssh_conn = ssh_ssh_conns.get(session_id)
+
+        if ssh_conn is None:
+            emit_session(session_id, "[LinEnum] No SSH connection — connect first.", color="#f85149")
             loop[session_id] = 0
-            emit_session(
-                session_id,
-                "[BeRoot] Done (AI off) — findings saved for later Full AI / Guide Me.",
-                color="#8b949e",
-            )
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason="LinEnum failed: no SSH connection",
+                    )
+                except Exception:
+                    pass
             return
 
-        if priv_esc is None or shell is None:
-            loop[session_id] = 0
-            emit_session(
-                session_id,
-                "[BeRoot] Scan saved but cannot start Full AI (missing prompt or shell).",
-                color="#f85149",
-            )
-            try:
-                from ramigpt.benchmark.orchestrator import mark_full_ai_finished
-                mark_full_ai_finished(
-                    session_id,
-                    stop_reason="BeRoot failed: missing prompt or shell for Full AI handoff",
-                )
-            except Exception:
-                pass
-            return
-
-        # Hand off to the Full AI loop with BeRoot findings already in prompt context.
-        flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
-        flag.clear()
-        root_won_by_session[session_id] = False
-        loop[session_id] = 1
-        slog.event("BEROOT_FULL_AI", "BeRoot finished — starting Full AI loop with scanner findings")
-        emit_session(
-            session_id,
-            "[BeRoot] Handing off to Full AI with scanner findings…",
-            color="#58a6ff",
-        )
-        beroot_ai = get_settings()
-        get_session_logger(session_id).event(
-            "FULL_AI_REQUESTED",
-            "Full AI started after BeRoot (AI checkbox)",
-            hostname=session_data.get("hostname"),
+        password = session_data.get("password") or ""
+        slog.event(
+            "LINENUM_START",
+            "Uploading and running LinEnum on remote host",
             server=session_data.get("server"),
             port=session_data.get("port"),
-            source="beroot",
-            provider=beroot_ai.ai_provider,
-            model=beroot_ai.active_model(),
+            username=session_data.get("username"),
+            with_ai=with_ai,
         )
-        start_autonomous_task(session_data)
+        emit_session(
+            session_id,
+            f"[LinEnum] Uploading LinEnum.sh to /tmp … (AI={'on' if with_ai else 'off'})",
+            color="#58a6ff",
+        )
+        debug_logger.info(
+            f"linenum.start session_id={session_id!r} "
+            f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
+        )
+
+        try:
+            linenum_started = time.monotonic()
+            linenum_string = _run_linenum_on_remote(
+                ssh_conn,
+                password=password,
+                slog=slog,
+                timeout=300,
+            )
+            linenum_duration = round(time.monotonic() - linenum_started, 3)
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception(f"linenum.failed session_id={session_id!r}")
+            slog.exception(f"linenum failed: {exc}")
+            slog.event("LINENUM_FAILED", str(exc))
+            emit_session(session_id, f"[LinEnum] Failed: {exc}", color="#f85149")
+            loop[session_id] = 0
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason=f"LinEnum failed: {exc}",
+                    )
+                except Exception:
+                    pass
+            return
+
+        ensure_runtime_dirs()
+        local_filename = str(LINENUM_DOWNLOADS_DIR / f"{session_id}_linenum.txt")
+        linenum_for_ai = sanitize_linenum_for_prompt(linenum_string)
+        try:
+            Path(local_filename).write_text(linenum_for_ai, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            slog.warning(f"linenum: could not write local copy: {exc}")
+
+        linenums[session_id] = local_filename
+        priv_esc = prompts.get(session_id)
+        if priv_esc is not None:
+            priv_esc.clear_scanner_findings()
+            priv_esc.set_LinEnum(linenum_for_ai, persist=with_ai)
+
+        preview = linenum_for_ai if len(linenum_for_ai) < 12000 else (
+            linenum_for_ai[:6000] + "\n…[truncated]…\n" + linenum_for_ai[-4000:]
+        )
+        emit_session(
+            session_id,
+            f"[LinEnum] Scan complete ({len(linenum_string)} chars):\n{preview}",
+            color="#1E90FF",
+        )
+        slog.event(
+            "LINENUM_OK",
+            f"Scan complete ({len(linenum_string)} chars)",
+            local_file=local_filename,
+            with_ai=with_ai,
+            duration_seconds=linenum_duration,
+        )
+        debug_logger.info(
+            f"linenum.ok session_id={session_id!r} chars={len(linenum_string)} with_ai={with_ai}"
+        )
+        _handoff_scanner_to_full_ai(session_data, source="linenum", tool_label="LinEnum", slog=slog)
+
+
+def execute_linpeas(session_data):
+    """
+    Background task: upload LinPEAS to the target, run it, attach findings to the
+    session prompt, then optionally hand off to Full AI (when with_ai=True).
+    """
+    with app.app_context():
+        session_id = session_data["sid"]
+        with_ai = bool(session_data.get("with_ai", True))
+        slog = get_session_logger(session_id)
+        ssh_conn = ssh_ssh_conns.get(session_id)
+
+        if ssh_conn is None:
+            emit_session(session_id, "[LinPEAS] No SSH connection — connect first.", color="#f85149")
+            loop[session_id] = 0
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason="LinPEAS failed: no SSH connection",
+                    )
+                except Exception:
+                    pass
+            return
+
+        password = session_data.get("password") or ""
+        slog.event(
+            "LINPEAS_START",
+            "Uploading and running LinPEAS on remote host",
+            server=session_data.get("server"),
+            port=session_data.get("port"),
+            username=session_data.get("username"),
+            with_ai=with_ai,
+        )
+        emit_session(
+            session_id,
+            f"[LinPEAS] Uploading linpeas.sh to /tmp … (AI={'on' if with_ai else 'off'})",
+            color="#58a6ff",
+        )
+        debug_logger.info(
+            f"linpeas.start session_id={session_id!r} "
+            f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
+        )
+
+        try:
+            linpeas_started = time.monotonic()
+            linpeas_string = _run_linpeas_on_remote(
+                ssh_conn,
+                password=password,
+                slog=slog,
+                timeout=600,
+            )
+            linpeas_duration = round(time.monotonic() - linpeas_started, 3)
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception(f"linpeas.failed session_id={session_id!r}")
+            slog.exception(f"linpeas failed: {exc}")
+            slog.event("LINPEAS_FAILED", str(exc))
+            emit_session(session_id, f"[LinPEAS] Failed: {exc}", color="#f85149")
+            loop[session_id] = 0
+            if with_ai:
+                try:
+                    from ramigpt.benchmark.orchestrator import mark_full_ai_finished
+
+                    mark_full_ai_finished(
+                        session_id,
+                        stop_reason=f"LinPEAS failed: {exc}",
+                    )
+                except Exception:
+                    pass
+            return
+
+        ensure_runtime_dirs()
+        local_filename = str(LINPEAS_DOWNLOADS_DIR / f"{session_id}_linpeas.txt")
+        linpeas_for_ai = sanitize_linpeas_for_prompt(linpeas_string)
+        try:
+            Path(local_filename).write_text(linpeas_string, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            slog.warning(f"linpeas: could not write local copy: {exc}")
+
+        linpeas_reports[session_id] = local_filename
+        priv_esc = prompts.get(session_id)
+        if priv_esc is not None:
+            priv_esc.clear_scanner_findings()
+            priv_esc.set_LinPEAS(linpeas_for_ai, persist=with_ai)
+
+        preview = linpeas_for_ai if len(linpeas_for_ai) < 12000 else (
+            linpeas_for_ai[:6000] + "\n…[truncated]…\n" + linpeas_for_ai[-4000:]
+        )
+        emit_session(
+            session_id,
+            f"[LinPEAS] Scan complete ({len(linpeas_string)} chars):\n{preview}",
+            color="#1E90FF",
+        )
+        slog.event(
+            "LINPEAS_OK",
+            f"Scan complete ({len(linpeas_string)} chars)",
+            local_file=local_filename,
+            with_ai=with_ai,
+            duration_seconds=linpeas_duration,
+        )
+        debug_logger.info(
+            f"linpeas.ok session_id={session_id!r} chars={len(linpeas_string)} with_ai={with_ai}"
+        )
+        _handoff_scanner_to_full_ai(session_data, source="linpeas", tool_label="LinPEAS", slog=slog)
+
+
+_TOOL_LABELS = {
+    "beroot": "BeRoot",
+    "linenum": "LinEnum",
+    "linpeas": "LinPEAS",
+}
+
+_TOOL_EXECUTORS = {
+    "beroot": execute_beroot,
+    "linenum": execute_linenum,
+    "linpeas": execute_linpeas,
+}
 
 
 @app.route('/action3', methods=['POST', 'DELETE'])
@@ -1708,7 +1976,21 @@ def action3():
             with_ai = raw_ai.strip().lower() not in {"0", "false", "no", "off"}
         else:
             with_ai = bool(raw_ai)
-        # Pause the interactive listener so it does not race BeRoot's helper shell.
+        tool = (request.json.get("tool") or "beroot").strip().lower()
+        if tool == "beroot" and request.json.get("tool") is None:
+            # Legacy workspace selector values (beRoot / linEnum).
+            legacy = (request.json.get("toolSelector") or "").strip()
+            if legacy.lower() in {"linenum", "linenum.sh"}:
+                tool = "linenum"
+            elif legacy.lower() in {"linpeas", "linpeas.sh"}:
+                tool = "linpeas"
+            elif legacy.lower() in {"beroot", "beroot.py"}:
+                tool = "beroot"
+        execute_fn = _TOOL_EXECUTORS.get(tool)
+        if execute_fn is None:
+            return jsonify(error=f"Unknown tool {tool!r}. Available: {', '.join(_TOOL_EXECUTORS)}"), 400
+        tool_label = _TOOL_LABELS.get(tool, tool)
+        # Pause the interactive listener so it does not race the scanner's helper shell.
         loop[session_id] = 1
         session_data_copy = {
             "sid": session_id,
@@ -1719,13 +2001,13 @@ def action3():
             "port": session.get("port"),
             "with_ai": with_ai,
         }
-        socketio.start_background_task(execute_beroot, session_data_copy)
+        socketio.start_background_task(execute_fn, session_data_copy)
         emit_session(
             session_id,
-            f"Starting BeRoot (upload + scan)… AI={'on' if with_ai else 'off'}",
+            f"Starting {tool_label} (upload + scan)… AI={'on' if with_ai else 'off'}",
             color="#58a6ff",
         )
-        return jsonify(output="beroot_started", session_id=session_id, ai=with_ai), 200
+        return jsonify(output=f"{tool}_started", tool=tool, session_id=session_id, ai=with_ai), 200
 
     elif action == "stop":
         session_id = resolve_server_session_id()
@@ -2505,6 +2787,8 @@ register_benchmark_hooks(
     start_shell_listener=start_shell_listener,
     autonomous=autonomous,
     execute_beroot=execute_beroot,
+    execute_linenum=execute_linenum,
+    execute_linpeas=execute_linpeas,
     prompts=prompts,
     prompt_delimiters=prompt_delimiters,
     stop_full_ai_by_session=stop_full_ai_by_session,

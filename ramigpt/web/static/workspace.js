@@ -699,27 +699,37 @@
     }
   }
 
+  const TOOL_API_IDS = {
+    beRoot: "beroot",
+    linEnum: "linenum",
+    linPeas: "linpeas",
+  };
+
   async function runTool() {
     if (!requireConnectedSession()) return;
     const tool = $("toolSelector").value;
     const withAi = !($("toolAiCheckbox") && !$("toolAiCheckbox").checked);
-    if (tool === "beRoot") {
-      try {
-        await api("/action3", {
-          method: "POST",
-          body: {
-            action: "start",
-            ai: withAi,
-            ...sessionPayloadExtras(),
-          },
-        });
-        if (withAi && state.selectedId) {
-          state.fullAiRunningBySession[state.selectedId] = true;
-          updateFullAiButton();
-        }
-      } catch (err) {
-        alert(err.message);
+    const toolId = TOOL_API_IDS[tool];
+    if (!toolId) {
+      alert("Unknown tool: " + tool);
+      return;
+    }
+    try {
+      await api("/action3", {
+        method: "POST",
+        body: {
+          action: "start",
+          ai: withAi,
+          tool: toolId,
+          ...sessionPayloadExtras(),
+        },
+      });
+      if (withAi && state.selectedId) {
+        state.fullAiRunningBySession[state.selectedId] = true;
+        updateFullAiButton();
       }
+    } catch (err) {
+      alert(err.message);
     }
   }
 
