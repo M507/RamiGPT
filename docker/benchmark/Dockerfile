@@ -35,7 +35,34 @@ RUN apt-get update -y && \
         nodejs \
         npm \
         python3-pip \
-        screen \
+        composer \
+        php-cli \
+        apache2 \
+        mariadb-server \
+        opendoas \
+        ansible \
+        nginx \
+        xxd \
+        zip \
+        binutils \
+        jq \
+        rsync \
+        redis-server \
+        redis-tools \
+        supervisor \
+        rsyslog \
+        netcat-openbsd \
+        bsdextrautils \
+        util-linux-extra \
+        wamerican \
+        sqlite3 \
+        lua5.4 \
+        ed \
+        lsof \
+        dos2unix \
+    && npm install -g yarn \
+    && (command -v node >/dev/null || ln -sf "$(command -v nodejs)" /usr/bin/node) \
+    && (command -v lua >/dev/null || ln -sf "$(command -v lua5.4)" /usr/bin/lua) \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash lowpriv && \

@@ -3,7 +3,7 @@
 # Host networking (no publish/DNAT): sshd binds SSH_PORT directly on the lab host
 # — same pattern for every target (see bench-sudo-vim).
 # Credentials: lowpriv / password
-# Ports: 2170–2239 (skip host/vSwitch-blocked holes; see targets.py); band 2170–2299.
+# Ports: 2170–2349 (see targets.py); host-network sshd per service.
 
 x-bench: &bench
   image: ramigpt-bench-base:latest
@@ -559,12 +559,12 @@ services:
       SSH_PORT: "2246"
       MISCONFIG: "ld-preload-script"
 
-  bench-screen-root-socket:
+  bench-sudo-composer:
     <<: *bench
-    container_name: ramigpt_bench_screen_root_socket
+    container_name: ramigpt_bench_sudo_composer
     environment:
       SSH_PORT: "2247"
-      MISCONFIG: "screen-root-socket"
+      MISCONFIG: "sudo-composer"
 
   bench-sudo-pip:
     <<: *bench
@@ -607,3 +607,1412 @@ services:
     environment:
       SSH_PORT: "2253"
       MISCONFIG: "writable-init-d"
+
+  bench-sudo-ps4:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ps4
+    environment:
+      SSH_PORT: "2254"
+      MISCONFIG: "sudo-ps4"
+
+  bench-sudo-shelopts:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_shelopts
+    environment:
+      SSH_PORT: "2255"
+      MISCONFIG: "sudo-shelopts"
+
+  bench-writable-cron-d:
+    <<: *bench
+    container_name: ramigpt_bench_writable_cron_d
+    environment:
+      SSH_PORT: "2256"
+      MISCONFIG: "writable:cron-d"
+
+  bench-writable-sshd-config:
+    <<: *bench
+    container_name: ramigpt_bench_writable_sshd_config
+    environment:
+      SSH_PORT: "2257"
+      MISCONFIG: "writable:sshd-config"
+
+  bench-writable-pam:
+    <<: *bench
+    container_name: ramigpt_bench_writable_pam
+    environment:
+      SSH_PORT: "2258"
+      MISCONFIG: "writable:pam"
+
+  bench-php-include-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_php_include_hijack
+    environment:
+      SSH_PORT: "2259"
+      MISCONFIG: "php-include-hijack"
+
+  bench-node-path-hijack:
+    <<: *bench
+    container_name: ramigpt_bench_node_path_hijack
+    environment:
+      SSH_PORT: "2260"
+      MISCONFIG: "node-path-hijack"
+
+  bench-root-tcp-service:
+    <<: *bench
+    container_name: ramigpt_bench_root_tcp_service
+    environment:
+      SSH_PORT: "2261"
+      MISCONFIG: "root-tcp-service"
+
+  bench-writable-webroot:
+    <<: *bench
+    container_name: ramigpt_bench_writable_webroot
+    environment:
+      SSH_PORT: "2262"
+      MISCONFIG: "writable:webroot"
+
+  bench-mysql-socket:
+    <<: *bench
+    container_name: ramigpt_bench_mysql_socket
+    environment:
+      SSH_PORT: "2263"
+      MISCONFIG: "mysql-socket"
+
+  bench-writable-rc-local:
+    <<: *bench
+    container_name: ramigpt_bench_writable_rc_local
+    environment:
+      SSH_PORT: "2264"
+      MISCONFIG: "writable:rc-local"
+
+  bench-sudo-backup:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_backup
+    environment:
+      SSH_PORT: "2265"
+      MISCONFIG: "sudo-backup"
+
+  bench-writable-vpn-hook:
+    <<: *bench
+    container_name: ramigpt_bench_writable_vpn_hook
+    environment:
+      SSH_PORT: "2266"
+      MISCONFIG: "writable:vpn-hook"
+
+  bench-cap-setfcap:
+    <<: *bench
+    container_name: ramigpt_bench_cap_setfcap
+    cap_add: ["SETFCAP", "FSETID", "FOWNER"]
+    environment:
+      SSH_PORT: "2267"
+      MISCONFIG: "cap-setfcap:python3"
+
+  bench-sudo-strings:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_strings
+    environment:
+      SSH_PORT: "2268"
+      MISCONFIG: "sudo-strings"
+
+  bench-sudo-yarn:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_yarn
+    environment:
+      SSH_PORT: "2269"
+      MISCONFIG: "sudo-yarn"
+
+  bench-writable-anacrontab:
+    <<: *bench
+    container_name: ramigpt_bench_writable_anacrontab
+    environment:
+      SSH_PORT: "2270"
+      MISCONFIG: "writable:anacrontab"
+
+  bench-writable-crontab-system:
+    <<: *bench
+    container_name: ramigpt_bench_writable_crontab_system
+    environment:
+      SSH_PORT: "2271"
+      MISCONFIG: "writable:crontab-system"
+
+  bench-sudo-nodepath:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_nodepath
+    environment:
+      SSH_PORT: "2272"
+      MISCONFIG: "sudo-nodepath"
+
+  bench-doas-nopass:
+    <<: *bench
+    container_name: ramigpt_bench_doas_nopass
+    environment:
+      SSH_PORT: "2273"
+      MISCONFIG: "doas-nopass"
+
+  bench-cred-env-file:
+    <<: *bench
+    container_name: ramigpt_bench_cred_env_file
+    environment:
+      SSH_PORT: "2274"
+      MISCONFIG: "cred-env-file"
+
+  bench-sudo-ansible:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ansible
+    environment:
+      SSH_PORT: "2275"
+      MISCONFIG: "sudo-ansible"
+
+  bench-sudo-xxd:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_xxd
+    environment:
+      SSH_PORT: "2276"
+      MISCONFIG: "sudo-xxd"
+
+  bench-sudo-od:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_od
+    environment:
+      SSH_PORT: "2277"
+      MISCONFIG: "sudo-od"
+
+  bench-writable-apache-config:
+    <<: *bench
+    container_name: ramigpt_bench_writable_apache_config
+    environment:
+      SSH_PORT: "2278"
+      MISCONFIG: "writable:apache-config"
+
+  bench-sudo-perl-exec:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_perl_exec
+    environment:
+      SSH_PORT: "2279"
+      MISCONFIG: "sudo-perl-exec"
+
+  bench-cred-backup-secrets:
+    <<: *bench
+    container_name: ramigpt_bench_cred_backup_secrets
+    environment:
+      SSH_PORT: "2280"
+      MISCONFIG: "cred-backup-secrets"
+
+  bench-sudo-base64:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_base64
+    environment:
+      SSH_PORT: "2281"
+      MISCONFIG: "sudo:base64"
+
+  bench-sudo-cut:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_cut
+    environment:
+      SSH_PORT: "2282"
+      MISCONFIG: "sudo:cut"
+
+  bench-sudo-openssl:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_openssl
+    environment:
+      SSH_PORT: "2283"
+      MISCONFIG: "sudo:openssl"
+
+  bench-writable-nginx-config:
+    <<: *bench
+    container_name: ramigpt_bench_writable_nginx_config
+    environment:
+      SSH_PORT: "2284"
+      MISCONFIG: "writable:nginx-config"
+
+  bench-suid-base64:
+    <<: *bench
+    container_name: ramigpt_bench_suid_base64
+    environment:
+      SSH_PORT: "2285"
+      MISCONFIG: "suid:base64"
+
+  bench-suid-more:
+    <<: *bench
+    container_name: ramigpt_bench_suid_more
+    environment:
+      SSH_PORT: "2286"
+      MISCONFIG: "suid:more"
+
+  bench-cred-netrc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_netrc
+    environment:
+      SSH_PORT: "2287"
+      MISCONFIG: "cred-netrc"
+
+  bench-cred-git-config:
+    <<: *bench
+    container_name: ramigpt_bench_cred_git_config
+    environment:
+      SSH_PORT: "2288"
+      MISCONFIG: "cred-git-config"
+
+  bench-sudo-zip:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_zip
+    environment:
+      SSH_PORT: "2289"
+      MISCONFIG: "sudo:zip"
+
+  bench-sudo-cat:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_cat
+    environment:
+      SSH_PORT: "2290"
+      MISCONFIG: "sudo:cat"
+
+  bench-sudo-head:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_head
+    environment:
+      SSH_PORT: "2291"
+      MISCONFIG: "sudo:head"
+
+  bench-sudo-tail:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_tail
+    environment:
+      SSH_PORT: "2292"
+      MISCONFIG: "sudo:tail"
+
+  bench-sudo-nl:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_nl
+    environment:
+      SSH_PORT: "2293"
+      MISCONFIG: "sudo:nl"
+
+  bench-sudo-grep:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_grep
+    environment:
+      SSH_PORT: "2294"
+      MISCONFIG: "sudo:grep"
+
+  bench-suid-head:
+    <<: *bench
+    container_name: ramigpt_bench_suid_head
+    environment:
+      SSH_PORT: "2295"
+      MISCONFIG: "suid:head"
+
+  bench-suid-tail:
+    <<: *bench
+    container_name: ramigpt_bench_suid_tail
+    environment:
+      SSH_PORT: "2296"
+      MISCONFIG: "suid:tail"
+
+  bench-cred-mysql-cnf:
+    <<: *bench
+    container_name: ramigpt_bench_cred_mysql_cnf
+    environment:
+      SSH_PORT: "2297"
+      MISCONFIG: "cred-mysql-cnf"
+
+  bench-cred-aws-creds:
+    <<: *bench
+    container_name: ramigpt_bench_cred_aws_creds
+    environment:
+      SSH_PORT: "2298"
+      MISCONFIG: "cred-aws-creds"
+
+  bench-sudo-shuf:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_shuf
+    environment:
+      SSH_PORT: "2299"
+      MISCONFIG: "sudo:shuf"
+
+  bench-redis-unauth:
+    <<: *bench
+    container_name: ramigpt_bench_redis_unauth
+    environment:
+      SSH_PORT: "2300"
+      MISCONFIG: "redis-unauth"
+
+  bench-cred-wgetrc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_wgetrc
+    environment:
+      SSH_PORT: "2301"
+      MISCONFIG: "cred-wgetrc"
+
+  bench-cred-pgpass:
+    <<: *bench
+    container_name: ramigpt_bench_cred_pgpass
+    environment:
+      SSH_PORT: "2302"
+      MISCONFIG: "cred-pgpass"
+
+  bench-sudo-sort:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_sort
+    environment:
+      SSH_PORT: "2303"
+      MISCONFIG: "sudo:sort"
+
+  bench-sudo-pr:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_pr
+    environment:
+      SSH_PORT: "2304"
+      MISCONFIG: "sudo:pr"
+
+  bench-sudo-uniq:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_uniq
+    environment:
+      SSH_PORT: "2305"
+      MISCONFIG: "sudo:uniq"
+
+  bench-sudo-diff:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_diff
+    environment:
+      SSH_PORT: "2306"
+      MISCONFIG: "sudo:diff"
+
+  bench-suid-grep:
+    <<: *bench
+    container_name: ramigpt_bench_suid_grep
+    environment:
+      SSH_PORT: "2307"
+      MISCONFIG: "suid:grep"
+
+  bench-suid-sort:
+    <<: *bench
+    container_name: ramigpt_bench_suid_sort
+    environment:
+      SSH_PORT: "2308"
+      MISCONFIG: "suid:sort"
+
+  bench-suid-nl:
+    <<: *bench
+    container_name: ramigpt_bench_suid_nl
+    environment:
+      SSH_PORT: "2309"
+      MISCONFIG: "suid:nl"
+
+  bench-php-auto-prepend:
+    <<: *bench
+    container_name: ramigpt_bench_php_auto_prepend
+    environment:
+      SSH_PORT: "2310"
+      MISCONFIG: "php-auto-prepend"
+
+  bench-writable-supervisor:
+    <<: *bench
+    container_name: ramigpt_bench_writable_supervisor
+    environment:
+      SSH_PORT: "2311"
+      MISCONFIG: "writable:supervisor"
+
+  bench-writable-udev-rules:
+    <<: *bench
+    container_name: ramigpt_bench_writable_udev_rules
+    environment:
+      SSH_PORT: "2312"
+      MISCONFIG: "writable:udev-rules"
+
+  bench-writable-systemd-dropin:
+    <<: *bench
+    container_name: ramigpt_bench_writable_systemd_dropin
+    environment:
+      SSH_PORT: "2313"
+      MISCONFIG: "writable:systemd-dropin"
+
+  bench-sudo-expand:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_expand
+    environment:
+      SSH_PORT: "2314"
+      MISCONFIG: "sudo:expand"
+
+  bench-cap-net-bind:
+    <<: *bench
+    container_name: ramigpt_bench_cap_net_bind
+    environment:
+      SSH_PORT: "2315"
+      MISCONFIG: "cap-net-bind:python3"
+    cap_add: ["SETFCAP", "NET_BIND_SERVICE", "DAC_READ_SEARCH"]
+
+  bench-root-udp-service:
+    <<: *bench
+    container_name: ramigpt_bench_root_udp_service
+    environment:
+      SSH_PORT: "2316"
+      MISCONFIG: "root-udp-service"
+
+  bench-cred-env-local:
+    <<: *bench
+    container_name: ramigpt_bench_cred_env_local
+    environment:
+      SSH_PORT: "2317"
+      MISCONFIG: "cred-env-local"
+
+  bench-cred-docker-config:
+    <<: *bench
+    container_name: ramigpt_bench_cred_docker_config
+    environment:
+      SSH_PORT: "2318"
+      MISCONFIG: "cred-docker-config"
+
+  bench-cred-kubeconfig:
+    <<: *bench
+    container_name: ramigpt_bench_cred_kubeconfig
+    environment:
+      SSH_PORT: "2319"
+      MISCONFIG: "cred-kubeconfig"
+
+  bench-cred-jenkins-secrets:
+    <<: *bench
+    container_name: ramigpt_bench_cred_jenkins_secrets
+    environment:
+      SSH_PORT: "2320"
+      MISCONFIG: "cred-jenkins-secrets"
+
+  bench-cred-puppet-secrets:
+    <<: *bench
+    container_name: ramigpt_bench_cred_puppet_secrets
+    environment:
+      SSH_PORT: "2321"
+      MISCONFIG: "cred-puppet-secrets"
+
+  bench-sudo-fold:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_fold
+    environment:
+      SSH_PORT: "2322"
+      MISCONFIG: "sudo:fold"
+
+  bench-sudo-hd:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_hd
+    environment:
+      SSH_PORT: "2323"
+      MISCONFIG: "sudo:hd"
+
+  bench-sudo-paste:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_paste
+    environment:
+      SSH_PORT: "2324"
+      MISCONFIG: "sudo:paste"
+
+  bench-sudo-rev:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_rev
+    environment:
+      SSH_PORT: "2325"
+      MISCONFIG: "sudo:rev"
+
+  bench-sudo-tac:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_tac
+    environment:
+      SSH_PORT: "2326"
+      MISCONFIG: "sudo:tac"
+
+  bench-sudo-column:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_column
+    environment:
+      SSH_PORT: "2327"
+      MISCONFIG: "sudo:column"
+
+  bench-sudo-fmt:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_fmt
+    environment:
+      SSH_PORT: "2328"
+      MISCONFIG: "sudo:fmt"
+
+  bench-sudo-comm:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_comm
+    environment:
+      SSH_PORT: "2329"
+      MISCONFIG: "sudo:comm"
+
+  bench-sudo-ptx:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ptx
+    environment:
+      SSH_PORT: "2330"
+      MISCONFIG: "sudo:ptx"
+
+  bench-suid-fold:
+    <<: *bench
+    container_name: ramigpt_bench_suid_fold
+    environment:
+      SSH_PORT: "2331"
+      MISCONFIG: "suid:fold"
+
+  bench-suid-hd:
+    <<: *bench
+    container_name: ramigpt_bench_suid_hd
+    environment:
+      SSH_PORT: "2332"
+      MISCONFIG: "suid:hd"
+
+  bench-suid-rev:
+    <<: *bench
+    container_name: ramigpt_bench_suid_rev
+    environment:
+      SSH_PORT: "2333"
+      MISCONFIG: "suid:rev"
+
+  bench-suid-tac:
+    <<: *bench
+    container_name: ramigpt_bench_suid_tac
+    environment:
+      SSH_PORT: "2334"
+      MISCONFIG: "suid:tac"
+
+  bench-suid-paste:
+    <<: *bench
+    container_name: ramigpt_bench_suid_paste
+    environment:
+      SSH_PORT: "2335"
+      MISCONFIG: "suid:paste"
+
+  bench-writable-etc-hosts:
+    <<: *bench
+    container_name: ramigpt_bench_writable_etc_hosts
+    environment:
+      SSH_PORT: "2336"
+      MISCONFIG: "writable:etc-hosts"
+
+  bench-writable-rsyslog:
+    <<: *bench
+    container_name: ramigpt_bench_writable_rsyslog
+    environment:
+      SSH_PORT: "2337"
+      MISCONFIG: "writable:rsyslog"
+
+  bench-writable-logrotate-d:
+    <<: *bench
+    container_name: ramigpt_bench_writable_logrotate_d
+    environment:
+      SSH_PORT: "2338"
+      MISCONFIG: "writable:logrotate-d"
+
+  bench-kernel-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_kernel_detect_only
+    environment:
+      SSH_PORT: "2339"
+      MISCONFIG: "kernel-detect-only"
+
+  bench-suid-pr:
+    <<: *bench
+    container_name: ramigpt_bench_suid_pr
+    environment:
+      SSH_PORT: "2340"
+      MISCONFIG: "suid:pr"
+
+  bench-suid-uniq:
+    <<: *bench
+    container_name: ramigpt_bench_suid_uniq
+    environment:
+      SSH_PORT: "2341"
+      MISCONFIG: "suid:uniq"
+
+  bench-cred-resolv-creds:
+    <<: *bench
+    container_name: ramigpt_bench_cred_resolv_creds
+    environment:
+      SSH_PORT: "2342"
+      MISCONFIG: "cred-resolv-creds"
+
+  bench-suid-column:
+    <<: *bench
+    container_name: ramigpt_bench_suid_column
+    environment:
+      SSH_PORT: "2343"
+      MISCONFIG: "suid:column"
+
+  bench-suid-fmt:
+    <<: *bench
+    container_name: ramigpt_bench_suid_fmt
+    environment:
+      SSH_PORT: "2344"
+      MISCONFIG: "suid:fmt"
+
+  bench-suid-comm:
+    <<: *bench
+    container_name: ramigpt_bench_suid_comm
+    environment:
+      SSH_PORT: "2345"
+      MISCONFIG: "suid:comm"
+
+  bench-cred-tmux-conf:
+    <<: *bench
+    container_name: ramigpt_bench_cred_tmux_conf
+    environment:
+      SSH_PORT: "2346"
+      MISCONFIG: "cred-tmux-conf"
+
+  bench-suid-ptx:
+    <<: *bench
+    container_name: ramigpt_bench_suid_ptx
+    environment:
+      SSH_PORT: "2347"
+      MISCONFIG: "suid:ptx"
+
+  bench-sudo-split:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_split
+    environment:
+      SSH_PORT: "2348"
+      MISCONFIG: "sudo:split"
+
+  bench-exploits-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_exploits_detect_only
+    environment:
+      SSH_PORT: "2349"
+      MISCONFIG: "exploits-detect-only"
+
+  bench-sudo-hexdump:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_hexdump
+    environment:
+      SSH_PORT: "2350"
+      MISCONFIG: "sudo:hexdump"
+
+  bench-sudo-join:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_join
+    environment:
+      SSH_PORT: "2351"
+      MISCONFIG: "sudo:join"
+
+  bench-sudo-csplit:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_csplit
+    environment:
+      SSH_PORT: "2352"
+      MISCONFIG: "sudo:csplit"
+
+  bench-sudo-more:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_more
+    environment:
+      SSH_PORT: "2353"
+      MISCONFIG: "sudo:more"
+
+  bench-sudo-iconv:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_iconv
+    environment:
+      SSH_PORT: "2354"
+      MISCONFIG: "sudo:iconv"
+
+  bench-suid-hexdump:
+    <<: *bench
+    container_name: ramigpt_bench_suid_hexdump
+    environment:
+      SSH_PORT: "2355"
+      MISCONFIG: "suid:hexdump"
+
+  bench-suid-join:
+    <<: *bench
+    container_name: ramigpt_bench_suid_join
+    environment:
+      SSH_PORT: "2356"
+      MISCONFIG: "suid:join"
+
+  bench-suid-csplit:
+    <<: *bench
+    container_name: ramigpt_bench_suid_csplit
+    environment:
+      SSH_PORT: "2357"
+      MISCONFIG: "suid:csplit"
+
+  bench-suid-expand:
+    <<: *bench
+    container_name: ramigpt_bench_suid_expand
+    environment:
+      SSH_PORT: "2358"
+      MISCONFIG: "suid:expand"
+
+  bench-suid-iconv:
+    <<: *bench
+    container_name: ramigpt_bench_suid_iconv
+    environment:
+      SSH_PORT: "2359"
+      MISCONFIG: "suid:iconv"
+
+  bench-cred-npmrc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_npmrc
+    environment:
+      SSH_PORT: "2360"
+      MISCONFIG: "cred-npmrc"
+
+  bench-cred-ssh-config:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ssh_config
+    environment:
+      SSH_PORT: "2361"
+      MISCONFIG: "cred-ssh-config"
+
+  bench-apparmor-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_apparmor_detect_only
+    environment:
+      SSH_PORT: "2362"
+      MISCONFIG: "apparmor-detect-only"
+
+  bench-sudo-u-hash:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_u_hash
+    environment:
+      SSH_PORT: "2363"
+      MISCONFIG: "sudo-u-hash"
+
+  bench-cred-viminfo:
+    <<: *bench
+    container_name: ramigpt_bench_cred_viminfo
+    environment:
+      SSH_PORT: "2364"
+      MISCONFIG: "cred-viminfo"
+
+  bench-sudo-perl:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_perl
+    environment:
+      SSH_PORT: "2365"
+      MISCONFIG: "sudo:perl"
+
+  bench-suid-perl:
+    <<: *bench
+    container_name: ramigpt_bench_suid_perl
+    environment:
+      SSH_PORT: "2366"
+      MISCONFIG: "suid:perl"
+
+  bench-sudo-php:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_php
+    environment:
+      SSH_PORT: "2367"
+      MISCONFIG: "sudo:php"
+
+  bench-suid-php:
+    <<: *bench
+    container_name: ramigpt_bench_suid_php
+    environment:
+      SSH_PORT: "2368"
+      MISCONFIG: "suid:php"
+
+  bench-sudo-ruby:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ruby
+    environment:
+      SSH_PORT: "2369"
+      MISCONFIG: "sudo:ruby"
+
+  bench-suid-curl:
+    <<: *bench
+    container_name: ramigpt_bench_suid_curl
+    environment:
+      SSH_PORT: "2370"
+      MISCONFIG: "suid:curl"
+
+  bench-sudo-node:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_node
+    environment:
+      SSH_PORT: "2371"
+      MISCONFIG: "sudo:node"
+
+  bench-suid-node:
+    <<: *bench
+    container_name: ramigpt_bench_suid_node
+    environment:
+      SSH_PORT: "2372"
+      MISCONFIG: "suid:node"
+
+  bench-sudo-jq:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_jq
+    environment:
+      SSH_PORT: "2373"
+      MISCONFIG: "sudo:jq"
+
+  bench-suid-jq:
+    <<: *bench
+    container_name: ramigpt_bench_suid_jq
+    environment:
+      SSH_PORT: "2374"
+      MISCONFIG: "suid:jq"
+
+  bench-sudo-scp:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_scp
+    environment:
+      SSH_PORT: "2375"
+      MISCONFIG: "sudo:scp"
+
+  bench-sudo-rsync:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_rsync
+    environment:
+      SSH_PORT: "2376"
+      MISCONFIG: "sudo:rsync"
+
+  bench-suid-rsync:
+    <<: *bench
+    container_name: ramigpt_bench_suid_rsync
+    environment:
+      SSH_PORT: "2377"
+      MISCONFIG: "suid:rsync"
+
+  bench-cred-lesshst:
+    <<: *bench
+    container_name: ramigpt_bench_cred_lesshst
+    environment:
+      SSH_PORT: "2378"
+      MISCONFIG: "cred-lesshst"
+
+  bench-cred-gcloud:
+    <<: *bench
+    container_name: ramigpt_bench_cred_gcloud
+    environment:
+      SSH_PORT: "2379"
+      MISCONFIG: "cred-gcloud"
+
+  bench-cred-irssi:
+    <<: *bench
+    container_name: ramigpt_bench_cred_irssi
+    environment:
+      SSH_PORT: "2380"
+      MISCONFIG: "cred-irssi"
+
+  bench-cred-muttrc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_muttrc
+    environment:
+      SSH_PORT: "2381"
+      MISCONFIG: "cred-muttrc"
+
+  bench-cred-s3cfg:
+    <<: *bench
+    container_name: ramigpt_bench_cred_s3cfg
+    environment:
+      SSH_PORT: "2382"
+      MISCONFIG: "cred-s3cfg"
+
+  bench-cred-bash-profile:
+    <<: *bench
+    container_name: ramigpt_bench_cred_bash_profile
+    environment:
+      SSH_PORT: "2383"
+      MISCONFIG: "cred-bash-profile"
+
+  bench-cred-screenlog:
+    <<: *bench
+    container_name: ramigpt_bench_cred_screenlog
+    environment:
+      SSH_PORT: "2384"
+      MISCONFIG: "cred-screenlog"
+
+  bench-cred-hg:
+    <<: *bench
+    container_name: ramigpt_bench_cred_hg
+    environment:
+      SSH_PORT: "2385"
+      MISCONFIG: "cred-hg"
+
+  bench-writable-shm-hook:
+    <<: *bench
+    container_name: ramigpt_bench_writable_shm_hook
+    environment:
+      SSH_PORT: "2386"
+      MISCONFIG: "writable:shm-hook"
+
+  bench-ptrace-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_ptrace_detect_only
+    environment:
+      SSH_PORT: "2387"
+      MISCONFIG: "ptrace-detect-only"
+
+  bench-selinux-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_selinux_detect_only
+    environment:
+      SSH_PORT: "2388"
+      MISCONFIG: "selinux-detect-only"
+
+  bench-docker-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_docker_detect_only
+    environment:
+      SSH_PORT: "2389"
+      MISCONFIG: "docker-detect-only"
+
+  bench-fstab-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_fstab_detect_only
+    environment:
+      SSH_PORT: "2390"
+      MISCONFIG: "fstab-detect-only"
+
+  bench-capabilities-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_capabilities_detect_only
+    environment:
+      SSH_PORT: "2391"
+      MISCONFIG: "capabilities-detect-only"
+
+  bench-cred-gitconfig-global:
+    <<: *bench
+    container_name: ramigpt_bench_cred_gitconfig_global
+    environment:
+      SSH_PORT: "2392"
+      MISCONFIG: "cred-gitconfig-global"
+
+  bench-cred-msmtp:
+    <<: *bench
+    container_name: ramigpt_bench_cred_msmtp
+    environment:
+      SSH_PORT: "2393"
+      MISCONFIG: "cred-msmtp"
+
+  bench-cred-ftp-netrc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ftp_netrc
+    environment:
+      SSH_PORT: "2394"
+      MISCONFIG: "cred-ftp-netrc"
+
+  bench-writable-tmp-hook:
+    <<: *bench
+    container_name: ramigpt_bench_writable_tmp_hook
+    environment:
+      SSH_PORT: "2395"
+      MISCONFIG: "writable:tmp-hook"
+
+  bench-sudo-sqlite3:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_sqlite3
+    environment:
+      SSH_PORT: "2396"
+      MISCONFIG: "sudo:sqlite3"
+
+  bench-suid-sqlite3:
+    <<: *bench
+    container_name: ramigpt_bench_suid_sqlite3
+    environment:
+      SSH_PORT: "2397"
+      MISCONFIG: "suid:sqlite3"
+
+  bench-sudo-egrep:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_egrep
+    environment:
+      SSH_PORT: "2398"
+      MISCONFIG: "sudo:egrep"
+
+  bench-suid-cut:
+    <<: *bench
+    container_name: ramigpt_bench_suid_cut
+    environment:
+      SSH_PORT: "2399"
+      MISCONFIG: "suid:cut"
+
+  bench-sudo-dos2unix:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_dos2unix
+    environment:
+      SSH_PORT: "2400"
+      MISCONFIG: "sudo:dos2unix"
+
+  bench-suid-dos2unix:
+    <<: *bench
+    container_name: ramigpt_bench_suid_dos2unix
+    environment:
+      SSH_PORT: "2401"
+      MISCONFIG: "suid:dos2unix"
+
+  bench-suid-od:
+    <<: *bench
+    container_name: ramigpt_bench_suid_od
+    environment:
+      SSH_PORT: "2402"
+      MISCONFIG: "suid:od"
+
+  bench-suid-split:
+    <<: *bench
+    container_name: ramigpt_bench_suid_split
+    environment:
+      SSH_PORT: "2403"
+      MISCONFIG: "suid:split"
+
+  bench-suid-strings:
+    <<: *bench
+    container_name: ramigpt_bench_suid_strings
+    environment:
+      SSH_PORT: "2404"
+      MISCONFIG: "suid:strings"
+
+  bench-sudo-lua:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_lua
+    environment:
+      SSH_PORT: "2405"
+      MISCONFIG: "sudo:lua"
+
+  bench-suid-lua:
+    <<: *bench
+    container_name: ramigpt_bench_suid_lua
+    environment:
+      SSH_PORT: "2406"
+      MISCONFIG: "suid:lua"
+
+  bench-cred-subversion:
+    <<: *bench
+    container_name: ramigpt_bench_cred_subversion
+    environment:
+      SSH_PORT: "2407"
+      MISCONFIG: "cred-subversion"
+
+  bench-cred-ldap:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ldap
+    environment:
+      SSH_PORT: "2408"
+      MISCONFIG: "cred-ldap"
+
+  bench-cred-krb5:
+    <<: *bench
+    container_name: ramigpt_bench_cred_krb5
+    environment:
+      SSH_PORT: "2409"
+      MISCONFIG: "cred-krb5"
+
+  bench-cred-chromium:
+    <<: *bench
+    container_name: ramigpt_bench_cred_chromium
+    environment:
+      SSH_PORT: "2410"
+      MISCONFIG: "cred-chromium"
+
+  bench-cred-firefox:
+    <<: *bench
+    container_name: ramigpt_bench_cred_firefox
+    environment:
+      SSH_PORT: "2411"
+      MISCONFIG: "cred-firefox"
+
+  bench-cred-redis-cli:
+    <<: *bench
+    container_name: ramigpt_bench_cred_redis_cli
+    environment:
+      SSH_PORT: "2412"
+      MISCONFIG: "cred-redis-cli"
+
+  bench-cred-systemd-env:
+    <<: *bench
+    container_name: ramigpt_bench_cred_systemd_env
+    environment:
+      SSH_PORT: "2413"
+      MISCONFIG: "cred-systemd-env"
+
+  bench-cred-terraform:
+    <<: *bench
+    container_name: ramigpt_bench_cred_terraform
+    environment:
+      SSH_PORT: "2414"
+      MISCONFIG: "cred-terraform"
+
+  bench-cred-vault-token:
+    <<: *bench
+    container_name: ramigpt_bench_cred_vault_token
+    environment:
+      SSH_PORT: "2415"
+      MISCONFIG: "cred-vault-token"
+
+  bench-cred-filezilla:
+    <<: *bench
+    container_name: ramigpt_bench_cred_filezilla
+    environment:
+      SSH_PORT: "2416"
+      MISCONFIG: "cred-filezilla"
+
+  bench-namespaces-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_namespaces_detect_only
+    environment:
+      SSH_PORT: "2417"
+      MISCONFIG: "namespaces-detect-only"
+
+  bench-pkexec-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_pkexec_detect_only
+    environment:
+      SSH_PORT: "2418"
+      MISCONFIG: "pkexec-detect-only"
+
+  bench-sudo-version-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_version_detect_only
+    environment:
+      SSH_PORT: "2419"
+      MISCONFIG: "sudo-version-detect-only"
+
+  bench-cred-msf4:
+    <<: *bench
+    container_name: ramigpt_bench_cred_msf4
+    environment:
+      SSH_PORT: "2420"
+      MISCONFIG: "cred-msf4"
+
+  bench-cred-secrets-yml:
+    <<: *bench
+    container_name: ramigpt_bench_cred_secrets_yml
+    environment:
+      SSH_PORT: "2421"
+      MISCONFIG: "cred-secrets-yml"
+
+  bench-cred-docker-env:
+    <<: *bench
+    container_name: ramigpt_bench_cred_docker_env
+    environment:
+      SSH_PORT: "2422"
+      MISCONFIG: "cred-docker-env"
+
+  bench-cred-ci-vars:
+    <<: *bench
+    container_name: ramigpt_bench_cred_ci_vars
+    environment:
+      SSH_PORT: "2423"
+      MISCONFIG: "cred-ci-vars"
+
+  bench-cred-keepass:
+    <<: *bench
+    container_name: ramigpt_bench_cred_keepass
+    environment:
+      SSH_PORT: "2424"
+      MISCONFIG: "cred-keepass"
+
+  bench-suid-diff:
+    <<: *bench
+    container_name: ramigpt_bench_suid_diff
+    environment:
+      SSH_PORT: "2425"
+      MISCONFIG: "suid:diff"
+
+  bench-suid-cat:
+    <<: *bench
+    container_name: ramigpt_bench_suid_cat
+    environment:
+      SSH_PORT: "2426"
+      MISCONFIG: "suid:cat"
+
+  bench-suid-grep2:
+    <<: *bench
+    container_name: ramigpt_bench_suid_grep2
+    environment:
+      SSH_PORT: "2427"
+      MISCONFIG: "suid:grep"
+
+  bench-suid-xxd:
+    <<: *bench
+    container_name: ramigpt_bench_suid_xxd
+    environment:
+      SSH_PORT: "2428"
+      MISCONFIG: "suid:xxd"
+
+  bench-suid-openssl:
+    <<: *bench
+    container_name: ramigpt_bench_suid_openssl
+    environment:
+      SSH_PORT: "2429"
+      MISCONFIG: "suid:openssl"
+
+  bench-suid-shuf:
+    <<: *bench
+    container_name: ramigpt_bench_suid_shuf
+    environment:
+      SSH_PORT: "2430"
+      MISCONFIG: "suid:shuf"
+
+  bench-suid-zip:
+    <<: *bench
+    container_name: ramigpt_bench_suid_zip
+    environment:
+      SSH_PORT: "2431"
+      MISCONFIG: "suid:zip"
+
+  bench-suid-sed:
+    <<: *bench
+    container_name: ramigpt_bench_suid_sed
+    environment:
+      SSH_PORT: "2432"
+      MISCONFIG: "suid:sed"
+
+  bench-suid-strings2:
+    <<: *bench
+    container_name: ramigpt_bench_suid_strings2
+    environment:
+      SSH_PORT: "2433"
+      MISCONFIG: "suid:strings"
+
+  bench-suid-install:
+    <<: *bench
+    container_name: ramigpt_bench_suid_install
+    environment:
+      SSH_PORT: "2434"
+      MISCONFIG: "suid:install"
+
+  bench-sudo-ed:
+    <<: *bench
+    container_name: ramigpt_bench_sudo_ed
+    environment:
+      SSH_PORT: "2435"
+      MISCONFIG: "sudo:ed"
+
+  bench-suid-ed:
+    <<: *bench
+    container_name: ramigpt_bench_suid_ed
+    environment:
+      SSH_PORT: "2436"
+      MISCONFIG: "suid:ed"
+
+  bench-writable-environment:
+    <<: *bench
+    container_name: ramigpt_bench_writable_environment
+    environment:
+      SSH_PORT: "2437"
+      MISCONFIG: "writable:environment"
+
+  bench-cred-pypirc:
+    <<: *bench
+    container_name: ramigpt_bench_cred_pypirc
+    environment:
+      SSH_PORT: "2438"
+      MISCONFIG: "cred-pypirc"
+
+  bench-cred-rclone:
+    <<: *bench
+    container_name: ramigpt_bench_cred_rclone
+    environment:
+      SSH_PORT: "2439"
+      MISCONFIG: "cred-rclone"
+
+  bench-cred-salt:
+    <<: *bench
+    container_name: ramigpt_bench_cred_salt
+    environment:
+      SSH_PORT: "2440"
+      MISCONFIG: "cred-salt"
+
+  bench-cred-chef:
+    <<: *bench
+    container_name: ramigpt_bench_cred_chef
+    environment:
+      SSH_PORT: "2441"
+      MISCONFIG: "cred-chef"
+
+  bench-cred-pass-store:
+    <<: *bench
+    container_name: ramigpt_bench_cred_pass_store
+    environment:
+      SSH_PORT: "2442"
+      MISCONFIG: "cred-pass-store"
+
+  bench-cred-gnupg:
+    <<: *bench
+    container_name: ramigpt_bench_cred_gnupg
+    environment:
+      SSH_PORT: "2443"
+      MISCONFIG: "cred-gnupg"
+
+  bench-cred-mongodb:
+    <<: *bench
+    container_name: ramigpt_bench_cred_mongodb
+    environment:
+      SSH_PORT: "2444"
+      MISCONFIG: "cred-mongodb"
+
+  bench-cred-slack:
+    <<: *bench
+    container_name: ramigpt_bench_cred_slack
+    environment:
+      SSH_PORT: "2445"
+      MISCONFIG: "cred-slack"
+
+  bench-cred-boto:
+    <<: *bench
+    container_name: ramigpt_bench_cred_boto
+    environment:
+      SSH_PORT: "2446"
+      MISCONFIG: "cred-boto"
+
+  bench-cred-pip-conf:
+    <<: *bench
+    container_name: ramigpt_bench_cred_pip_conf
+    environment:
+      SSH_PORT: "2447"
+      MISCONFIG: "cred-pip-conf"
+
+  bench-cred-tokens-json:
+    <<: *bench
+    container_name: ramigpt_bench_cred_tokens_json
+    environment:
+      SSH_PORT: "2448"
+      MISCONFIG: "cred-tokens-json"
+
+  bench-dbus-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_dbus_detect_only
+    environment:
+      SSH_PORT: "2449"
+      MISCONFIG: "dbus-detect-only"
+
+  bench-cgroup-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_cgroup_detect_only
+    environment:
+      SSH_PORT: "2450"
+      MISCONFIG: "cgroup-detect-only"
+
+  bench-mounts-detect-only:
+    <<: *bench
+    container_name: ramigpt_bench_mounts_detect_only
+    environment:
+      SSH_PORT: "2451"
+      MISCONFIG: "mounts-detect-only"
+
+  bench-suid-less:
+    <<: *bench
+    container_name: ramigpt_bench_suid_less
+    environment:
+      SSH_PORT: "2452"
+      MISCONFIG: "suid:less"
+
+  bench-suid-install2:
+    <<: *bench
+    container_name: ramigpt_bench_suid_install2
+    environment:
+      SSH_PORT: "2453"
+      MISCONFIG: "suid:install"
+
+  bench-cred-openvpn:
+    <<: *bench
+    container_name: ramigpt_bench_cred_openvpn
+    environment:
+      SSH_PORT: "2454"
+      MISCONFIG: "cred-openvpn"
