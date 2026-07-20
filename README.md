@@ -25,20 +25,43 @@
 
 ---
 
-![image info](docs/screenshots/execution_flow.svg)
+![RamiGPT Full AI loop](docs/screenshots/execution_flow.svg)
+
+The diagram above shows the **Full AI** loop: RamiGPT builds a privilege-escalation prompt from session context, asks the configured provider for the next shell command, runs it over SSH, feeds the output back into history, and repeats until root is detected or the request budget is exhausted.
 
 ---
 
-## GUI:
+## Web workspace
 
->![alt text](docs/screenshots/poc_pwn.gif)
+RamiGPT opens into a **multi-session workspace** — a sidebar inventory plus a server workspace for each SSH target. Create sessions, connect when ready, then use the **Terminal** tab for interactive shells and AI tools.
 
+![RamiGPT workspace — landing view with session inventory and quick actions](docs/screenshots/workspace_landing.png)
+
+| Area | What it does |
+|------|----------------|
+| **Sidebar** | Favorites, recent sessions, and draggable groups (Production, Staging, Benchmark, …). |
+| **Session workspace** | Connect / disconnect, terminal I/O, Facts / Hints / Avoid queues, and the Full AI panel. |
+| **Top bar** | Search, **Benchmark**, **New Session**, **AI Settings**, **App Settings**, and log cleanup. |
+
+### Typical workflow
+
+1. **Configure AI** — top bar → robot icon (**AI Settings**). Pick a provider, model, and max Full AI requests.
+2. **Create or select a session** — **New Session** or click an entry in the sidebar. Credentials are remembered per `user@host:port`.
+3. **Connect** — open the session and click **Connect**. Output streams in the Terminal tab.
+4. **Run Full AI** — click **Full AI** to start the autonomous priv-esc loop, or pick **BeRoot** / **LinPEAS** from the tool dropdown (optionally with the **AI** checkbox to chain into Full AI).
+5. **Guide the model** — add Facts, Hints, or Avoid entries in the right-hand panel; use **Import** / **Export** to share prompt context across sessions.
+
+![RamiGPT terminal — connected session with Full AI and enumeration tools](docs/screenshots/terminal_session.png)
+
+---
 
 ## Configuration: AI Providers
 
 RamiGPT supports multiple AI backends. Configure them through the **Settings**
-button. API keys come from `.env`; provider, model, URL, and UI choices are
+button (robot icon). API keys come from `.env`; provider, model, URL, and UI choices are
 saved in `data/ai_settings.json`.
+
+![AI Settings — provider, model, and connection test](docs/screenshots/ai_settings.png)
 
 ### Supported providers
 
@@ -86,10 +109,25 @@ saved in `data/ai_settings.json`.
    CURSOR_MODEL=composer-2.5
    ```
 
-6. In the running app, click **Settings** to change provider, model, keys, and
+6. In the running app, click **AI Settings** to change provider, model, keys, and
    max AI requests. Saving writes non-secret choices to
    `data/ai_settings.json` and API keys to `.env`. **Reload from disk** reloads
-   both files.
+   both files. Use **Test connection** to verify the active provider before a benchmark or Full AI run.
+
+### App settings
+
+**App Settings** (sliders icon) control runtime behavior saved alongside provider choices in `data/ai_settings.json`:
+
+![App Settings — role objectives, Session v2, and AI history options](docs/screenshots/app_settings.png)
+
+| Setting | Purpose |
+|---------|---------|
+| **Role / objective** | Starting persona for prompts (from `ramigpt/config/role_objectives.json`). |
+| **Rotate role every prompt** | Cycle through all JSON roles across Full AI turns. |
+| **Upgraded Session v2** | Better command extraction and PTY handling (password prompts, editors, nested shells). |
+| **Show AI prompts in terminal** | Print `[DEBUG] About to send prompt:` before each AI request. |
+| **Include command outputs in AI history** | Send selected shell output back to the model (not just prior commands). |
+| **Terminal tools** | Show or hide BeRoot / LinPEAS / LinEnum in the Terminal dropdown. |
 
 ### Obtaining an OpenAI API Key
 
@@ -101,6 +139,7 @@ saved in `data/ai_settings.json`.
 
 - Base URL is the Ollama host (e.g. `http://10.10.10.82:11434`); RamiGPT appends `/v1`.
 - Model names must match `ollama list` on that host.
+- Use the refresh icon in **AI Settings** to pull the live model list from the host.
 
 ### Open WebUI notes
 
@@ -123,7 +162,7 @@ Before running the project, ensure you have installed:
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
-- OpenAI key
+- An AI backend (OpenAI key, Ollama host, Open WebUI, or Cursor API key)
 
 ### Setup
 
@@ -132,10 +171,13 @@ Clone the repository and launch the Docker containers:
 ```sh
 git clone https://github.com/M507/RamiGPT.git
 cd RamiGPT
+cp .env.example .env   # edit with your provider + keys
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
+
+Set `APP_RELOAD=0` in `.env` for Docker so the container does not watch source files for reload.
 
 ## Run Locally
 
@@ -144,7 +186,8 @@ Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
 Ensure the following are installed:
 
 - Python 3 and pip
-- OpenAI key (or Open WebUI)
+- An AI backend (Ollama, Open WebUI, OpenAI, or Cursor API)
+- `ansible-core` (for Benchmark remote deploy; installed via `requirements.txt`)
 
 ### Setup
 
@@ -160,6 +203,7 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 chmod +x ./scripts/generate_certs.sh
 ./scripts/generate_certs.sh
 pip install -r requirements.txt
+cp .env.example .env      # edit provider + API keys
 python app.py
 ```
 
@@ -174,11 +218,13 @@ The app listens on `127.0.0.1:8443` by default (override with `APP_HOST` / `APP_
 
 Access the application at: [https://127.0.0.1:8443](https://127.0.0.1:8443)
 
-The app opens into a **multi-session workspace** (sidebar inventory + server workspace). Create sessions, connect when ready, then use the Terminal tab for SSH and RamiGPT AI tools. AI provider settings are available from the top bar gear icon before connecting.
+TLS certificates are generated under `certs/` by `scripts/generate_certs.sh` (self-signed for local HTTPS).
 
 ## Privilege Escalation Benchmark
 
 RamiGPT deploys intentionally misconfigured SSH targets to a **remote lab host** (Ansible) and runs **Full AI** against each until root (or timeout).
+
+![Benchmark modal — remote deploy, model/role plans, and target selection](docs/screenshots/benchmark_modal.png)
 
 ### Targets (Docker Compose on remote)
 
@@ -202,12 +248,13 @@ UI Benchmark modal → **Test targets (get root)** runs the same probes against 
 
 ### From the UI
 
-1. Configure AI (top bar → Settings).
+1. Configure AI (top bar → **AI Settings**).
 2. Click **Benchmark**.
 3. Set the **remote lab host** (SSH for Ansible; prefills from `data/benchmark/remote.json`).
-4. Pick a **target profile** (default: **Regression sample**, ~19 labs) or use **Select all** for the full suite.
-5. Set per-target timeout (default **180s** in the UI).
-6. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
+4. Configure **model plan** and **role plan** (multiple models/roles and runs per target).
+5. Pick a **target profile** (default: **Regression sample**, ~19 labs) or use **Select all** for the full suite.
+6. Set per-target timeout (default **180s** in the UI).
+7. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
 
 **Target profiles** (22 presets in the **Select from** dropdown): quick runs (*Does it work?*, *Regression sample*, *Easy & portable*), themed runs (*Non-sudo*, *Detect-only*, *Cron & scheduled jobs*, …), and full family buckets (*Classic sudo*, *SUID*, *Credentials*, …). Defined in `ramigpt/benchmark/targets.py` (`PROFILES`). Full integration details: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md).
 
@@ -248,12 +295,17 @@ Remote mode from the UI prompts for SSH user/password, installs Docker if needed
 
 Requires `ansible-core` (installed via `requirements.txt`).
 
-RamiGPT integrates several tools for privilege escalation enumeration, including:
+### Bundled enumeration tools
 
-- **[BeRoot](https://github.com/AlessandroZ/BeRoot)**: A tool for identifying common privilege escalation vectors in Windows environments.
-- **[LinPEAS](https://github.com/carlospolop/PEASS-ng/tree/master/linPEAS)**: A script that audits Linux environments for potential misconfigurations and vulnerabilities.
+RamiGPT integrates several tools for privilege escalation enumeration:
 
-These tools are automatically employed or recommended by RamiGPT depending on the target environment.
+- **[BeRoot](https://github.com/AlessandroZ/BeRoot)**: Identifies common privilege escalation vectors on Linux (sudo, SUID, capabilities, writable paths, and more).
+- **[LinPEAS](https://github.com/carlospolop/PEASS-ng/tree/master/linPEAS)**: Audits Linux environments for misconfigurations and vulnerabilities.
+- **LinEnum**: Lightweight enumeration script (uploaded and run like BeRoot).
+
+Run them from the Terminal tool dropdown. With the **AI** checkbox enabled, RamiGPT uploads the tool, captures output, and chains into **Full AI** using the findings.
+
+![BeRoot + Full AI — enumeration output feeding the autonomous loop](docs/screenshots/beroot_full_ai.png)
 
 ## Project layout
 
@@ -261,43 +313,46 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 
 | Path | Role |
 |------|------|
-| `ramigpt/web/` | Flask/Socket.IO UI, templates, static assets |
-| `ramigpt/ai/` | AI provider interface (OpenAI, Open WebUI) |
+| `ramigpt/web/` | Flask/Socket.IO UI, routes, shell layer, Full AI hooks |
+| `ramigpt/ai/` | AI provider interface (Ollama, Open WebUI, OpenAI, Cursor) |
 | `ramigpt/domain/` | Privilege-escalation prompt + root detection |
-| `ramigpt/config/` | Settings loaded from `.env` secrets plus JSON user choices |
+| `ramigpt/config/` | Settings from `.env` secrets plus JSON user choices |
+| `ramigpt/benchmark/` | Benchmark orchestrator (remote Ansible deploy + Full AI runs) |
 | `ramigpt/utils/` | Shared helpers and logging |
 | `tools/` | Bundled priv-esc tooling (BeRoot, LinPEAS) |
-| `scripts/` | Ops helpers (TLS cert generation) |
+| `scripts/` | Ops helpers (TLS cert generation, benchmark verify) |
 | `docs/` | Screenshots and documentation assets |
 | `tests/` | Automated tests |
-| `ramigpt/benchmark/` | Benchmark orchestrator (remote Ansible deploy + Full AI runs) |
-
-| `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2170–2454). Integration guide: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md) |
+| `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2170–2454). Guide: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
-| `data/` | Runtime logs and sessions (gitignored) |
+| `data/` | Runtime logs, sessions, and benchmark results (gitignored except committed benchmark sheets) |
 | `data/sessions/hosts/` | One JSON file per saved SSH session/host |
 | `data/sessions/meta.json` | Groups + recent session ids |
-
 | `certs/` | TLS certificates (gitignored) |
 
 ## Features
 
+### Session context (Facts, Hints, Avoid)
+
+Per-session queues in the Terminal AI panel steer Full AI without editing `.env`:
+
+- **Facts** — ground truth the model should treat as established (e.g. kernel version, discovered SUID binaries).
+- **Hints** — suggested directions without guaranteeing success.
+- **Avoid** — commands or approaches that already failed.
+
+Use **Import** / **Export** to move this context between sessions or capture it for write-ups and flags.
+
+### Full AI autonomous loop
+
+**Full AI** runs a background loop: build prompt → ask provider → execute one shell command → append to history → check for root → repeat. **Stop** halts the loop; **Guide Me** sends a single AI turn without starting the full autonomous run.
+
+Session v2 (enabled in **App Settings**) improves command extraction and handles interactive edge cases — sudo password prompts, stuck editors, and nested root shells.
+
 ### AI provider settings
 
 Switch between **Ollama**, **Open WebUI**, **OpenAI**, and **Cursor API** from
-the **Settings** button. The selection persists in `data/ai_settings.json`;
+the **AI Settings** button. The selection persists in `data/ai_settings.json`;
 `.env` remains the source for API keys and initial defaults.
-
-### Import and export instructions
-
-For example, to capture a flag:
->![alt text](docs/screenshots/poc_flag.gif)
-
-### Use external tools for enumerations
-
-For example, executing BeRoot and feeding the results to the AI:
->![alt text](docs/screenshots/proof_of_concept_beroot.gif)
-
 
 ## Disclaimer
 
