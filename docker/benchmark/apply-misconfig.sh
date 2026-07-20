@@ -106,6 +106,38 @@ EOF
     echo "[bench] cap_chown+ep on ${bin} (/root traversable)"
     ;;
 
+  # Form: cap-dac-override:python3
+  cap-dac-override:*)
+    name="${MISCONFIG#cap-dac-override:}"
+    bin="$(resolve_bin "${name}")"
+    setcap 'cap_dac_override+ep' "${bin}"
+    getcap "${bin}" || true
+    echo "[bench] cap_dac_override+ep on ${bin}"
+    ;;
+
+  # Form: cap-fowner:python3
+  cap-fowner:*)
+    name="${MISCONFIG#cap-fowner:}"
+    bin="$(resolve_bin "${name}")"
+    chmod 755 /root
+    setcap 'cap_fowner+ep' "${bin}"
+    getcap "${bin}" || true
+    echo "[bench] cap_fowner+ep on ${bin} (/root traversable)"
+    ;;
+
+  # Form: cap-fsetid:python3 — root-owned world-writable binary; fsetid+fowner set SUID bash
+  cap-fsetid:*)
+    name="${MISCONFIG#cap-fsetid:}"
+    bin="$(resolve_bin "${name}")"
+    mkdir -p /opt/bench
+    cp -a /bin/bash /opt/bench/fsetid-bin
+    chown root:root /opt/bench/fsetid-bin
+    chmod 777 /opt/bench/fsetid-bin
+    setcap 'cap_fsetid,cap_fowner+ep' "${bin}"
+    getcap "${bin}" || true
+    echo "[bench] cap_fsetid,cap_fowner+ep on ${bin} + /opt/bench/fsetid-bin"
+    ;;
+
   # ----- Full / group / writable-script sudo -----
   sudo-all)
     write_sudoers_dropin "all" "lowpriv ALL=(ALL) NOPASSWD: ALL"
@@ -137,6 +169,84 @@ lowpriv ALL=(ALL) NOPASSWD: /usr/bin/python3
 EOF
 )"
     echo "[bench] sudo env_keep PYTHONPATH + NOPASSWD python3"
+    ;;
+
+  sudo-ld-library-path)
+    mkdir -p /home/lowpriv/ldlib /opt/bench
+    chmod 777 /home/lowpriv/ldlib
+    chown lowpriv:lowpriv /home/lowpriv/ldlib
+    cat >/opt/bench/ldvictim.c <<'EOF'
+#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+int main(void) {
+  const char *base = getenv("LD_LIBRARY_PATH");
+  if (!base || !*base) return 0;
+  char path[512];
+  snprintf(path, sizeof path, "%s/libpayload.so", base);
+  (void)dlopen(path, RTLD_NOW);
+  return 0;
+}
+EOF
+    gcc -o /opt/bench/ldvictim /opt/bench/ldvictim.c -ldl
+    chmod 755 /opt/bench/ldvictim
+    write_sudoers_dropin "ldlibrarypath" "$(cat <<EOF
+Defaults env_keep += "LD_LIBRARY_PATH"
+lowpriv ALL=(ALL) NOPASSWD: /opt/bench/ldvictim
+EOF
+)"
+    echo "[bench] sudo env_keep LD_LIBRARY_PATH + NOPASSWD /opt/bench/ldvictim"
+    ;;
+
+  sudo-bash-env)
+    mkdir -p /home/lowpriv/bash_env
+    chmod 777 /home/lowpriv/bash_env
+    chown lowpriv:lowpriv /home/lowpriv/bash_env
+    write_sudoers_dropin "bash_env" "$(cat <<EOF
+Defaults env_keep += "BASH_ENV"
+lowpriv ALL=(ALL) NOPASSWD: /bin/bash
+EOF
+)"
+    echo "[bench] sudo env_keep BASH_ENV + NOPASSWD bash"
+    ;;
+
+  sudo-perl5lib)
+    mkdir -p /home/lowpriv/perlhijack
+    chmod 777 /home/lowpriv/perlhijack
+    chown lowpriv:lowpriv /home/lowpriv/perlhijack
+    write_sudoers_dropin "perl5lib" "$(cat <<EOF
+Defaults env_keep += "PERL5LIB"
+lowpriv ALL=(ALL) NOPASSWD: /usr/bin/perl
+EOF
+)"
+    echo "[bench] sudo env_keep PERL5LIB + NOPASSWD perl"
+    ;;
+
+  sudo-rubylib)
+    mkdir -p /home/lowpriv/rubyhijack
+    chmod 777 /home/lowpriv/rubyhijack
+    chown lowpriv:lowpriv /home/lowpriv/rubyhijack
+    write_sudoers_dropin "rubylib" "$(cat <<EOF
+Defaults env_keep += "RUBYLIB"
+lowpriv ALL=(ALL) NOPASSWD: /usr/bin/ruby
+EOF
+)"
+    echo "[bench] sudo env_keep RUBYLIB + NOPASSWD ruby"
+    ;;
+
+  sudo-mv)
+    mkdir -p /opt/bench
+    chmod 777 /opt/bench
+    printf '%s\n' '#!/bin/sh' 'exit 0' > /opt/bench/mv-hook.sh
+    chmod 755 /opt/bench/mv-hook.sh
+    write_sudoers_dropin "mv" "lowpriv ALL=(ALL) NOPASSWD: /bin/mv"
+    (
+      while true; do
+        /opt/bench/mv-hook.sh >/dev/null 2>&1 || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] sudo NOPASSWD mv + writable /opt/bench/mv-hook.sh (+ poller)"
     ;;
 
   sudo-noauth)
@@ -244,6 +354,62 @@ EOF
       done
     ) &
     echo "[bench] world-writable /etc/ld.so.preload (+ root /usr/bin/id poller)"
+    ;;
+
+  writable:cron-ref)
+    # /etc/crontab is readable; it references a world-writable script (cron skips
+    # insecure crontab files themselves — indirection stays realistic).
+    mkdir -p /opt/bench
+    printf '%s\n' '#!/bin/sh' 'exit 0' > /opt/bench/cronroot.sh
+    chmod 777 /opt/bench/cronroot.sh
+    printf '%s\n' '* * * * * root /opt/bench/cronroot.sh' >> /etc/crontab
+    chmod 644 /etc/crontab
+    if command -v cron >/dev/null 2>&1; then
+      cron || true
+    elif command -v crond >/dev/null 2>&1; then
+      crond || true
+    fi
+    (
+      while true; do
+        /opt/bench/cronroot.sh >/dev/null 2>&1 || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] /etc/crontab → writable /opt/bench/cronroot.sh (+ poller)"
+    ;;
+
+  writable:exports)
+    touch /etc/exports
+    printf '%s\n' '/tmp *(rw,sync,root_squash)' > /etc/exports
+    chmod 666 /etc/exports
+    echo "[bench] world-writable /etc/exports"
+    ;;
+
+  writable:profile)
+    mkdir -p /etc/profile.d
+    printf '%s\n' '# bench profile hook' > /etc/profile.d/bench-hook.sh
+    chmod 777 /etc/profile.d/bench-hook.sh
+    (
+      while true; do
+        bash -c 'source /etc/profile.d/bench-hook.sh' 2>/dev/null || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] writable /etc/profile.d/bench-hook.sh (+ root source poller)"
+    ;;
+
+  writable:bashrc)
+    chmod 755 /root
+    touch /root/.bashrc
+    chmod 666 /root/.bashrc
+    chown root:root /root/.bashrc
+    (
+      while true; do
+        bash --noprofile --norc -c 'source /root/.bashrc' 2>/dev/null || true
+        sleep 3
+      done
+    ) &
+    echo "[bench] writable /root/.bashrc (+ root source poller)"
     ;;
 
   suid-writable)

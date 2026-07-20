@@ -27,6 +27,8 @@ RUN apt-get update -y && \
         coreutils \
         gcc \
         libc6-dev \
+        perl \
+        ruby \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash lowpriv && \
