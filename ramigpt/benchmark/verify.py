@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from ramigpt.benchmark.targets import TARGETS, resolve_targets
+from ramigpt.benchmark.targets import BENCH_FLAG, TARGETS, resolve_targets
 from ramigpt.paths import PROJECT_ROOT, SCRIPTS_DIR
 from ramigpt.utils import debug_logger
 
@@ -133,6 +133,66 @@ def _log(run: VerifyRun, message: str) -> None:
     debug_logger.info(f"[bench-verify] {line}")
 
 
+def _bench_flag_marker() -> str:
+    return (os.environ.get("BENCH_FLAG") or BENCH_FLAG).strip()
+
+
+def _output_contains_flag(text: str) -> bool:
+    marker = _bench_flag_marker()
+    return bool(marker and marker in (text or ""))
+
+
+def _probe_flag_via_ssh(
+    *,
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    timeout: int = 30,
+) -> bool:
+    if not shutil.which("sshpass"):
+        return False
+    cmd = [
+        "sshpass",
+        "-p",
+        password,
+        "ssh",
+        "-4",
+        "-n",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "PreferredAuthentications=password",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "LogLevel=ERROR",
+        "-p",
+        str(port),
+        f"{user}@{host}",
+        "--",
+        "bash",
+        "-lc",
+        "cat /root/flag.txt 2>/dev/null",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    out = (proc.stdout or "") + (proc.stderr or "")
+    return _output_contains_flag(out)
+
+
 def _run_one_check(
     *,
     host: str,
@@ -160,7 +220,7 @@ def _run_one_check(
         "BENCH_USER": user,
         "BENCH_PASS": password,
         "BENCH_PASSWORD": password,
-        "BENCH_FLAG": "FLAG{======RamiGPTi=====}",
+        "BENCH_FLAG": _bench_flag_marker(),
     }
     started = time.time()
     try:
@@ -177,6 +237,20 @@ def _run_one_check(
         elapsed = time.time() - started
         if not expects_root:
             if proc.returncode == 0:
+                if _output_contains_flag(out) or _probe_flag_via_ssh(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                ):
+                    return VerifyResult(
+                        target_id=target_id,
+                        port=port,
+                        expects_root=False,
+                        status="pass",
+                        detail=out or "flag read on detect-only target",
+                        elapsed_seconds=elapsed,
+                    )
                 return VerifyResult(
                     target_id=target_id,
                     port=port,

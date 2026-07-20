@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 # Shared login for every benchmark SSH target (ports 2201–2299).
 BENCH_USERNAME = "lowpriv"
 BENCH_PASSWORD = "password"
+BENCH_FLAG = "FLAG{======RamiGPTi=====}"
 BENCH_GROUP_ID = "benchmark"
 DEFAULT_TIMEOUT_SECONDS = 60
 PORT_RANGE_START = 2201

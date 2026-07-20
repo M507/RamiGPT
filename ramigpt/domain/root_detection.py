@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Pattern
+
+from ramigpt.benchmark.targets import BENCH_FLAG as DEFAULT_BENCH_FLAG
 
 
 def _escape_hostname(hostname: str) -> str:
@@ -82,6 +85,15 @@ def _looks_like_passwd_entry(line: str) -> bool:
     return bool(re.match(r"^[a-zA-Z0-9_.'-]+:[^:]*:\d+:\d+:", (line or "").strip()))
 
 
+def _bench_flag_marker() -> str:
+    return (os.environ.get("BENCH_FLAG") or DEFAULT_BENCH_FLAG).strip()
+
+
+def _output_contains_bench_flag(text: str) -> bool:
+    marker = _bench_flag_marker()
+    return bool(marker and marker in text)
+
+
 def diagnose_root(hostname: Optional[str], output: Optional[str]) -> Dict[str, Any]:
     """
     Like got_root(), but returns a diagnosis for session logs:
@@ -95,6 +107,16 @@ def diagnose_root(hostname: Optional[str], output: Optional[str]) -> Dict[str, A
     text = str(output)
     if not text.strip():
         return {"got_root": False, "reason": "output empty/whitespace", "hostname": host, "checked": checked}
+
+    if _output_contains_bench_flag(text):
+        return {
+            "got_root": True,
+            "reason": "benchmark flag visible in output",
+            "hostname": host,
+            "matched": _bench_flag_marker(),
+            "checked": checked,
+        }
+    checked.append("benchmark flag marker")
 
     # Identity checks — require id(1)-style tokens, not /etc/passwd contents.
     if re.search(r"\buid=0\(root\)", text) or re.search(r"\beuid=0\(root\)", text):
