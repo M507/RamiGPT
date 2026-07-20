@@ -338,5 +338,100 @@ class BenchmarkTokenAggregationTests(unittest.TestCase):
             self.assertIn("FULL_AI_END missing", joined)
 
 
+class BenchmarkEventsPathSelectionTests(unittest.TestCase):
+    def test_prefers_benchmark_run_over_later_adhoc_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            suite_dir = Path(tmp)
+            target_root = suite_dir / "sgid-secret"
+            benchmark_dir = target_root / "001_20260720T182404Z_benchmark"
+            adhoc_dir = target_root / "002_20260720T182706Z_adhoc"
+            benchmark_dir.mkdir(parents=True)
+            adhoc_dir.mkdir(parents=True)
+
+            benchmark_events = [
+                {"kind": "BENCHMARK_TARGET", "details": {"target_id": "sgid-secret"}},
+                {
+                    "kind": "BEROOT_START",
+                    "details": {"with_ai": True},
+                },
+                {
+                    "kind": "BEROOT_OK",
+                    "details": {"duration_seconds": 6.6, "with_ai": True},
+                },
+                {
+                    "kind": "AI_TURN",
+                    "details": {
+                        "request_n": 1,
+                        "filtered_command": "/opt/bench/sgidcat /var/bench/flagcopy",
+                        "duration_seconds": 8.0,
+                        "prompt_tokens": 100,
+                        "completion_tokens": 20,
+                        "total_tokens": 120,
+                    },
+                },
+                {
+                    "kind": "SHELL_IO",
+                    "details": {
+                        "request_n": 1,
+                        "command": "/opt/bench/sgidcat /var/bench/flagcopy",
+                        "duration_seconds": 1.0,
+                    },
+                },
+            ]
+            (benchmark_dir / "events.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in benchmark_events) + "\n",
+                encoding="utf-8",
+            )
+            (adhoc_dir / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "kind": "RECONNECT_ATTEMPT",
+                        "details": {"server": "10.10.1.109", "port": 2231},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (target_root / "runs.index").write_text(
+                "\n".join(
+                    json.dumps(entry)
+                    for entry in (
+                        {
+                            "index": 1,
+                            "reason": "benchmark",
+                            "run": "001_20260720T182404Z_benchmark",
+                        },
+                        {
+                            "index": 2,
+                            "reason": "adhoc",
+                            "run": "002_20260720T182706Z_adhoc",
+                        },
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            item = {
+                "target_id": "sgid-secret",
+                "status": "failed",
+                "elapsed_seconds": 181.0,
+                "tools_used": ["beroot"],
+            }
+            out = enrich_target_from_events(
+                item,
+                str(suite_dir),
+                tools_configured={"beroot": True, "linenum": False, "linpeas": False},
+            )
+
+            self.assertIn("_benchmark", out["events_path"])
+            self.assertNotIn("_adhoc", out["events_path"])
+            self.assertEqual(out["ai_requests"], 1)
+            self.assertEqual(out["timing_summary"]["beroot_seconds"], 6.6)
+            joined = "\n".join(out.get("issues") or [])
+            self.assertNotIn("BeRoot listed in tools_used but no tool_runs timing", joined)
+            self.assertNotIn("no AI/tool timing captured", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

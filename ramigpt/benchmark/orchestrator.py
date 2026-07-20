@@ -772,8 +772,8 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
 
     except Exception as exc:  # noqa: BLE001
         item.status = "error"
-        item.message = str(exc)
-        _log(run, f"Target {target.name} error: {exc}")
+        item.message = str(exc) or f"{type(exc).__name__}"
+        _log(run, f"Target {target.name} error: {item.message}")
     finally:
         if item.session_id:
             try:

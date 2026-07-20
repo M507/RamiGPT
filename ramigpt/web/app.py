@@ -740,6 +740,9 @@ def _open_ssh_interactive_shell(ssh_conn):
     for label, opener in (
         ("process:/bin/sh", lambda: ssh_conn.process("/bin/sh", env={"TERM": ""})),
         ("process:/bin/bash", lambda: ssh_conn.process("/bin/bash", env={"TERM": ""})),
+        # Login shell (no argv): required for rbash targets where absolute paths like
+        # /bin/sh are rejected ("restricted: cannot specify `/' in command names").
+        ("shell:login", lambda: ssh_conn.shell()),
         ("system:/bin/sh", lambda: ssh_conn.system("/bin/sh")),
         ("system:/bin/bash", lambda: ssh_conn.system("/bin/bash")),
         ("shell:/bin/bash", lambda: ssh_conn.shell("/bin/bash")),

@@ -293,10 +293,43 @@
   word-break: break-all;
 }
 
-.bench-issues,
-.bench-issue {
-  color: var(--warn, #d29922);
+.bench-progress {
+  margin: 10px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bench-progress[hidden] {
+  display: none !important;
+}
+
+.bench-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border-dim, #30363d);
+  overflow: hidden;
+}
+
+.bench-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--info, #58a6ff), var(--accent, #3fb950));
+  transition: width 0.45s ease;
+}
+
+.bench-progress-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text, #e6edf3);
+  line-height: 1.45;
+}
+
+.bench-result-activity {
   grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--info, #58a6ff);
 }
 
 .bench-result-row.status-passed,

@@ -25,6 +25,7 @@
   /** @type {string[]} */
   let knownRoles = [];
   let currentAiRole = "";
+  let lastLoggedIssueKey = "";
 
   async function api(path, options = {}) {
     const opts = {
@@ -311,7 +312,214 @@
   }
 
   function phaseLabel(phase) {
-    return phase || "idle";
+    const labels = {
+      idle: "Idle",
+      queued: "Queued",
+      deploying: "Preparing",
+      running: "Running",
+      stopping: "Stopping",
+      done: "Done",
+      error: "Error",
+    };
+    return labels[(phase || "idle").toLowerCase()] || phase || "Idle";
+  }
+
+  function truncateText(text, maxLen) {
+    const value = String(text || "").trim();
+    if (value.length <= maxLen) return value;
+    return `${value.slice(0, maxLen - 1)}…`;
+  }
+
+  function timelineHas(timeline, phase) {
+    return (timeline || []).some((entry) => entry.phase === phase);
+  }
+
+  function logBenchmarkDiagnostics(run) {
+    if (!run) {
+      lastLoggedIssueKey = "";
+      return;
+    }
+    const issues = [...(run.issues || [])];
+    (run.targets || []).forEach((target) => {
+      (target.issues || []).forEach((issue) => issues.push(issue));
+    });
+    if (!issues.length) {
+      lastLoggedIssueKey = "";
+      return;
+    }
+    const key = issues.join("\n");
+    if (key === lastLoggedIssueKey) return;
+    lastLoggedIssueKey = key;
+    console.group("[benchmark] diagnostics");
+    issues.forEach((issue) => console.warn(issue));
+    console.groupEnd();
+  }
+
+  function describeTargetActivity(target, toolIds) {
+    const status = (target.status || "pending").toLowerCase();
+    const timeline = target.timeline || [];
+    const aiTurns = target.ai_turns || [];
+    const toolRuns = target.tool_runs || [];
+    const lastEntry = timeline.length ? timeline[timeline.length - 1] : null;
+    const lastPhase = lastEntry && lastEntry.phase;
+
+    if (status === "passed") {
+      return { pct: 100, label: "Root achieved" };
+    }
+    if (status === "failed") {
+      return { pct: 100, label: target.message || "Finished without root" };
+    }
+    if (status === "error") {
+      return { pct: 100, label: target.message || "Target error" };
+    }
+    if (status === "skipped") {
+      return { pct: 100, label: "Stopped by user" };
+    }
+    if (status === "pending") {
+      return { pct: 4, label: "Waiting to start…" };
+    }
+
+    if (lastPhase === "ai_turn") {
+      const req = lastEntry.request || aiTurns.length || 1;
+      const cmd =
+        lastEntry.command ||
+        (aiTurns.length ? aiTurns[aiTurns.length - 1].command : "") ||
+        "";
+      return {
+        pct: 78,
+        label: cmd
+          ? `Executing AI command #${req}: ${truncateText(cmd, 72)}`
+          : `Executing AI command #${req}…`,
+      };
+    }
+
+    if (lastPhase === "shell_io" || timelineHas(timeline, "full_ai_start")) {
+      const nextReq = aiTurns.length + 1;
+      return { pct: 58, label: `AI thinking — choosing command #${nextReq}…` };
+    }
+
+    if (timelineHas(timeline, "beroot") || toolRuns.some((run) => run.tool === "beroot")) {
+      return { pct: 46, label: "BeRoot finished — starting Full AI…" };
+    }
+
+    if (toolIds.includes("linpeas")) {
+      if (timelineHas(timeline, "linpeas_start") && !toolRuns.some((run) => run.tool === "linpeas")) {
+        return { pct: 28, label: "Running LinPEAS scan…" };
+      }
+      if (toolRuns.some((run) => run.tool === "linpeas")) {
+        return { pct: 46, label: "LinPEAS finished — starting Full AI…" };
+      }
+    }
+
+    if (toolIds.includes("linenum")) {
+      if (timelineHas(timeline, "linenum_start") && !toolRuns.some((run) => run.tool === "linenum")) {
+        return { pct: 28, label: "Running LinEnum scan…" };
+      }
+      if (toolRuns.some((run) => run.tool === "linenum")) {
+        return { pct: 46, label: "LinEnum finished — starting Full AI…" };
+      }
+    }
+
+    if (toolIds.includes("beroot")) {
+      if (timelineHas(timeline, "beroot_start") || !toolRuns.length) {
+        return { pct: 24, label: "Running BeRoot scan…" };
+      }
+    }
+
+    if (timelineHas(timeline, "full_ai_requested") || timelineHas(timeline, "full_ai_start")) {
+      return { pct: 50, label: "Starting Full AI…" };
+    }
+
+    if (status === "running") {
+      return { pct: 12, label: "Connecting to target…" };
+    }
+
+    return { pct: 8, label: "Starting target…" };
+  }
+
+  function describeSuiteActivity(run) {
+    const phase = (run && run.phase) || "idle";
+    const logTail = ((run && run.log) || []).slice(-20).join("\n").toLowerCase();
+
+    if (phase === "deploying") {
+      if (logTail.includes("warmup")) {
+        return { pct: 8, label: "Warming up AI model…" };
+      }
+      if (logTail.includes("ansible deploy") || logTail.includes("deploying")) {
+        return { pct: 12, label: "Deploying benchmark targets on lab host…" };
+      }
+      if (logTail.includes("port check") || logTail.includes("verifying benchmark ssh")) {
+        return { pct: 10, label: "Checking target SSH ports…" };
+      }
+      return { pct: 6, label: "Preparing benchmark environment…" };
+    }
+    if (phase === "queued") {
+      return { pct: 2, label: "Benchmark queued…" };
+    }
+    if (phase === "stopping") {
+      return { pct: 99, label: "Stopping benchmark…" };
+    }
+
+    const targets = (run && run.targets) || [];
+    if (!targets.length) {
+      return { pct: 0, label: "Idle" };
+    }
+
+    const toolIds = enabledToolIds(run.tools);
+    const activities = targets.map((target) => describeTargetActivity(target, toolIds));
+    const finished = targets.filter((target) =>
+      ["passed", "failed", "error", "skipped"].includes((target.status || "").toLowerCase())
+    ).length;
+    const avgPct =
+      activities.reduce((sum, activity) => sum + activity.pct, 0) / Math.max(activities.length, 1);
+    const suitePct = Math.round((finished / targets.length) * 100 * 0.35 + avgPct * 0.65);
+
+    const activeTarget =
+      targets.find((target) => (target.status || "").toLowerCase() === "running") ||
+      targets.find(
+        (target) => !["passed", "failed", "error", "skipped"].includes((target.status || "").toLowerCase())
+      );
+
+    if (activeTarget) {
+      const active = describeTargetActivity(activeTarget, toolIds);
+      const targetName = activeTarget.name || activeTarget.target_id || "Target";
+      return {
+        pct: Math.min(98, Math.max(suitePct, active.pct)),
+        label: `${targetName}: ${active.label}`,
+      };
+    }
+
+    if (finished === targets.length) {
+      return { pct: 100, label: "All targets finished" };
+    }
+
+    return { pct: Math.min(98, suitePct), label: "Running benchmark…" };
+  }
+
+  function renderProgress(run, running) {
+    const root = $("bench-progress");
+    const fill = $("bench-progress-fill");
+    const label = $("bench-progress-label");
+    if (!root || !fill || !label) return;
+
+    const active = running && run && !["done", "error"].includes((run.phase || "").toLowerCase());
+    if (!active) {
+      root.hidden = true;
+      fill.style.width = "0%";
+      label.textContent = "";
+      return;
+    }
+
+    const activity = describeSuiteActivity(run);
+    const pct = Math.max(0, Math.min(100, Math.round(activity.pct || 0)));
+    root.hidden = false;
+    fill.style.width = `${pct}%`;
+    label.textContent = activity.label || "Running benchmark…";
+    root.setAttribute("role", "progressbar");
+    root.setAttribute("aria-valuemin", "0");
+    root.setAttribute("aria-valuemax", "100");
+    root.setAttribute("aria-valuenow", String(pct));
+    root.setAttribute("aria-label", activity.label || "Benchmark progress");
   }
 
   function renderRun(run, running, batch) {
@@ -339,6 +547,9 @@
       phaseEl.className = "status-pill " + (run ? phase : "idle");
       phaseEl.innerHTML = `<i class="dot"></i> ${phaseLabel(run ? phase : "Idle")}${escapeHtml(repLabel)}`;
     }
+
+    logBenchmarkDiagnostics(run);
+    renderProgress(run, running);
 
     if (results) {
       if (!run || !(run.targets || []).length) {
@@ -379,11 +590,6 @@
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
           : "";
-        const runIssues = (run.issues || []).length
-          ? `<div class="bench-issues muted small">${(run.issues || [])
-              .map((issue) => `<div>! ${escapeHtml(issue)}</div>`)
-              .join("")}</div>`
-          : "";
         results.innerHTML =
           modelLabel +
           modelKeyLabel +
@@ -393,10 +599,12 @@
           roleLabel +
           toolsLabel +
           resultDir +
-          runIssues +
           run.targets
             .map((t) => {
               const klass = t.status || "pending";
+              const statusLower = klass.toLowerCase();
+              const isActive = running && ["pending", "running", "deploying"].includes(statusLower);
+              const activity = describeTargetActivity(t, runToolIds);
               const elapsed = t.elapsed_seconds != null ? `${t.elapsed_seconds}s` : "—";
               const cmds =
                 t.ai_requests != null ? `${t.ai_requests} cmds` : "";
@@ -408,6 +616,10 @@
               const timingLine = timingParts.length
                 ? `<div class="muted small bench-timing">${escapeHtml(timingParts.join(" · "))}</div>`
                 : "";
+              const activityLine =
+                isActive && activity.label
+                  ? `<div class="bench-result-activity">${escapeHtml(activity.label)}</div>`
+                  : "";
               const aiLines = (t.ai_turns || [])
                 .map((turn) => {
                   const llm = turn.llm_duration_seconds != null ? `${turn.llm_duration_seconds}s llm` : "— llm";
@@ -426,17 +638,16 @@
                   return `<div class="muted small bench-tool-run">${escapeHtml(tool.tool || "tool")}: ${escapeHtml(dur)}</div>`;
                 })
                 .join("");
-              const issueLines = (t.issues || [])
-                .map((issue) => `<div class="muted small bench-issue">! ${escapeHtml(issue)}</div>`)
-                .join("");
-              const meta = [elapsed, cmds, t.message || ""]
-                .filter(Boolean)
-                .join(" · ");
+              const metaParts = [];
+              if (!isActive) metaParts.push(elapsed);
+              if (cmds) metaParts.push(cmds);
+              if (!isActive && t.message) metaParts.push(t.message);
+              const meta = metaParts.filter(Boolean).join(" · ");
               return `<div class="bench-result-row status-${escapeHtml(klass)}">
               <span class="bench-result-name">${escapeHtml(t.name)} <span class="muted">:${t.port}</span></span>
               <span class="bench-result-status">${escapeHtml(klass)}</span>
               <span class="bench-result-meta muted">${escapeHtml(meta)}</span>
-              ${timingLine}${toolLines}${aiLines}${issueLines}
+              ${activityLine}${timingLine}${toolLines}${aiLines}
             </div>`;
             })
             .join("");

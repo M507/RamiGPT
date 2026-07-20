@@ -16,6 +16,30 @@ from ramigpt.benchmark.orchestrator import (
 from ramigpt.benchmark import orchestrator as orch
 
 
+class OpenSshInteractiveShellTests(unittest.TestCase):
+    def test_prefers_login_shell_when_explicit_paths_fail(self):
+        from ramigpt.web import app as webapp
+
+        conn = mock.Mock(name="ssh_conn")
+        conn.process.return_value = None
+        broken = mock.Mock(name="broken_shell")
+        login_shell = mock.Mock(name="login_shell")
+
+        def _shell(path=None):
+            if path is None:
+                return login_shell
+            return broken
+
+        conn.system.side_effect = lambda _path: broken
+        conn.shell.side_effect = _shell
+
+        shell = webapp._open_ssh_interactive_shell(conn)
+
+        self.assertIs(shell, login_shell)
+        conn.shell.assert_called_once_with()
+        conn.system.assert_not_called()
+
+
 class GetOrCreateSshShellTests(unittest.TestCase):
     def test_create_new_closes_stale_shell_before_reconnect(self):
         from ramigpt.web import app as webapp

@@ -552,7 +552,11 @@ def _diagnose_target(
             f"{prefix}: ai_requests={ai_requests} but captured {len(ai_turns)} AI_TURN event(s)"
         )
 
-    if status in {"passed", "failed", "running"} and not ai_turns and not tool_runs:
+    if (
+        status in {"passed", "failed"}
+        and not ai_turns
+        and not tool_runs
+    ):
         issues.append(f"{prefix}: no AI/tool timing captured (status={status})")
 
     if ai_turns and "FULL_AI_END" not in kinds and status not in {"skipped", "pending"}:
@@ -577,7 +581,7 @@ def _diagnose_target(
                 f"(total={total}s measured={measured}s) — check connect/deploy overhead"
             )
 
-    if target.get("elapsed_seconds") is None:
+    if target.get("elapsed_seconds") is None and status not in {"pending", "running"}:
         issues.append(f"{prefix}: elapsed_seconds missing on target record")
 
     if not target.get("events_path"):
@@ -595,14 +599,88 @@ def _write_results_log(result_dir: Path, lines: List[str]) -> None:
     _log_warning(f"result issues written → {path} ({len(lines)} line(s))")
 
 
-def _latest_events_path(suite_dir: Path, target_id: str) -> Optional[Path]:
+_BENCHMARK_EVENT_KINDS = frozenset(
+    {
+        "BENCHMARK_TARGET",
+        "BEROOT_START",
+        "BEROOT_OK",
+        "BEROOT_FAILED",
+        "BEROOT_FULL_AI",
+        "LINENUM_START",
+        "LINENUM_OK",
+        "LINENUM_FAILED",
+        "LINPEAS_START",
+        "LINPEAS_OK",
+        "LINPEAS_FAILED",
+        "FULL_AI_START",
+        "FULL_AI_END",
+        "FULL_AI_REQUESTED",
+        "AI_TURN",
+        "SHELL_IO",
+    }
+)
+
+
+def _events_path_from_runs_index(target_root: Path) -> Optional[Path]:
+    """Return the benchmark run's events file recorded in runs.index."""
+    index_path = target_root / "runs.index"
+    if not index_path.is_file():
+        return None
+    try:
+        lines = index_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (entry.get("reason") or "").lower() != "benchmark":
+            continue
+        run_name = str(entry.get("run") or "").strip()
+        if not run_name:
+            continue
+        path = target_root / run_name / "events.jsonl"
+        if path.is_file():
+            return path
+    return None
+
+
+def _score_events_path(path: Path) -> tuple[int, int]:
+    """Prefer logs that contain benchmark/AI activity over adhoc reconnect noise."""
+    events, stats = _read_events(path)
+    kinds = {(ev.get("kind") or "").upper() for ev in events}
+    return (len(kinds & _BENCHMARK_EVENT_KINDS), int(stats.get("events_parsed") or 0))
+
+
+def _best_events_path(suite_dir: Path, target_id: str) -> Optional[Path]:
+    """
+    Pick the events.jsonl that belongs to the benchmark target run.
+
+    Lexicographic "latest" is wrong: timeout teardown often creates 002_* adhoc
+    or reconnect runs after 001_*_benchmark, hiding BeRoot/AI timing in results.
+    """
     target_root = suite_dir / _safe_name(target_id)
     if not target_root.is_dir():
         return None
-    candidates = sorted(
-        p for p in target_root.glob("*/events.jsonl") if p.is_file()
-    )
-    return candidates[-1] if candidates else None
+    candidates = [p for p in target_root.glob("*/events.jsonl") if p.is_file()]
+    if not candidates:
+        return None
+
+    from_index = _events_path_from_runs_index(target_root)
+    if from_index is not None:
+        return from_index
+
+    benchmark_candidates = [
+        p for p in candidates if p.parent.name.endswith("_benchmark")
+    ]
+    if benchmark_candidates:
+        return max(benchmark_candidates, key=_score_events_path)
+
+    return max(candidates, key=_score_events_path)
 
 
 def enrich_target_from_events(
@@ -619,7 +697,7 @@ def enrich_target_from_events(
         out["issues"] = [f"target={target_id}: no suite_dir on run record"]
         _log_warning(out["issues"][0])
         return out
-    events_path = _latest_events_path(Path(suite_dir), target_id)
+    events_path = _best_events_path(Path(suite_dir), target_id)
     if events_path is None:
         out.update(_empty_target_timing())
         out["issues"] = [
