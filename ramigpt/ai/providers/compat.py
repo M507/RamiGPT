@@ -84,6 +84,46 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def require_chat_completion_text(
+    completion: Any,
+    *,
+    provider: str,
+    model: str,
+    base_url: str = "",
+) -> str:
+    """
+    Return assistant text or raise when an OpenAI-compatible backend returns
+    ``null``, omits ``choices``, or yields no extractable message text.
+
+    Open WebUI sometimes responds with HTTP 200 and a literal JSON ``null`` body
+    when a model refuses or fails on security-related prompts; the OpenAI SDK
+    surfaces that as ``completion is None`` and callers must not treat it as an
+    empty model answer.
+    """
+    endpoint = (base_url or "unknown endpoint").rstrip("/")
+    if completion is None:
+        raise RuntimeError(
+            f"AI provider {provider} returned an empty HTTP body (null) at "
+            f"{endpoint} (model={model!r}). The backend accepted the request but "
+            f"produced no completion — try another model or check Open WebUI logs."
+        )
+
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        raise RuntimeError(
+            f"AI provider {provider} returned no choices at {endpoint} "
+            f"(model={model!r})."
+        )
+
+    text = completion_text(completion)
+    if not text.strip():
+        raise RuntimeError(
+            f"AI provider {provider} returned an empty message at {endpoint} "
+            f"(model={model!r})."
+        )
+    return text
+
+
 def completion_text(completion: Any) -> str:
     """
     Extract assistant text from an OpenAI-compatible chat completion.

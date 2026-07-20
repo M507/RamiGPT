@@ -984,7 +984,8 @@ def autonomous(session_data):
         stop_reason = "max_requests"
         stop_flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         reconnect_budget = 3
-        
+        consecutive_empty_ai = 0
+        max_consecutive_empty_ai = 3
         # Safely fetching session-specific data with default values and debugging
         prompt_delimiter = prompt_delimiters.get(session_id, "$")  # Default to "#" if not set
         shell = ssh_shells.get(session_id)
@@ -1054,8 +1055,26 @@ def autonomous(session_data):
                     duration_seconds=ai_duration,
                 )
                 if not command:
-                    slog.warning(f"AI returned empty/unusable command on request#{i}; skipping")
+                    if not (response or "").strip():
+                        consecutive_empty_ai += 1
+                    slog.warning(
+                        f"AI returned empty/unusable command on request#{i}; skipping "
+                        f"(consecutive_empty={consecutive_empty_ai})"
+                    )
+                    if consecutive_empty_ai >= max_consecutive_empty_ai:
+                        stop_reason = "ai_empty_response"
+                        settings = get_settings()
+                        msg = (
+                            f"AI returned no usable output {consecutive_empty_ai} times in a row "
+                            f"({settings.ai_provider}/{settings.active_model()}). "
+                            "Some Open WebUI models respond with null on security prompts — "
+                            "switch models in Settings or check Open WebUI logs."
+                        )
+                        slog.error(msg)
+                        emit_session(session_id, f"[Full AI] {msg}", color="#f85149")
+                        break
                     continue
+                consecutive_empty_ai = 0
                 shell = ssh_shells.get(session_id) or shell
                 if shell is None:
                     slog.error("No shell available before sendline — attempting reconnect")
@@ -1463,6 +1482,9 @@ def autonomous(session_data):
                             "apiconnectionerror",
                             "timed out",
                             "model not found",
+                            "empty http body",
+                            "empty message",
+                            "no choices",
                         )
                     )
                     and "recv" not in err_l

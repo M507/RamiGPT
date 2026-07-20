@@ -8,22 +8,22 @@ from openai import OpenAI
 
 from ramigpt.ai.base import AIProvider, ChatMessage
 from ramigpt.ai.providers.compat import (
-    completion_text,
-    ensure_suffix,
     make_openai_compat_client,
+    openwebui_openai_base_url,
+    require_chat_completion_text,
     usage_from_completion,
 )
 from ramigpt.config import Settings
 
 
 class OpenWebUIProvider(AIProvider):
-    """Talks to Open WebUI's OpenAI-compatible API (``{host}/api``)."""
+    """Talks to Open WebUI's OpenAI-compatible API (``{host}/api/v1``)."""
 
     def __init__(self, settings: Settings, client: Optional[OpenAI] = None) -> None:
         if not settings.openwebui_base_url:
             raise ValueError("OPENWEBUI_BASE_URL is not configured.")
 
-        base_url = ensure_suffix(settings.openwebui_base_url, "/api")
+        base_url = openwebui_openai_base_url(settings.openwebui_base_url)
         api_key = settings.openwebui_api_key or settings.openai_api_key or "sk-placeholder"
         self._client = make_openai_compat_client(
             api_key=api_key, base_url=base_url, client=client
@@ -48,4 +48,9 @@ class OpenWebUIProvider(AIProvider):
                 f"(model={self._model!r}): {exc}"
             ) from exc
         self.last_usage = usage_from_completion(completion)
-        return completion_text(completion)
+        return require_chat_completion_text(
+            completion,
+            provider=self.name,
+            model=self._model,
+            base_url=self._base_url,
+        )
