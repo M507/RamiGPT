@@ -3,6 +3,7 @@ import unittest
 from ramigpt.benchmark.tools import (
     AVAILABLE_TOOLS,
     normalize_tools,
+    normalize_terminal_tools_visible,
     pick_benchmark_tool,
 )
 from ramigpt.domain import PrivEscPrompt
@@ -26,6 +27,18 @@ class BenchmarkToolsTest(unittest.TestCase):
     def test_normalize_tools_accepts_linpeas_only(self):
         out = normalize_tools({"beroot": False, "linenum": False, "linpeas": True})
         self.assertEqual(pick_benchmark_tool(out), "linpeas")
+
+    def test_normalize_terminal_tools_visible_defaults_all_on(self):
+        out = normalize_terminal_tools_visible(None)
+        self.assertTrue(out["beroot"])
+        self.assertTrue(out["linenum"])
+        self.assertTrue(out["linpeas"])
+
+    def test_normalize_terminal_tools_visible_hides_tool(self):
+        out = normalize_terminal_tools_visible({"linenum": False, "linpeas": False})
+        self.assertTrue(out["beroot"])
+        self.assertFalse(out["linenum"])
+        self.assertFalse(out["linpeas"])
 
     def test_pick_benchmark_tool_prefers_beroot_when_both_enabled(self):
         tools = {"beroot": True, "linenum": True}

@@ -714,6 +714,15 @@
       alert("Unknown tool: " + tool);
       return;
     }
+    const sel = $("toolSelector");
+    const toolName =
+      sel && sel.selectedIndex >= 0
+        ? sel.options[sel.selectedIndex].textContent.trim()
+        : toolId;
+    addTerminalOutput(
+      `[${toolName}] Sending tool run to server…`,
+      "#58a6ff"
+    );
     try {
       await api("/action3", {
         method: "POST",
@@ -724,11 +733,16 @@
           ...sessionPayloadExtras(),
         },
       });
+      addTerminalOutput(
+        `[${toolName}] Request accepted — tool is being sent and executed on the remote host. Waiting for results…`,
+        "#58a6ff"
+      );
       if (withAi && state.selectedId) {
         state.fullAiRunningBySession[state.selectedId] = true;
         updateFullAiButton();
       }
     } catch (err) {
+      addTerminalOutput(`[${toolName}] Tool run failed: ${err.message}`, "#f85149");
       alert(err.message);
     }
   }

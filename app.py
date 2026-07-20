@@ -82,21 +82,41 @@ def _extra_watch_files() -> list[str]:
 def _silence_eventlet_ssl_noise() -> None:
     """Drop SSL handshake traceback spam from eventlet's hub / WSGI server.
 
-    Happens when a client speaks plain HTTP (or broken TLS) to the HTTPS port —
-    not actionable; eventlet otherwise dumps a full stack + 'Removing descriptor'.
+    Happens when a browser tab closes/reloads during a long scan, plain HTTP hits
+    the HTTPS port, or TLS is aborted mid-handshake — not actionable; eventlet
+    otherwise dumps full stacks and can kill the WSGI accept loop.
     """
     import ssl
+
+    def _is_benign_client_disconnect(exc: BaseException) -> bool:
+        if isinstance(exc, ssl.SSLError):
+            return True
+        if isinstance(exc, ValueError) and "closed or unwrapped SSL" in str(exc):
+            return True
+        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+            return True
+        if isinstance(exc, OSError):
+            # 22=EINVAL (accept after client abort), 54/104=ECONNRESET
+            return exc.errno in {22, 54, 104}
+        return False
+
+    def _close_quietly(obj) -> None:  # noqa: ANN001
+        try:
+            obj.close()
+        except Exception:
+            pass
 
     try:
         from eventlet.hubs.hub import BaseHub
         from eventlet import wsgi as eventlet_wsgi
+        from eventlet.green import ssl as green_ssl
     except ImportError:
         return
 
     _orig_squelch = BaseHub.squelch_exception
 
     def _quiet_squelch(self, fileno, exc_info):  # noqa: ANN001
-        if isinstance(exc_info[1], ssl.SSLError):
+        if _is_benign_client_disconnect(exc_info[1]):
             try:
                 self.remove_descriptor(fileno)
             except Exception:
@@ -111,13 +131,26 @@ def _silence_eventlet_ssl_noise() -> None:
     def _quiet_process_request(self, conn_state):  # noqa: ANN001
         try:
             return _orig_process(self, conn_state)
-        except ssl.SSLError:
-            try:
-                conn_state[1].close()
-            except Exception:
-                pass
+        except Exception as exc:
+            if not _is_benign_client_disconnect(exc):
+                raise
+            _close_quietly(conn_state[1])
 
     eventlet_wsgi.Server.process_request = _quiet_process_request
+
+    _orig_accept = green_ssl.GreenSSLSocket.accept
+
+    def _quiet_green_accept(self):  # noqa: ANN001
+        while True:
+            try:
+                return _orig_accept(self)
+            except OSError as exc:
+                if exc.errno == 22:
+                    # Client dropped during TLS handshake; accept the next client.
+                    continue
+                raise
+
+    green_ssl.GreenSSLSocket.accept = _quiet_green_accept
 
 
 if __name__ == "__main__":

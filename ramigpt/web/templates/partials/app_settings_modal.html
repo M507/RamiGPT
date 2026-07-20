@@ -11,84 +11,98 @@
             (same file as provider choices; API keys stay in <code>.env</code>).
         </p>
 
-        <label class="settings-field" for="app-settings-role-objective">
-            Role / objective
-            <select id="app-settings-role-objective" class="settings-input"></select>
-            <em>The selected role is the starting role. Options are loaded from <code>ramigpt/config/role_objectives.json</code>.</em>
-        </label>
+        <div id="app-settings-main">
+            <label class="settings-field" for="app-settings-role-objective">
+                Role / objective
+                <select id="app-settings-role-objective" class="settings-input"></select>
+                <em>The selected role is the starting role. Options are loaded from <code>ramigpt/config/role_objectives.json</code>.</em>
+            </label>
 
-        <label class="settings-toggle-field" for="app-settings-rotate-roles">
-            <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Rotate role / objective every AI prompt</span>
-                <span class="settings-toggle-hint">Cycle through every JSON role, beginning with the selected role.</span>
-            </span>
-            <span class="settings-toggle">
-                <input type="checkbox" id="app-settings-rotate-roles">
-                <span class="settings-toggle-slider" aria-hidden="true"></span>
-            </span>
-        </label>
+            <label class="settings-toggle-field" for="app-settings-rotate-roles">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Rotate role / objective every AI prompt</span>
+                    <span class="settings-toggle-hint">Cycle through every JSON role, beginning with the selected role.</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-rotate-roles">
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
 
-        <label class="settings-toggle-field" for="app-settings-upgraded-session-v2">
-            <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Upgraded Session v2</span>
-                <span class="settings-toggle-hint">Better AI command extraction and interactive PTY handling (password prompts, editors, nested root shells).</span>
-            </span>
-            <span class="settings-toggle">
-                <input type="checkbox" id="app-settings-upgraded-session-v2" checked>
-                <span class="settings-toggle-slider" aria-hidden="true"></span>
-            </span>
-        </label>
+            <label class="settings-toggle-field" for="app-settings-upgraded-session-v2">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Upgraded Session v2</span>
+                    <span class="settings-toggle-hint">Better AI command extraction and interactive PTY handling (password prompts, editors, nested root shells).</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-upgraded-session-v2" checked>
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
 
-        <label class="settings-toggle-field" for="app-settings-show-prompts">
-            <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Show AI prompts in terminal</span>
-                <span class="settings-toggle-hint">When on, Full AI prints <code>[DEBUG] About to send prompt:</code> before each request.</span>
-            </span>
-            <span class="settings-toggle">
-                <input type="checkbox" id="app-settings-show-prompts">
-                <span class="settings-toggle-slider" aria-hidden="true"></span>
-            </span>
-        </label>
+            <label class="settings-toggle-field" for="app-settings-show-prompts">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Show AI prompts in terminal</span>
+                    <span class="settings-toggle-hint">When on, Full AI prints <code>[DEBUG] About to send prompt:</code> before each request.</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-show-prompts">
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
 
-        <label class="settings-toggle-field" for="app-settings-history-outputs">
-            <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Include command outputs in AI history</span>
-                <span class="settings-toggle-hint">Off sends only previous commands. On also sends selected outputs.</span>
-            </span>
-            <span class="settings-toggle">
-                <input type="checkbox" id="app-settings-history-outputs">
-                <span class="settings-toggle-slider" aria-hidden="true"></span>
-            </span>
-        </label>
+            <label class="settings-toggle-field" for="app-settings-history-outputs">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Include command outputs in AI history</span>
+                    <span class="settings-toggle-hint">Off sends only previous commands. On also sends selected outputs.</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-history-outputs">
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
 
-        <label class="settings-toggle-field" for="app-settings-advanced-mode">
-            <span class="settings-toggle-copy">
-                <span class="settings-toggle-title">Advanced</span>
-                <span class="settings-toggle-hint">Show destructive benchmark controls (e.g. reset all collaborative results).</span>
-            </span>
-            <span class="settings-toggle">
-                <input type="checkbox" id="app-settings-advanced-mode">
-                <span class="settings-toggle-slider" aria-hidden="true"></span>
-            </span>
-        </label>
+            <label class="settings-toggle-field" for="app-settings-advanced-mode">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">Advanced</span>
+                    <span class="settings-toggle-hint">Show destructive benchmark controls (e.g. reset all collaborative results).</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-advanced-mode">
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
 
-        <label class="settings-field" for="app-settings-history-output-count">
-            History output edge count
-            <input
-                type="number"
-                id="app-settings-history-output-count"
-                class="settings-input"
-                min="0"
-                max="40"
-                step="1"
-                value="4"
-            >
-            <em>Include outputs for the first and last N commands. Use 0 for all outputs.</em>
-        </label>
+            <label class="settings-field" for="app-settings-history-output-count">
+                History output edge count
+                <input
+                    type="number"
+                    id="app-settings-history-output-count"
+                    class="settings-input"
+                    min="0"
+                    max="40"
+                    step="1"
+                    value="4"
+                >
+                <em>Include outputs for the first and last N commands. Use 0 for all outputs.</em>
+            </label>
+        </div>
+
+        <div id="app-settings-tools-panel" class="app-settings-subpanel" hidden>
+            <div class="app-settings-subpanel-head">
+                <button type="button" id="app-settings-tools-back" class="settings-btn secondary">← Back</button>
+                <h3 class="app-settings-subpanel-title">Terminal tools</h3>
+            </div>
+            <p class="settings-help">
+                Show or hide enumeration tools in the Terminal dropdown. Benchmark tool checkboxes are not affected.
+            </p>
+            <div id="app-settings-tools-list" class="app-settings-tools-list"></div>
+        </div>
 
         <p id="app-settings-status" class="settings-status"></p>
 
         <div class="settings-actions">
+            <button type="button" id="app-settings-tools-open" class="settings-btn secondary">Tools</button>
             <button type="button" id="app-settings-save" class="settings-btn">Save</button>
         </div>
     </div>

@@ -96,7 +96,7 @@ ${NC}This tool enum and search possible misconfigurations$DG (known vulns, user,
 	${YELLOW}    -q${BLUE} Do not show banner
         ${YELLOW}    -N${BLUE} Do not use colours
         ${YELLOW}    -z <N>${BLUE} Set number of threads for background checks (default: auto-detected CPU count, fallback: 2; must be >= 1)$NC"
-while getopts ":h?asd:p:i:P:qo:T:LMwNDterVf:F:z:" opt; do
+while getopts ":h?asd:p:i:P:qo:T:LMwNDnterVf:F:z:" opt; do
   case "$opt" in
     h|\?) printf "%s\n\n" "$HELP$NC"; exit 0;;
     a)  FAST="";EXTRA_CHECKS="1";ONLINE_VULN_CHECKS="1";;
@@ -169,6 +169,32 @@ if [ $? -ne 0 ] ; then
 fi
 # on macOS the built-in echo does not support -n, use /bin/echo instead
 if [ "$MACPEAS" ] ; then alias echo=/bin/echo ; fi
+linpeas_flush_red_only_output(){
+  if [ -z "$LINPEAS_RAW_OUT" ] || [ ! -f "$LINPEAS_RAW_OUT" ]; then
+    return
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *"${C}[1;31m"*)
+        case "$line" in
+          *"95% a PE vector"*|*"You should take a look into it"*) ;;
+          *) printf '%s\n' "$line" >&3 ;;
+        esac
+        ;;
+    esac
+  done < "$LINPEAS_RAW_OUT"
+  rm -f "$LINPEAS_RAW_OUT"
+  LINPEAS_RAW_OUT=""
+  exec 1>&3 3>&- 2>/dev/null
+}
+linpeas_begin_red_only_output(){
+  [ -n "$NOCOLOR" ] && return
+  [ -n "$LINPEAS_RAW_OUT" ] && return
+  LINPEAS_RAW_OUT=$(mktemp 2>/dev/null || echo "/tmp/linpeas_raw_$$")
+  exec 3>&1
+  exec > "$LINPEAS_RAW_OUT" 2>&1
+  trap linpeas_flush_red_only_output EXIT
+}
 print_title(){
   if [ "$DEBUG" ]; then
     END_T1_TIME=$(date +%s 2>/dev/null)
@@ -349,6 +375,7 @@ print_support () {
 ###########################################
 #-----------) Starting Output (-----------#
 ###########################################
+linpeas_begin_red_only_output
 echo ""
 if [ ! "$QUIET" ]; then print_banner; print_support; fi
 printf ${BLUE}"          $SCRIPTNAME-$VERSION ${YELLOW}by carlospolop\n"$NC;

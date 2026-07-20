@@ -6,7 +6,7 @@ import json
 import os
 import threading
 import warnings
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -89,6 +89,7 @@ JSON_SETTING_FIELDS = (
     "rotate_role_objectives",
     "upgraded_session_v2",
     "advanced_mode",
+    "terminal_tools_visible",
 )
 
 VALID_PROVIDERS = ("openai", "ollama", "openwebui", "cursor")
@@ -119,6 +120,7 @@ class Settings:
     rotate_role_objectives: int = 0
     upgraded_session_v2: int = 1
     advanced_mode: int = 0
+    terminal_tools_visible: Dict[str, bool] = field(default_factory=dict)
 
     def active_api_key(self) -> str:
         if self.ai_provider == "ollama":
@@ -140,6 +142,11 @@ class Settings:
 
     def to_public_dict(self) -> Dict[str, Any]:
         """Serialize for the settings UI; mask secrets."""
+        from ramigpt.benchmark.tools import (
+            AVAILABLE_TOOLS,
+            normalize_terminal_tools_visible,
+        )
+
         role_objectives = load_role_objectives()
         selected_role = (
             self.role_objective
@@ -173,6 +180,10 @@ class Settings:
             "rotate_role_objectives": self.rotate_role_objectives,
             "upgraded_session_v2": self.upgraded_session_v2,
             "advanced_mode": self.advanced_mode,
+            "available_tools": AVAILABLE_TOOLS,
+            "terminal_tools_visible": normalize_terminal_tools_visible(
+                self.terminal_tools_visible
+            ),
             "providers": list(VALID_PROVIDERS),
         }
 
@@ -284,6 +295,10 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             value = str(value).strip()
             if value not in load_role_objectives():
                 raise ValueError(f"Invalid role/objective option: {value}")
+        if key == "terminal_tools_visible":
+            from ramigpt.benchmark.tools import normalize_terminal_tools_visible
+
+            value = normalize_terminal_tools_visible(value)
         if key in (
             "ollama_base_url",
             "openwebui_base_url",
@@ -295,10 +310,19 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
     return Settings(**data)
 
 
+def _normalize_loaded_settings(settings: Settings) -> Settings:
+    from ramigpt.benchmark.tools import normalize_terminal_tools_visible
+
+    return _apply_updates(
+        settings,
+        {"terminal_tools_visible": normalize_terminal_tools_visible(settings.terminal_tools_visible)},
+    )
+
+
 def _load_settings() -> Settings:
     settings = _load_settings_from_env()
     if not AI_SETTINGS_PATH.exists():
-        return settings
+        return _normalize_loaded_settings(settings)
 
     try:
         payload = json.loads(AI_SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -309,14 +333,14 @@ def _load_settings() -> Settings:
             for key in JSON_SETTING_FIELDS
             if key in payload
         }
-        return _apply_updates(settings, updates)
+        return _normalize_loaded_settings(_apply_updates(settings, updates))
     except Exception as exc:  # noqa: BLE001
         warnings.warn(
             f"Ignoring invalid AI settings file {AI_SETTINGS_PATH}: {exc}",
             RuntimeWarning,
             stacklevel=2,
         )
-        return settings
+        return _normalize_loaded_settings(settings)
 
 
 class SettingsManager:

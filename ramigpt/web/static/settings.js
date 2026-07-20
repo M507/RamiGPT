@@ -436,6 +436,138 @@
         el.className = "settings-status" + (isError ? " error" : " success");
     }
 
+    var TERMINAL_TOOL_UI = [
+        { id: "beroot", value: "beRoot", label: "BeRoot" },
+        { id: "linenum", value: "linEnum", label: "LinEnum" },
+        { id: "linpeas", value: "linPeas", label: "LinPEAS" },
+    ];
+
+    function showAppSettingsMainView() {
+        const main = $("app-settings-main");
+        const tools = $("app-settings-tools-panel");
+        const toolsBtn = $("app-settings-tools-open");
+        if (main) main.hidden = false;
+        if (tools) tools.hidden = true;
+        if (toolsBtn) toolsBtn.hidden = false;
+    }
+
+    function showAppSettingsToolsView() {
+        const main = $("app-settings-main");
+        const tools = $("app-settings-tools-panel");
+        const toolsBtn = $("app-settings-tools-open");
+        if (main) main.hidden = true;
+        if (tools) tools.hidden = false;
+        if (toolsBtn) toolsBtn.hidden = true;
+    }
+
+    function renderTerminalToolsSettings(settings) {
+        const list = $("app-settings-tools-list");
+        if (!list) return;
+        const visible = settings.terminal_tools_visible || {};
+        const catalog = settings.available_tools || [];
+        list.innerHTML = "";
+        TERMINAL_TOOL_UI.forEach(function (opt) {
+            const meta = catalog.find(function (t) {
+                return t.id === opt.id;
+            });
+            const name = meta && meta.name ? meta.name : opt.label;
+            const desc = meta && meta.description ? meta.description : "";
+            const checked = visible[opt.id] !== false;
+
+            const row = document.createElement("label");
+            row.className = "settings-toggle-field";
+            row.setAttribute("for", "app-tool-visible-" + opt.id);
+
+            const copy = document.createElement("span");
+            copy.className = "settings-toggle-copy";
+            const title = document.createElement("span");
+            title.className = "settings-toggle-title";
+            title.textContent = name;
+            copy.appendChild(title);
+            if (desc) {
+                const hint = document.createElement("span");
+                hint.className = "settings-toggle-hint";
+                hint.textContent = desc;
+                copy.appendChild(hint);
+            }
+
+            const toggle = document.createElement("span");
+            toggle.className = "settings-toggle";
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.id = "app-tool-visible-" + opt.id;
+            input.setAttribute("data-tool-id", opt.id);
+            input.checked = checked;
+            const slider = document.createElement("span");
+            slider.className = "settings-toggle-slider";
+            slider.setAttribute("aria-hidden", "true");
+            toggle.appendChild(input);
+            toggle.appendChild(slider);
+
+            row.appendChild(copy);
+            row.appendChild(toggle);
+            list.appendChild(row);
+        });
+    }
+
+    function collectTerminalToolsVisible() {
+        const out = {};
+        document.querySelectorAll("#app-settings-tools-list input[data-tool-id]").forEach(function (el) {
+            out[el.getAttribute("data-tool-id")] = !!el.checked;
+        });
+        TERMINAL_TOOL_UI.forEach(function (opt) {
+            if (out[opt.id] === undefined) {
+                out[opt.id] = true;
+            }
+        });
+        return out;
+    }
+
+    function refreshTerminalToolSelector(settings) {
+        const select = document.getElementById("toolSelector");
+        if (!select || !settings) return;
+        const visible = settings.terminal_tools_visible || {};
+        const catalog = settings.available_tools || [];
+        const previous = select.value;
+        select.innerHTML = "";
+        var added = 0;
+        TERMINAL_TOOL_UI.forEach(function (opt) {
+            if (visible[opt.id] === false) return;
+            const meta = catalog.find(function (t) {
+                return t.id === opt.id;
+            });
+            const option = document.createElement("option");
+            option.value = opt.value;
+            option.textContent = meta && meta.name ? meta.name : opt.label;
+            select.appendChild(option);
+            added += 1;
+        });
+        if (!added) {
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "No tools visible (App Settings → Tools)";
+            placeholder.disabled = true;
+            select.appendChild(placeholder);
+            return;
+        }
+        var values = Array.prototype.map.call(select.options, function (o) {
+            return o.value;
+        });
+        if (previous && values.indexOf(previous) >= 0) {
+            select.value = previous;
+        }
+        if (select.classList.contains("queue-select")) {
+            ["import", "export"].forEach(function (extra) {
+                const option = document.createElement("option");
+                option.value = extra;
+                option.textContent = extra.charAt(0).toUpperCase() + extra.slice(1);
+                select.appendChild(option);
+            });
+        }
+    }
+
+    window.refreshTerminalToolSelector = refreshTerminalToolSelector;
+
     function applyAppSettingsToForm(settings) {
         const roleSelect = $("app-settings-role-objective");
         if (roleSelect) {
@@ -475,6 +607,8 @@
         if (advancedToggle) {
             advancedToggle.checked = !!Number(settings.advanced_mode);
         }
+        renderTerminalToolsSettings(settings);
+        refreshTerminalToolSelector(settings);
     }
 
     async function loadAppSettings() {
@@ -514,6 +648,7 @@
                 history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
                 history_output_edge_count: edgeCount,
                 advanced_mode: advancedToggle && advancedToggle.checked ? 1 : 0,
+                terminal_tools_visible: collectTerminalToolsVisible(),
                 persist: true,
             }),
         });
@@ -539,12 +674,14 @@
         if (window.BenchmarkUI && typeof window.BenchmarkUI.refresh === "function") {
             window.BenchmarkUI.refresh().catch(function () {});
         }
+        refreshTerminalToolSelector(data.settings || {});
     }
 
     function openAppSettings() {
         closeSettings();
         const modal = $("app-settings-modal");
         if (!modal) return;
+        showAppSettingsMainView();
         modal.classList.add("open");
         modal.setAttribute("aria-hidden", "false");
         loadAppSettings().catch((err) => showAppStatus(err.message, true));
@@ -666,6 +803,20 @@
             });
         }
 
+        const appToolsOpenBtn = $("app-settings-tools-open");
+        if (appToolsOpenBtn) {
+            appToolsOpenBtn.addEventListener("click", function () {
+                showAppSettingsToolsView();
+            });
+        }
+
+        const appToolsBackBtn = $("app-settings-tools-back");
+        if (appToolsBackBtn) {
+            appToolsBackBtn.addEventListener("click", function () {
+                showAppSettingsMainView();
+            });
+        }
+
         const historyOutputsToggle = $("app-settings-history-outputs");
         if (historyOutputsToggle) {
             historyOutputsToggle.addEventListener("change", function () {
@@ -690,5 +841,16 @@
                 closeAppSettings();
             }
         });
+
+        fetch("/api/settings")
+            .then(function (r) {
+                return r.ok ? r.json() : null;
+            })
+            .then(function (settings) {
+                if (settings) {
+                    refreshTerminalToolSelector(settings);
+                }
+            })
+            .catch(function () {});
     });
 })();

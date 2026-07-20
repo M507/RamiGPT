@@ -695,7 +695,7 @@ def _handoff_scanner_to_full_ai(session_data, *, source: str, tool_label: str, s
     slog.event(full_ai_event, f"{tool_label} finished — starting Full AI loop with scanner findings")
     emit_session(
         session_id,
-        f"[{tool_label}] Handing off to Full AI with scanner findings…",
+        f"[{tool_label}] Findings sent to Full AI — continuing with autonomous privilege escalation…",
         color="#58a6ff",
     )
     ai_cfg = get_settings()
@@ -710,6 +710,10 @@ def _handoff_scanner_to_full_ai(session_data, *, source: str, tool_label: str, s
         model=ai_cfg.active_model(),
     )
     start_autonomous_task(session_data)
+
+
+def _emit_tool_progress(session_id, tool_label, message, *, color="#58a6ff") -> None:
+    emit_session(session_id, f"[{tool_label}] {message}", color=color)
 
 
 def _require_live_shell(shell, *, where: str = "shell op"):
@@ -1662,6 +1666,12 @@ def execute_beroot(session_data):
             f"[BeRoot] Uploading toolkit to /tmp/Linux … (AI={'on' if with_ai else 'off'})",
             color="#58a6ff",
         )
+        _emit_tool_progress(session_id, "BeRoot", "Sending toolkit to remote host…")
+        _emit_tool_progress(
+            session_id,
+            "BeRoot",
+            "Executing scan on target — waiting for results (this may take a minute)…",
+        )
         debug_logger.info(
             f"beroot.start session_id={session_id!r} "
             f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
@@ -1693,6 +1703,7 @@ def execute_beroot(session_data):
                     pass
             return
 
+        _emit_tool_progress(session_id, "BeRoot", "Scan finished — processing and attaching findings…")
         # Persist the enriched/sanitized text locally (do NOT re-download /tmp/beroot.txt
         # afterwards — that file lacks the sudo -l enrichment we append in-process).
         ensure_runtime_dirs()
@@ -1709,6 +1720,7 @@ def execute_beroot(session_data):
             priv_esc.clear_scanner_findings()
             priv_esc.set_BeRoot(beroot_for_ai, persist=with_ai)
 
+        _emit_tool_progress(session_id, "BeRoot", "Findings attached to session prompt.")
         preview = beroot_for_ai if len(beroot_for_ai) < 12000 else (
             beroot_for_ai[:6000] + "\n…[truncated]…\n" + beroot_for_ai[-4000:]
         )
@@ -1764,6 +1776,12 @@ def execute_linenum(session_data):
             f"[LinEnum] Uploading LinEnum.sh to /tmp … (AI={'on' if with_ai else 'off'})",
             color="#58a6ff",
         )
+        _emit_tool_progress(session_id, "LinEnum", "Sending LinEnum.sh to remote host…")
+        _emit_tool_progress(
+            session_id,
+            "LinEnum",
+            "Executing scan on target — waiting for results (this may take several minutes)…",
+        )
         debug_logger.info(
             f"linenum.start session_id={session_id!r} "
             f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
@@ -1796,6 +1814,7 @@ def execute_linenum(session_data):
                     pass
             return
 
+        _emit_tool_progress(session_id, "LinEnum", "Scan finished — processing and attaching findings…")
         ensure_runtime_dirs()
         local_filename = str(LINENUM_DOWNLOADS_DIR / f"{session_id}_linenum.txt")
         linenum_for_ai = sanitize_linenum_for_prompt(linenum_string)
@@ -1810,6 +1829,7 @@ def execute_linenum(session_data):
             priv_esc.clear_scanner_findings()
             priv_esc.set_LinEnum(linenum_for_ai, persist=with_ai)
 
+        _emit_tool_progress(session_id, "LinEnum", "Findings attached to session prompt.")
         preview = linenum_for_ai if len(linenum_for_ai) < 12000 else (
             linenum_for_ai[:6000] + "\n…[truncated]…\n" + linenum_for_ai[-4000:]
         )
@@ -1871,6 +1891,12 @@ def execute_linpeas(session_data):
             f"[LinPEAS] Uploading linpeas.sh to /tmp … (AI={'on' if with_ai else 'off'})",
             color="#58a6ff",
         )
+        _emit_tool_progress(session_id, "LinPEAS", "Sending linpeas.sh to remote host…")
+        _emit_tool_progress(
+            session_id,
+            "LinPEAS",
+            "Executing scan on target — waiting for results (this may take several minutes)…",
+        )
         debug_logger.info(
             f"linpeas.start session_id={session_id!r} "
             f"host={session_data.get('server')!r}:{session_data.get('port')} with_ai={with_ai}"
@@ -1903,6 +1929,7 @@ def execute_linpeas(session_data):
                     pass
             return
 
+        _emit_tool_progress(session_id, "LinPEAS", "Scan finished — processing and attaching findings…")
         ensure_runtime_dirs()
         local_filename = str(LINPEAS_DOWNLOADS_DIR / f"{session_id}_linpeas.txt")
         linpeas_for_ai = sanitize_linpeas_for_prompt(linpeas_string)
@@ -1917,6 +1944,7 @@ def execute_linpeas(session_data):
             priv_esc.clear_scanner_findings()
             priv_esc.set_LinPEAS(linpeas_for_ai, persist=with_ai)
 
+        _emit_tool_progress(session_id, "LinPEAS", "Findings attached to session prompt.")
         preview = linpeas_for_ai if len(linpeas_for_ai) < 12000 else (
             linpeas_for_ai[:6000] + "\n…[truncated]…\n" + linpeas_for_ai[-4000:]
         )
@@ -2004,7 +2032,7 @@ def action3():
         socketio.start_background_task(execute_fn, session_data_copy)
         emit_session(
             session_id,
-            f"Starting {tool_label} (upload + scan)… AI={'on' if with_ai else 'off'}",
+            f"[{tool_label}] Tool run requested — dispatching to remote host (AI={'on' if with_ai else 'off'})…",
             color="#58a6ff",
         )
         return jsonify(output=f"{tool}_started", tool=tool, session_id=session_id, ai=with_ai), 200
@@ -2836,6 +2864,7 @@ def update_ai_settings():
         "rotate_role_objectives",
         "upgraded_session_v2",
         "advanced_mode",
+        "terminal_tools_visible",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
     persist = bool(payload.get("persist", True))
@@ -2956,6 +2985,7 @@ def test_ai_settings():
         "rotate_role_objectives",
         "upgraded_session_v2",
         "advanced_mode",
+        "terminal_tools_visible",
     }
     updates = {key: payload[key] for key in allowed if key in payload}
 
