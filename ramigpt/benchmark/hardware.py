@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 from ramigpt.paths import ENV_PATH
 
+_REMOTE_AI_PROVIDERS = frozenset({"openwebui"})
+
 _HARDWARE_ENV_KEYS = {
     "gpu_name": "BENCHMARK_GPU_NAME",
     "gpu_vram": "BENCHMARK_GPU_VRAM",
@@ -94,6 +96,42 @@ def load_benchmark_hardware(*, reload_env: bool = False) -> Dict[str, Any]:
         if value:
             profile[field] = _normalize_hardware_field(field, value)
     return profile
+
+
+# Stable collaborative profile for remote/proxy AI providers (not local GPU lab).
+OPENWEBUI_HARDWARE_PROFILE: Dict[str, str] = {
+    "gpu_name": "Online AI Service",
+    "gpu_driver": "Open WebUI proxy",
+}
+
+
+def openwebui_hardware_profile() -> Dict[str, Any]:
+    """
+    Synthetic lab profile for Open WebUI runs.
+
+    Open WebUI fronts opaque backend hardware, so benchmark results should not
+    inherit the local Ollama GPU profile from ``.env``. The profile is fixed
+    (no host/IP) so contributors merge on model + provider, not private URLs.
+    """
+    return dict(OPENWEBUI_HARDWARE_PROFILE)
+
+
+def resolve_benchmark_hardware(
+    *,
+    provider: str = "",
+    reload_env: bool = False,
+) -> Dict[str, Any]:
+    """
+    Return the hardware profile stored on benchmark run sheets.
+
+    Local providers (e.g. Ollama) use ``BENCHMARK_GPU_*`` from ``.env``.
+    Remote proxy providers substitute a stable online-service profile instead.
+    """
+    name = (provider or "").strip().lower()
+    if name in _REMOTE_AI_PROVIDERS:
+        if name == "openwebui":
+            return openwebui_hardware_profile()
+    return load_benchmark_hardware(reload_env=reload_env)
 
 
 def hardware_is_configured(profile: Dict[str, Any]) -> bool:

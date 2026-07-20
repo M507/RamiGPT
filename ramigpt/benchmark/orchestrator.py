@@ -39,7 +39,7 @@ from ramigpt.benchmark.batch_plan import (
     normalize_batch_plans,
 )
 from ramigpt.benchmark.model_warmup import ModelWarmupResult, warmup_ai_model
-from ramigpt.benchmark.hardware import load_benchmark_hardware
+from ramigpt.benchmark.hardware import resolve_benchmark_hardware
 from ramigpt.benchmark.profile import collaborative_profile_key, profile_display_label
 from ramigpt.benchmark.model_registry import resolve_model_identity
 from ramigpt.benchmark.results import (
@@ -820,11 +820,12 @@ def _selected_suite_targets(run: BenchmarkRun) -> List[BenchmarkTarget]:
 
 def _attach_run_model_identity(run: BenchmarkRun) -> None:
     """Resolve registry key_name + hardware profile for this run."""
+    cfg = get_settings()
     try:
-        _sync_run_ai_settings(run)
+        cfg = _sync_run_ai_settings(run, cfg)
     except Exception:  # noqa: BLE001
         pass
-    run.hardware = load_benchmark_hardware()
+    run.hardware = resolve_benchmark_hardware(provider=run.provider)
     try:
         identity = resolve_model_identity(get_settings())
         run.model_key_name = str(identity.get("key_name") or "")
@@ -869,6 +870,8 @@ def _attach_run_model_identity(run: BenchmarkRun) -> None:
         _log(run, f"Benchmark profile: {run.profile_label}")
     if not run.hardware:
         _log(run, "Benchmark hardware profile not configured (.env BENCHMARK_GPU_*)")
+    elif (run.provider or "").strip().lower() == "openwebui":
+        _log(run, "Benchmark hardware profile: Online AI Service (Open WebUI proxy)")
 
 
 def _worker(run: BenchmarkRun) -> None:

@@ -11,6 +11,8 @@ from ramigpt.benchmark.hardware import (
     hardware_key,
     hardware_label,
     load_benchmark_hardware,
+    openwebui_hardware_profile,
+    resolve_benchmark_hardware,
 )
 
 
@@ -70,6 +72,48 @@ class BenchmarkHardwareTests(unittest.TestCase):
         low_power = {**base, "gpu_power_limit": 200}
         high_power = {**base, "gpu_power_limit": 250}
         self.assertEqual(hardware_key(low_power), hardware_key(high_power))
+
+    def test_openwebui_hardware_profile_ignores_env_gpu(self):
+        profile = openwebui_hardware_profile()
+        self.assertEqual(profile["gpu_name"], "Online AI Service")
+        self.assertEqual(profile["gpu_driver"], "Open WebUI proxy")
+        self.assertNotIn("gpu_vram", profile)
+        self.assertNotIn("cuda_version", profile)
+        self.assertEqual(hardware_label(profile), "Online AI Service")
+
+    def test_openwebui_hardware_profile_same_key_regardless_of_url(self):
+        a = openwebui_hardware_profile()
+        b = openwebui_hardware_profile()
+        self.assertEqual(hardware_key(a), hardware_key(b))
+
+    @patch.dict(
+        os.environ,
+        {
+            "BENCHMARK_GPU_NAME": "NVIDIA GeForce RTX 4070",
+            "BENCHMARK_GPU_VRAM": "12282",
+            "BENCHMARK_GPU_DRIVER": "591.86",
+            "BENCHMARK_CUDA_VERSION": "13.1",
+        },
+        clear=False,
+    )
+    def test_resolve_benchmark_hardware_for_openwebui(self):
+        profile = resolve_benchmark_hardware(provider="openwebui", reload_env=False)
+        self.assertEqual(profile["gpu_name"], "Online AI Service")
+        self.assertEqual(profile["gpu_driver"], "Open WebUI proxy")
+        self.assertNotIn("gpu_vram", profile)
+
+    @patch.dict(
+        os.environ,
+        {
+            "BENCHMARK_GPU_NAME": "NVIDIA GeForce RTX 4070",
+            "BENCHMARK_GPU_VRAM": "12282",
+        },
+        clear=False,
+    )
+    def test_resolve_benchmark_hardware_for_ollama_uses_env(self):
+        profile = resolve_benchmark_hardware(provider="ollama", reload_env=False)
+        self.assertEqual(profile["gpu_name"], "NVIDIA GeForce RTX 4070")
+        self.assertEqual(profile["gpu_vram"], 12282)
 
 
 if __name__ == "__main__":
