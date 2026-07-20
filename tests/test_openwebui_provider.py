@@ -68,7 +68,7 @@ class OpenWebUIProviderTests(unittest.TestCase):
 
     def test_null_sdk_response_raises(self):
         class FakeCompletions:
-            def create(self, model, messages):
+            def create(self, *args, **kwargs):
                 return None
 
         fake_client = SimpleNamespace(

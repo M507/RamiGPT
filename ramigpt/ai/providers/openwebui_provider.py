@@ -7,6 +7,7 @@ from typing import List, Optional
 from openai import OpenAI
 
 from ramigpt.ai.base import AIProvider, ChatMessage
+from ramigpt.ai.openwebui_prompt import prepare_openwebui_messages
 from ramigpt.ai.providers.compat import (
     make_openai_compat_client,
     openwebui_openai_base_url,
@@ -36,10 +37,13 @@ class OpenWebUIProvider(AIProvider):
         return "openwebui"
 
     def create_completion(self, messages: List[ChatMessage]) -> str:
+        payload = prepare_openwebui_messages(messages)
         try:
             completion = self._client.chat.completions.create(
                 model=self._model,
-                messages=messages,
+                messages=payload,
+                stream=False,
+                extra_body={"parent_id": None},
             )
         except Exception as exc:  # noqa: BLE001
             self.last_usage = None

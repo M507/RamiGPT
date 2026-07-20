@@ -39,11 +39,14 @@ class Action3LinEnumRouteTest(unittest.TestCase):
     def test_action3_start_linenum(self):
         mock_socketio = MagicMock()
         app_mod = self.app_module
-        with patch.object(app_mod, "socketio", mock_socketio), patch.object(
-            app_mod, "resolve_server_session_id", return_value="sess-linenum-test"
-        ), patch.object(app_mod, "ssh_shells", {"sess-linenum-test": MagicMock()}), patch.object(
-            app_mod, "ssh_ssh_conns", {"sess-linenum-test": MagicMock()}
-        ), patch.object(app_mod, "emit_session"), patch.object(app_mod, "loop", {}):
+        from ramigpt.web import state as web_state
+        from ramigpt.web.routes import ssh as ssh_routes
+
+        with patch.object(ssh_routes, "socketio", mock_socketio), patch.object(
+            ssh_routes, "resolve_server_session_id", return_value="sess-linenum-test"
+        ), patch.object(web_state, "ssh_shells", {"sess-linenum-test": MagicMock()}), patch.object(
+            web_state, "ssh_ssh_conns", {"sess-linenum-test": MagicMock()}
+        ), patch.object(ssh_routes, "emit_session"), patch.object(web_state, "loop", {}):
             with self.client.session_transaction() as sess:
                 sess["username"] = "lowpriv"
                 sess["password"] = "password"
@@ -62,11 +65,14 @@ class Action3LinEnumRouteTest(unittest.TestCase):
     def test_action3_start_linpeas(self):
         mock_socketio = MagicMock()
         app_mod = self.app_module
-        with patch.object(app_mod, "socketio", mock_socketio), patch.object(
-            app_mod, "resolve_server_session_id", return_value="sess-linpeas-test"
-        ), patch.object(app_mod, "ssh_shells", {"sess-linpeas-test": MagicMock()}), patch.object(
-            app_mod, "ssh_ssh_conns", {"sess-linpeas-test": MagicMock()}
-        ), patch.object(app_mod, "emit_session"), patch.object(app_mod, "loop", {}):
+        from ramigpt.web import state as web_state
+        from ramigpt.web.routes import ssh as ssh_routes
+
+        with patch.object(ssh_routes, "socketio", mock_socketio), patch.object(
+            ssh_routes, "resolve_server_session_id", return_value="sess-linpeas-test"
+        ), patch.object(web_state, "ssh_shells", {"sess-linpeas-test": MagicMock()}), patch.object(
+            web_state, "ssh_ssh_conns", {"sess-linpeas-test": MagicMock()}
+        ), patch.object(ssh_routes, "emit_session"), patch.object(web_state, "loop", {}):
             with self.client.session_transaction() as sess:
                 sess["username"] = "lowpriv"
                 sess["password"] = "password"

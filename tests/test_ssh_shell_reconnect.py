@@ -43,6 +43,7 @@ class OpenSshInteractiveShellTests(unittest.TestCase):
 class GetOrCreateSshShellTests(unittest.TestCase):
     def test_create_new_closes_stale_shell_before_reconnect(self):
         from ramigpt.web import app as webapp
+        from ramigpt.web.shell import connection as conn_mod
 
         stale_shell = mock.Mock(name="stale_shell")
         webapp.ssh_shells["sid-1"] = stale_shell
@@ -59,11 +60,11 @@ class GetOrCreateSshShellTests(unittest.TestCase):
             flask_session["server"] = "10.0.0.1"
             flask_session["port"] = 2211
 
-            with mock.patch.object(webapp, "close_ssh_connection") as close_mock, mock.patch.object(
-                webapp, "ssh", return_value=new_conn
+            with mock.patch.object(conn_mod, "close_ssh_connection") as close_mock, mock.patch.object(
+                conn_mod, "ssh", return_value=new_conn
             ), mock.patch.object(
-                webapp, "_open_ssh_interactive_shell", return_value=new_shell
-            ), mock.patch.object(webapp, "shell_recvuntil"):
+                conn_mod, "_open_ssh_interactive_shell", return_value=new_shell
+            ), mock.patch.object(conn_mod, "shell_recvuntil"):
                 result = webapp.get_or_create_ssh_shell("sid-1", create_new=True)
 
         close_mock.assert_called_once_with("sid-1")
@@ -73,12 +74,13 @@ class GetOrCreateSshShellTests(unittest.TestCase):
 
     def test_reuses_existing_when_create_new_false(self):
         from ramigpt.web import app as webapp
+        from ramigpt.web.shell import connection as conn_mod
 
         existing = mock.Mock(name="existing_shell")
         webapp.ssh_shells["sid-2"] = existing
 
-        with mock.patch.object(webapp, "close_ssh_connection") as close_mock, mock.patch.object(
-            webapp, "ssh"
+        with mock.patch.object(conn_mod, "close_ssh_connection") as close_mock, mock.patch.object(
+            conn_mod, "ssh"
         ) as ssh_mock:
             result = webapp.get_or_create_ssh_shell("sid-2", create_new=False)
 

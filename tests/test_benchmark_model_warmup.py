@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ramigpt.ai.providers.ollama_provider import ollama_model_names_match
+from ramigpt.ai.probe import PROVIDER_PROBE_MESSAGES
 from ramigpt.benchmark.model_warmup import warmup_ai_model
 from ramigpt.config import Settings
 
@@ -45,7 +46,7 @@ def test_warmup_ollama_probe_and_ps(mock_ps, mock_create):
     assert result.skipped is False
     assert result.ollama_verified is True
     assert result.probe_seconds is not None
-    provider.create_completion.assert_called_once()
+    provider.create_completion.assert_called_once_with(PROVIDER_PROBE_MESSAGES)
     assert any("Ollama ps before warmup" in line for line in result.log_lines)
     assert any("warmup OK" in line for line in result.log_lines)
 

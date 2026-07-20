@@ -7,17 +7,12 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from ramigpt.ai.factory import create_provider
+from ramigpt.ai.probe import PROVIDER_PROBE_MESSAGES
 from ramigpt.ai.providers.ollama_provider import (
     list_ollama_running_models,
     ollama_model_names_match,
 )
 from ramigpt.config import Settings
-
-_WARMUP_MESSAGES = [
-    {"role": "system", "content": "Reply with exactly: ok"},
-    {"role": "user", "content": "ping"},
-]
-
 
 @dataclass
 class ModelWarmupResult:
@@ -95,7 +90,7 @@ def warmup_ai_model(
     started = time.monotonic()
     try:
         ai = create_provider(settings)
-        reply = ai.create_completion(_WARMUP_MESSAGES)
+        reply = ai.create_completion(list(PROVIDER_PROBE_MESSAGES))
         probe_seconds = round(time.monotonic() - started, 3)
         preview = (reply or "").strip().replace("\n", " ")
         if len(preview) > 80:
