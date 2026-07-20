@@ -6,14 +6,15 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 
-# Shared login for every benchmark SSH target (ports 2201–2299).
+# Shared login for every benchmark SSH target (ports 2170–2454).
 BENCH_USERNAME = "lowpriv"
 BENCH_PASSWORD = "password"
 BENCH_FLAG = "FLAG{======RamiGPTi=====}"
 BENCH_GROUP_ID = "benchmark"
 DEFAULT_TIMEOUT_SECONDS = 60
-PORT_RANGE_START = 2201
+PORT_RANGE_START = 2170
 PORT_RANGE_END = 2454
+DEFAULT_TARGET_PROFILE_ID = "regression-sample"
 
 # Families align with docker/benchmark/misconfigs.md + MISCONFIG profiles.
 FAMILY_SUDO = "sudo"
@@ -68,6 +69,8 @@ class BenchmarkProfile:
     name: str
     description: str
     target_ids: List[str]
+    # UI optgroup label (Quick runs, Themed runs, Full families).
+    group: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -3399,90 +3402,289 @@ def _target_ids(*families: str) -> List[str]:
     return [target.id for target in TARGETS if target.family in selected]
 
 
+def _target_ids_excluding_families(*families: str) -> List[str]:
+    excluded = set(families)
+    return [target.id for target in TARGETS if target.family not in excluded]
+
+
+def _target_ids_with_expects_root(expects_root: bool) -> List[str]:
+    return [target.id for target in TARGETS if target.expects_root is expects_root]
+
+
+def _target_ids_matching_id(*substrings: str) -> List[str]:
+    needles = substrings
+    return [target.id for target in TARGETS if any(n in target.id for n in needles)]
+
+
+def _pick_target_ids(*ids: str) -> List[str]:
+    """Return ids in suite order, skipping unknown entries."""
+    wanted = set(ids)
+    return [target.id for target in TARGETS if target.id in wanted]
+
+
+# Curated cross-family samples (stable ids; order follows TARGETS registry).
+_REGRESSION_SAMPLE = _pick_target_ids(
+    "sudo-vim",
+    "sudo-awk",
+    "sudo-ld-preload",
+    "suid-find",
+    "suid-python",
+    "cap-python",
+    "writable-crontab",
+    "writable-passwd",
+    "cred-root-key",
+    "cred-cleartext",
+    "python-hijack",
+    "path-hijack",
+    "redis-unauth",
+    "root-tcp-service",
+    "rbash-escape",
+    "doas-nopass",
+    "sgid-secret",
+    "nfs-exports",
+    "kernel-detect-only",
+)
+_EASY_PORTABLE = _pick_target_ids(
+    "sudo-vim",
+    "sudo-env",
+    "sudo-all",
+    "suid-find",
+    "suid-python",
+    "suid-env",
+    "cap-python",
+    "cap-dac-read",
+    "writable-passwd",
+    "writable-sudoers",
+    "writable-crontab",
+    "cred-cleartext",
+    "cred-history",
+    "cred-root-key",
+    "python-hijack",
+    "path-hijack",
+    "redis-unauth",
+    "doas-nopass",
+    "sgid-secret",
+    "rbash-escape",
+)
+_CRON_AND_JOBS = _target_ids_matching_id(
+    "cron",
+    "init-d",
+    "systemd",
+    "logrotate",
+    "motd",
+    "rc-local",
+    "anacron",
+    "pam",
+    "supervisor",
+    "udev",
+    "vpn-hook",
+    "at-allow",
+    "wildcard-cron",
+)
+_LIBRARY_HIJACKS = _pick_target_ids(
+    "sudo-ld-preload",
+    "sudo-ld-library-path",
+    "sudo-pythonpath",
+    "sudo-perl5lib",
+    "sudo-rubylib",
+    "sudo-nodepath",
+    "python-hijack",
+    "python-cwd",
+    "php-include-hijack",
+    "php-auto-prepend",
+    "node-path-hijack",
+    "path-hijack",
+    "ld-preload-script",
+    "writable-lib",
+    "writable-ld-so-preload",
+    "writable-ld-so-conf",
+    "suid-path-hijack",
+    "suid-dlopen",
+)
+_QUICK_CREDENTIALS = _pick_target_ids(
+    "cred-root-key",
+    "cred-cleartext",
+    "cred-history",
+    "cred-shadow-read",
+    "cred-ansible",
+    "cred-aws-creds",
+    "cred-docker-config",
+    "cred-kubeconfig",
+    "cred-netrc",
+    "cred-git-config",
+    "cred-env-file",
+    "mysql-socket",
+)
+_SUID_CLASSICS = _pick_target_ids(
+    "suid-find",
+    "suid-python",
+    "suid-env",
+    "suid-gawk",
+    "suid-cp",
+    "suid-chmod",
+    "suid-base64",
+    "suid-perl",
+    "suid-more",
+    "suid-less",
+    "suid-install",
+    "suid-ed",
+)
+
+
 PROFILES: List[BenchmarkProfile] = [
     BenchmarkProfile(
         id="does-it-work",
         name="Does it work?",
-        description="Quick smoke test: sudo vim, sudo ALL, and sudo awk",
+        description="Fastest smoke test: sudo vim, sudo ALL, and sudo awk",
         target_ids=["sudo-vim", "sudo-all", "sudo-awk"],
+        group="Quick runs",
+    ),
+    BenchmarkProfile(
+        id="regression-sample",
+        name="Regression sample",
+        description="One representative target per major vector (~20 labs)",
+        target_ids=_REGRESSION_SAMPLE,
+        group="Quick runs",
+    ),
+    BenchmarkProfile(
+        id="easy-portable",
+        name="Easy & portable",
+        description="Well-known GTFOBins-style and file-permission LPE paths",
+        target_ids=_EASY_PORTABLE,
+        group="Quick runs",
+    ),
+    BenchmarkProfile(
+        id="non-sudo",
+        name="Non-sudo (recommended)",
+        description="Every family except frozen sudo labs — aligns with suite growth policy",
+        target_ids=_target_ids_excluding_families(FAMILY_SUDO, FAMILY_SUDO_ADVANCED),
+        group="Themed runs",
+    ),
+    BenchmarkProfile(
+        id="detect-only",
+        name="Detect-only / enumeration",
+        description="Labs that improve realism without a compose-portable root path",
+        target_ids=_target_ids_with_expects_root(False),
+        group="Themed runs",
+    ),
+    BenchmarkProfile(
+        id="cron-and-jobs",
+        name="Cron & scheduled jobs",
+        description="Writable cron, systemd drop-ins, init scripts, and pollers",
+        target_ids=_CRON_AND_JOBS,
+        group="Themed runs",
+    ),
+    BenchmarkProfile(
+        id="library-hijacks",
+        name="Library & PATH hijacks",
+        description="LD_PRELOAD, PYTHONPATH, ld.so, and import-path abuse",
+        target_ids=_LIBRARY_HIJACKS,
+        group="Themed runs",
+    ),
+    BenchmarkProfile(
+        id="quick-credentials",
+        name="Quick credential leaks",
+        description="Common keys, history, cloud tokens, and socket creds",
+        target_ids=_QUICK_CREDENTIALS,
+        group="Themed runs",
+    ),
+    BenchmarkProfile(
+        id="suid-classics",
+        name="SUID classics",
+        description="Core GTFOBins-style SUID binaries (subset of full SUID suite)",
+        target_ids=_SUID_CLASSICS,
+        group="Themed runs",
     ),
     BenchmarkProfile(
         id="all-sudo-problems",
         name="All sudo problems",
         description="Every classic and advanced sudo misconfiguration",
         target_ids=_target_ids(FAMILY_SUDO, FAMILY_SUDO_ADVANCED),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="classic-sudo",
         name="Classic sudo commands",
         description="NOPASSWD command and GTFOBins-style sudo targets",
         target_ids=_target_ids(FAMILY_SUDO),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="advanced-sudo",
         name="Advanced sudo configuration",
         description="Environment, group, script, and authentication sudo issues",
         target_ids=_target_ids(FAMILY_SUDO_ADVANCED),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="suid",
-        name="SUID binaries",
-        description="Unsafe and writable SUID executables",
+        name="SUID binaries (all)",
+        description="Every unsafe and writable SUID executable in the suite",
         target_ids=_target_ids(FAMILY_SUID),
-    ),
-    BenchmarkProfile(
-        id="sgid",
-        name="SGID binaries",
-        description="SGID binaries and group-owned secrets",
-        target_ids=_target_ids(FAMILY_SGID),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="writable",
         name="Writable files and loaders",
         description="Writable system files, root jobs, keys, and loader paths",
         target_ids=_target_ids(FAMILY_WRITABLE),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="capabilities",
         name="Linux capabilities",
         description="Dangerous file capabilities on interpreters",
         target_ids=_target_ids(FAMILY_CAPABILITIES),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="python-path",
         name="Python and PATH hijacks",
         description="Python import-path and executable PATH attacks",
         target_ids=_target_ids(FAMILY_PYTHON, FAMILY_PATH),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="credentials",
-        name="Credential leaks",
-        description="Keys, passwords, history, Ansible data, and logs",
+        name="Credential leaks (all)",
+        description="Every keys, passwords, history, and config leak lab",
         target_ids=_target_ids(FAMILY_CREDENTIALS),
-    ),
-    BenchmarkProfile(
-        id="nfs",
-        name="NFS detection",
-        description="Detect-only NFS no_root_squash target",
-        target_ids=_target_ids(FAMILY_NFS),
-    ),
-    BenchmarkProfile(
-        id="shell",
-        name="Shell restrictions",
-        description="Restricted shells and escape paths",
-        target_ids=_target_ids(FAMILY_SHELL),
-    ),
-    BenchmarkProfile(
-        id="doas",
-        name="Doas misconfigurations",
-        description="OpenDoas policy mistakes",
-        target_ids=_target_ids(FAMILY_DOAS),
+        group="Full families",
     ),
     BenchmarkProfile(
         id="services",
         name="Network services",
         description="Misconfigured daemons listening as root",
         target_ids=_target_ids(FAMILY_SERVICES),
+        group="Full families",
+    ),
+    BenchmarkProfile(
+        id="nfs",
+        name="NFS detection",
+        description="NFS export and writable-export detect-only labs",
+        target_ids=_target_ids(FAMILY_NFS),
+        group="Full families",
+    ),
+    BenchmarkProfile(
+        id="shell",
+        name="Shell restrictions",
+        description="Restricted shells and escape paths",
+        target_ids=_target_ids(FAMILY_SHELL),
+        group="Full families",
+    ),
+    BenchmarkProfile(
+        id="doas",
+        name="Doas misconfigurations",
+        description="OpenDoas policy mistakes",
+        target_ids=_target_ids(FAMILY_DOAS),
+        group="Full families",
+    ),
+    BenchmarkProfile(
+        id="sgid",
+        name="SGID binaries",
+        description="SGID binaries and group-owned secrets",
+        target_ids=_target_ids(FAMILY_SGID),
+        group="Full families",
     ),
 ]
 
@@ -3493,6 +3695,29 @@ def list_targets() -> List[Dict[str, Any]]:
 
 def list_profiles() -> List[Dict[str, Any]]:
     return [profile.to_dict() for profile in PROFILES]
+
+
+def get_profile(profile_id: str) -> BenchmarkProfile:
+    for profile in PROFILES:
+        if profile.id == profile_id:
+            return profile
+    raise KeyError(f"Unknown benchmark profile: {profile_id}")
+
+
+def get_default_target_ids() -> List[str]:
+    """Target ids pre-selected when the Benchmark modal opens."""
+    return list(get_profile(DEFAULT_TARGET_PROFILE_ID).target_ids)
+
+
+def resolve_profile_for_target_ids(target_ids: Optional[List[str]]) -> Optional[BenchmarkProfile]:
+    """Return a profile when the selection matches exactly (UI preset or custom)."""
+    if not target_ids:
+        return None
+    selected = set(target_ids)
+    for profile in PROFILES:
+        if set(profile.target_ids) == selected:
+            return profile
+    return None
 
 
 def list_families() -> List[str]:

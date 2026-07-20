@@ -23,10 +23,14 @@ from ramigpt.benchmark.targets import (
     BENCH_GROUP_ID,
     BENCH_PASSWORD,
     BENCH_USERNAME,
+    DEFAULT_TARGET_PROFILE_ID,
     DEFAULT_TIMEOUT_SECONDS,
     TARGETS,
     BenchmarkTarget,
+    get_default_target_ids,
+    get_profile,
     list_profiles,
+    resolve_profile_for_target_ids,
     resolve_targets,
 )
 from ramigpt.benchmark.batch_plan import (
@@ -140,6 +144,8 @@ class BenchmarkRun:
     model_key_name: str = ""
     profile_key: str = ""
     profile_label: str = ""
+    suite_profile_id: str = ""
+    suite_profile_name: str = ""
     model_registry: Optional[Dict[str, Any]] = None
     hardware: Optional[Dict[str, Any]] = None
     result_dir: Optional[str] = None
@@ -274,7 +280,8 @@ def get_status() -> Dict[str, Any]:
                 "username": BENCH_USERNAME,
                 "password": BENCH_PASSWORD,
                 "ports": [t.port for t in TARGETS],
-                "target_ids": [t.id for t in TARGETS],
+                "target_ids": get_default_target_ids(),
+                "default_profile_id": DEFAULT_TARGET_PROFILE_ID,
                 "tools": remote_cfg.get("tools") or default_tools(),
             },
             "ai_settings": {
@@ -970,6 +977,24 @@ def _worker(run: BenchmarkRun) -> None:
         _log(run, f"Benchmark finished (phase={run.phase})")
 
 
+def _resolve_suite_profile(
+    *,
+    target_ids: List[str],
+    suite_profile_id: Optional[str],
+) -> tuple[str, str]:
+    profile = None
+    if suite_profile_id:
+        try:
+            profile = get_profile(str(suite_profile_id).strip())
+        except KeyError:
+            profile = None
+    if profile is None:
+        profile = resolve_profile_for_target_ids(target_ids)
+    if profile is None:
+        return "", ""
+    return profile.id, profile.name
+
+
 def _make_run(
     *,
     mode: str,
@@ -980,6 +1005,8 @@ def _make_run(
     repetition: int,
     repetitions: int,
     suite_targets: List[BenchmarkTarget],
+    suite_profile_id: str = "",
+    suite_profile_name: str = "",
 ) -> BenchmarkRun:
     settings = get_settings()
     run = BenchmarkRun(
@@ -1002,6 +1029,8 @@ def _make_run(
         provider=settings.ai_provider,
         model=settings.active_model(),
         role_objective=settings.role_objective,
+        suite_profile_id=suite_profile_id,
+        suite_profile_name=suite_profile_name,
     )
     suite_dir = begin_benchmark_suite_logs(
         run.id,
@@ -1010,6 +1039,8 @@ def _make_run(
             "timeout_seconds": run.timeout_seconds,
             "tools": tools_cfg,
             "targets": [t.id for t in suite_targets],
+            "suite_profile_id": run.suite_profile_id,
+            "suite_profile_name": run.suite_profile_name,
             "batch_id": batch_id,
             "repetition": repetition,
             "repetitions": repetitions,
@@ -1033,6 +1064,7 @@ def start_run(
     role_plan: Optional[List[Any]] = None,
     role_repetitions: int = 1,
     target_ids: Optional[List[str]] = None,
+    suite_profile_id: Optional[str] = None,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
 
@@ -1070,6 +1102,12 @@ def start_run(
         raise
     if not suite_targets:
         raise ValueError("Select at least one benchmark target")
+
+    selected_ids = [t.id for t in suite_targets]
+    suite_sp_id, suite_sp_name = _resolve_suite_profile(
+        target_ids=selected_ids,
+        suite_profile_id=suite_profile_id,
+    )
 
     merged_remote = merge_remote_override(remote)
     if not merged_remote.get("host") or not merged_remote.get("username") or not merged_remote.get("password"):
@@ -1129,6 +1167,8 @@ def start_run(
             repetition=1,
             repetitions=total_runs,
             suite_targets=suite_targets,
+            suite_profile_id=suite_sp_id,
+            suite_profile_name=suite_sp_name,
         )
         first.provider = ai_cfg.ai_provider
         first.model = ai_cfg.active_model()
@@ -1136,18 +1176,18 @@ def start_run(
         _current = first
 
     enabled = enabled_tool_ids(tools_cfg)
-    selected_ids = [t.id for t in suite_targets]
     debug_logger.info(
         f"[benchmark] suite logs → {first.log_dir}/ "
         f"(run.log + per-target events under <target_id>/) "
         f"runs={total_runs} batch={batch_id[:8]} targets={selected_ids}"
     )
+    profile_note = f", profile={suite_sp_name}" if suite_sp_name else ""
     _log(
         first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
         f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
         f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
-        f"role={role_cfg.role_objective}, "
+        f"role={role_cfg.role_objective}{profile_note}, "
         f"run={1}/{total_runs} ({_format_slot_plan(first_slot)}), logs={first.log_dir})",
     )
     if total_runs > 1:
@@ -1198,6 +1238,8 @@ def start_run(
                             repetition=global_idx,
                             repetitions=total_runs,
                             suite_targets=suite_targets,
+                            suite_profile_id=suite_sp_id,
+                            suite_profile_name=suite_sp_name,
                         )
                         run.provider = ai_cfg.ai_provider
                         run.model = ai_cfg.active_model()

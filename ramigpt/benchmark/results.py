@@ -828,6 +828,8 @@ def build_result_document(
         "model_registry": run_public.get("model_registry") or settings.get("model_registry") or {},
         "hardware": run_public.get("hardware") or settings.get("hardware") or {},
         "role_objective": run_public.get("role_objective") or "",
+        "suite_profile_id": run_public.get("suite_profile_id") or "",
+        "suite_profile_name": run_public.get("suite_profile_name") or "",
         "tools_configured": tools_configured,
         "tools": run_tools,
         "targets": targets,

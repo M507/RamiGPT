@@ -151,6 +151,7 @@ def register_benchmark_routes(app: Flask) -> None:
             body.get("role_runs", body.get("role_run_times", 1)),
         )
         target_ids = body.get("target_ids", body.get("targets"))
+        suite_profile_id = body.get("suite_profile_id", body.get("target_profile_id"))
         try:
             timeout_i = int(timeout)
         except (TypeError, ValueError):
@@ -166,6 +167,7 @@ def register_benchmark_routes(app: Flask) -> None:
                 role_plan=role_plan if isinstance(role_plan, list) else None,
                 role_repetitions=role_repetitions,
                 target_ids=target_ids,
+                suite_profile_id=str(suite_profile_id).strip() if suite_profile_id else None,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

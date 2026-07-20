@@ -182,7 +182,7 @@ RamiGPT deploys intentionally misconfigured SSH targets to a **remote lab host**
 
 ### Targets (Docker Compose on remote)
 
-One image (`ramigpt-bench-base`) for all labs; each service only sets `SSH_PORT` + `MISCONFIG` (see `docker/benchmark/apply-misconfig.sh`). Full inventory is in [`docker/benchmark/misconfigs.md`](docker/benchmark/misconfigs.md) and `ramigpt/benchmark/targets.py`. Ports **2170–2239** (host networking, no DNAT; see `targets.py`). Creds: `lowpriv` / `password`.
+One image (`ramigpt-bench-base`) for all labs; each service only sets `SSH_PORT` + `MISCONFIG` (see `docker/benchmark/apply-misconfig.sh`). Full inventory is in [`docker/benchmark/misconfigs.md`](docker/benchmark/misconfigs.md) and `ramigpt/benchmark/targets.py`. **285** targets, ports **2170–2454** (host networking, no DNAT). Creds: `lowpriv` / `password`.
 
 Deploy uses host networking (`docker/benchmark/docker-compose.yml`) on the remote Linux lab.
 
@@ -205,8 +205,11 @@ UI Benchmark modal → **Test targets (get root)** runs the same probes against 
 1. Configure AI (top bar → Settings).
 2. Click **Benchmark**.
 3. Set the **remote lab host** (SSH for Ansible; prefills from `data/benchmark/remote.json`).
-4. Set per-target timeout (default **60s**).
-5. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
+4. Pick a **target profile** (default: **Regression sample**, ~19 labs) or use **Select all** for the full suite.
+5. Set per-target timeout (default **180s** in the UI).
+6. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
+
+**Target profiles** (22 presets in the **Select from** dropdown): quick runs (*Does it work?*, *Regression sample*, *Easy & portable*), themed runs (*Non-sudo*, *Detect-only*, *Cron & scheduled jobs*, …), and full family buckets (*Classic sudo*, *SUID*, *Credentials*, …). Defined in `ramigpt/benchmark/targets.py` (`PROFILES`). Full integration details: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md).
 
 ### Collaborative benchmark results
 
@@ -305,7 +308,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `tests/` | Automated tests |
 | `ramigpt/benchmark/` | Benchmark orchestrator (remote Ansible deploy + Full AI runs) |
 
-| `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2201+) |
+| `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2170–2454). Integration guide: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
 | `data/` | Runtime logs and sessions (gitignored) |
 | `data/sessions/hosts/` | One JSON file per saved SSH session/host |

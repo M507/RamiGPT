@@ -211,19 +211,41 @@
     const select = $("bench-target-profile");
     if (!select) return;
     knownProfiles = Array.isArray(profiles) ? profiles : [];
-    select.innerHTML = `
-      <option value="all">Select all</option>
-      <option value="none">None</option>
-      <optgroup label="Profiles">
-        ${knownProfiles
+    const groupOrder = ["Quick runs", "Themed runs", "Full families"];
+    const grouped = new Map();
+    knownProfiles.forEach((profile) => {
+      const label = profile.group || "Profiles";
+      if (!grouped.has(label)) grouped.set(label, []);
+      grouped.get(label).push(profile);
+    });
+    const orderedGroups = [
+      ...groupOrder.filter((label) => grouped.has(label)),
+      ...[...grouped.keys()].filter((label) => !groupOrder.includes(label)),
+    ];
+    const profileOptions = orderedGroups
+      .map(
+        (label) => `<optgroup label="${escapeHtml(label)}">
+        ${(grouped.get(label) || [])
           .map(
             (profile) =>
               `<option value="profile:${escapeHtml(profile.id)}">${escapeHtml(profile.name)} (${(profile.target_ids || []).length})</option>`
           )
           .join("")}
-      </optgroup>
+      </optgroup>`
+      )
+      .join("");
+    select.innerHTML = `
+      <option value="all">Select all (${knownTargets.length || "285"})</option>
+      <option value="none">None</option>
+      ${profileOptions}
       <option value="custom" hidden>Custom selection</option>`;
     syncTargetProfileSelector();
+  }
+
+  function selectedTargetProfileId() {
+    const select = $("bench-target-profile");
+    if (!select || !select.value.startsWith("profile:")) return "";
+    return select.value.slice("profile:".length);
   }
 
   function selectedPortsLabel() {
@@ -331,7 +353,10 @@
           ? `<div class="muted small">Model key: <code>${escapeHtml(run.model_key_name)}</code></div>`
           : "";
         const profileLabel = run.profile_label
-          ? `<div class="muted small">Profile: ${escapeHtml(run.profile_label)}</div>`
+          ? `<div class="muted small">Model profile: ${escapeHtml(run.profile_label)}</div>`
+          : "";
+        const suiteProfileLabel = run.suite_profile_name
+          ? `<div class="muted small">Target profile: ${escapeHtml(run.suite_profile_name)}</div>`
           : "";
         const hardware = run.hardware || {};
         const vramLabel =
@@ -363,6 +388,7 @@
           modelLabel +
           modelKeyLabel +
           profileLabel +
+          suiteProfileLabel +
           hardwareLabel +
           roleLabel +
           toolsLabel +
@@ -923,6 +949,7 @@
       role_repetitions: roleRepsEach(),
       tools: selectedTools(),
       target_ids: targetIds,
+      suite_profile_id: selectedTargetProfileId() || undefined,
       remote: {
         host: ($("bench-remote-host").value || "").trim(),
         port: parseInt($("bench-remote-port").value, 10) || 22,

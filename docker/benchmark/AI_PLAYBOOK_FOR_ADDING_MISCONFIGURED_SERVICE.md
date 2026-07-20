@@ -36,6 +36,7 @@ scripts/benchmark/checks/<id>.sh  →  prove root for real
 | `misconfigs.md` | Document the row under the right family |
 | `scripts/benchmark/checks/<id>.sh` | Probe that obtains root (or detect-only if `expects_root=False`) |
 | `catalog.tsv` | Regenerated: `python3 -m ramigpt.benchmark.verify --write-catalog` |
+| [`BENCHMARK_INTEGRATION.md`](BENCHMARK_INTEGRATION.md) | Update profiles/tests checklist if integration behavior changes |
 
 Shared constants:
 
@@ -43,7 +44,7 @@ Shared constants:
 |--|--|
 | User / pass | `lowpriv` / `password` |
 | Flag | `/root/flag.txt` → `FLAG{======RamiGPTi=====}` |
-| Port band | **2170–2299** (pick a free port from `targets.py`; avoid blocked holes on the lab NIC) |
+| Port band | **2170–2454** (pick a free port from `targets.py`; avoid blocked holes on the lab NIC) |
 
 ---
 
@@ -240,6 +241,7 @@ assert_root_output "${out}"
 - [ ] `misconfigs.md` updated  
 - [ ] `scripts/benchmark/checks/<id>.sh` exists and is catalogued  
 - [ ] `./scripts/benchmark/verify-misconfigs.sh <host> <id>` → PASS (or FLAG if detect-only)  
+- [ ] `python3 -m pytest tests/test_benchmark_registry.py tests/test_benchmark_targets.py -q` passes  
 - [ ] Full suite verify still exit 0  
 
 ---
@@ -247,6 +249,7 @@ assert_root_output "${out}"
 ## Related docs
 
 - Full LPE catalog + TODO backlog: [`misconfigs.md`](misconfigs.md)
+- App ↔ docker ↔ verify ↔ profiles ↔ tests: [`BENCHMARK_INTEGRATION.md`](BENCHMARK_INTEGRATION.md)
 - Suite credentials / ports: [`../../benchmark.md`](../../benchmark.md)
 - Standalone verify: `scripts/benchmark/verify-misconfigs.sh`, `python3 -m ramigpt.benchmark.verify`
 
