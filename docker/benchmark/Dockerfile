@@ -29,6 +29,13 @@ RUN apt-get update -y && \
         libc6-dev \
         perl \
         ruby \
+        logrotate \
+        git \
+        at \
+        nodejs \
+        npm \
+        python3-pip \
+        screen \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash lowpriv && \

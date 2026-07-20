@@ -177,6 +177,35 @@ Profile: `MISCONFIG=nfs-exports` — plants `/etc/exports` with `no_root_squash`
 
 ---
 
+## Mid tier (shipped)
+
+| ID | Port | Primitive | Implementation | How this one differs |
+|----|------|-----------|----------------|----------------------|
+| `suid-path-hijack` | 2224 | `system()` + PATH | **mid** | Custom SUID C binary runs relative `benchhelper` |
+| `suid-writable-exec` | 2225 | `execl()` helper | **mid** | Custom SUID execs world-writable `/opt/bench/helper` |
+| `wildcard-cron` | 2226 | `wildcard/*` | **mid** | Root cron runs executables in lowpriv-owned dir |
+| `cred-shadow-read` | 2227 | `/etc/shadow` | **mid** | World-readable shadow + su with known root password |
+| `sgid-secret` | 2231 | `benchsecret` | **mid** | SGID cat reads group-owned flag copy |
+| `sudo-runas` | 2234 | `(deploy)` | **mid** | sudo as deploy → credentials → su root |
+| `writable-ld-so-conf` | 2235 | `ld.so.conf.d` | **mid** | Writable conf.d path + root ldconfig poller |
+| `sudo-wildcard-tar` | 2236 | `tar *` | **mid** | NOPASSWD backup.sh + tar checkpoint wildcard |
+| `logrotate-writable` | 2240 | `logrotate hook` | **mid** | World-writable postrotate script |
+| `cred-core-dump` | 2241 | `core dump` | **mid** | Readable fake core with root password |
+| `suid-dlopen` | 2242 | `dlopen` | **mid** | Custom SUID loads `.so` from writable dir |
+| `writable-motd` | 2243 | `update-motd.d` | **mid** | Writable motd hook + root poller |
+| `sudo-git-hook` | 2244 | `git hooks` | **mid** | NOPASSWD git commit runs pre-commit hook |
+| `at-allow` | 2245 | `at.allow` + `atjob` | **mid** | Writable at job executed by root via `at` |
+| `ld-preload-script` | 2246 | `rootwrap.sh` | **mid** | Writable root script sets LD_PRELOAD |
+| `screen-root-socket` | 2247 | `screen multiuser` | **mid** | Root screen session with multiuser ACL |
+| `sudo-pip` | 2248 | `pip3` | **mid** | NOPASSWD pip3 → setup.py install hook as root |
+| `writable-cron-allow` | 2249 | `cron.allow` | **mid** | Writable cron.allow + root cronjob hook |
+| `sudo-gem` | 2250 | `gem` | **mid** | NOPASSWD gem install → extconf.rb runs as root |
+| `rbash-escape` | 2251 | `/bin/rbash` | **mid** | Restricted shell + root poller on escape dir |
+| `sudo-npm` | 2252 | `npm` | **mid** | NOPASSWD npm → preinstall script as root |
+| `writable-init-d` | 2253 | `init.d` | **mid** | World-writable init script + root poller |
+
+---
+
 ## Privilege escalation methods (pentester reference)
 
 Field notes for Linux LPE: common misconfigs, how they show up in real environments, and how operators typically abuse them. This section documents **methods**; the [LPE catalog & backlog](#lpe-catalog--backlog) maps them to suite status (COVERED / PARTIAL / TODO).
@@ -377,9 +406,9 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 | NOPASSWD GTFOBins (editors, interpreters, transfer, spawn) | **PARTIAL** | **easy** | `sudo-vim/…/sed/install/mv/tee/cp/chmod/dd` — more binaries = `sudo:…` reuse |
 | `NOPASSWD: ALL` / `/bin/bash` / `sudo -i` | **COVERED** | **easy** | `sudo-all` — One sudoers drop-in |
 | Group-based sudo (`%group`) | **COVERED** | **easy** | `sudo-group` — Add group + matching sudoers line |
-| Run-as other user / `su` impersonation chains | **TODO** | **mid** | Second user + weaker secondary misconfig |
+| Run-as other user / `su` impersonation chains | **COVERED** | **mid** | `sudo-runas` — NOPASSWD as deploy + root creds |
 | Sudo on writable script/binary | **COVERED** | **easy** | `sudo-writable-script` — NOPASSWD path + `chmod 777` |
-| Sudo + shell wildcards | **TODO** | **mid** | Scripted wildcard victim + verify via crafted filenames |
+| Sudo + shell wildcards | **COVERED** | **mid** | `sudo-wildcard-tar` — tar checkpoint in attacker dir |
 | `Defaults env_keep += LD_PRELOAD` | **COVERED** | **easy** | `sudo-ld-preload` |
 | `env_keep` other dangerous vars (`LD_LIBRARY_PATH`, `PYTHONPATH`, `PERL5LIB`, `RUBYLIB`, `BASH_ENV`, `ENV`, `SHELLOPTS`, `PS4`, `CVE-2019-14287` `-u#-1`) | **PARTIAL** | **easy**–**mid** | `sudo-pythonpath`, `sudo-ld-library-path`, `sudo-perl5lib`, `sudo-bash-env`, `sudo-rubylib` shipped; SHELLOPTS/PS4 still TODO |
 | Sudo version bugs (e.g. Baron Samedit / CVE-2021-3156) | **TODO** | **hard** | Pin vulnerable sudo build; noisy / brittle |
@@ -392,10 +421,10 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 |--------|--------|----------------|-----------------|
 | SUID GTFOBins | **PARTIAL** | **easy** | `suid-find/python/chmod/cp/dd/gawk/env` — `chmod u+s` |
 | Writable SUID binary | **COVERED** | **easy** | `suid-writable` — SUID + world-writable copy of helper |
-| Relative `system()` + PATH hijack | **TODO** | **mid** | Tiny C SUID in image (`gcc` already present) |
-| Absolute `exec*` of writable helper | **TODO** | **mid** | Same: custom SUID |
-| SGID binaries / shared-group abuse | **TODO** | **mid** | Group + SGID binary + group-owned secret → root |
-| SUID shared-object load from writable dir | **TODO** | **mid** | Custom binary + writable load path |
+| Relative `system()` + PATH hijack | **COVERED** | **mid** | `suid-path-hijack` — custom SUID + gcc at start |
+| Absolute `exec*` of writable helper | **COVERED** | **mid** | `suid-writable-exec` |
+| SGID binaries / shared-group abuse | **COVERED** | **mid** | `sgid-secret` |
+| SUID shared-object load from writable dir | **COVERED** | **mid** | `suid-dlopen` |
 | Known SUID CVEs in image (PwnKit `pkexec`, etc.) | **TODO** | **hard** | Vulnerable package pin / special build |
 
 ### Capabilities
@@ -404,8 +433,8 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 |--------|--------|----------------|-----------------|
 | `cap_setuid` / `cap_setgid` | **COVERED** | **easy** | `cap-python` + `cap_add: [SETFCAP]` |
 | `cap_dac_override` / `cap_dac_read_search` | **COVERED** | **easy** | `cap-dac-read`, `cap-dac-override` |
-| `cap_sys_admin` | **TODO** | **mid** | Needs broad `cap_add` / often `privileged`-adjacent |
-| `cap_sys_ptrace` | **TODO** | **mid** | Caps + target process + inject story |
+| `cap_sys_admin` | **TODO** | **mid**–**hard** | Mount/chroot abuse needs `privileged` or host coupling in Docker |
+| `cap_sys_ptrace` | **TODO** | **mid** | File cap / pam_cap blocked for lowpriv SSH sessions in Docker |
 | `cap_sys_module` | **TODO** | **hard** | Kernel modules / privileged |
 | `cap_net_raw` / `cap_net_admin` / `cap_net_bind_service` | **TODO** | **mid** | Caps easy; meaningful root path may need chain |
 | `cap_chown` / `cap_fowner` / `cap_fsetid` | **COVERED** | **easy** | `cap-chown`, `cap-fowner`, `cap-fsetid` |
@@ -421,15 +450,15 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 | Writable `/etc/exports` (add `no_root_squash`) | **COVERED** | **easy** | `writable-exports` (detect-only); live NFS separate (**hard**) |
 | Writable cron job script invoked as root | **COVERED** | **easy** | `writable-crontab` |
 | Writable `/etc/crontab`, `cron.d`, spool, anacrontab | **TODO** | **mid** | Cron security skips insecure modes — design carefully |
-| Writable `cron.allow` / `at.allow` / deny files | **TODO** | **mid** | Policy files + scheduler |
-| Writable `/etc/ld.so.conf` / `ld.so.conf.d/*` | **TODO** | **mid** | Plant `.so` + force root exec |
+| Writable `cron.allow` / `at.allow` / deny files | **COVERED** | **mid** | `at-allow`, `writable-cron-allow` |
+| Writable `/etc/ld.so.conf` / `ld.so.conf.d/*` | **COVERED** | **mid** | `writable-ld-so-conf` |
 | Writable `/lib`, `/usr/lib`, `/usr/local/lib` | **COVERED** | **easy** | `writable-lib` — `chmod 777` dir + root importer/poller |
-| Writable `/etc/init.d` / systemd unit / timer | **TODO** | **mid**–**hard** | init.d+poller = mid; real systemd = hard in Docker |
+| Writable `/etc/init.d` / systemd unit / timer | **PARTIAL** | **mid**–**hard** | `writable-init-d` shipped; real systemd = hard in Docker |
 | Writable Apache/Nginx/SSH config | **TODO** | **mid** | Service packages + reload |
 | Writable root crontab path referenced inside readable cron | **COVERED** | **easy** | `writable-cron-ref` — `/etc/crontab` → writable script |
 | World-writable `/root` or home of privileged user | **COVERED** | **easy** | `writable-root-ssh` — `chmod` + SSH key / login file |
 | Writable `/etc/profile`, `bashrc`, `ld.so.preload` | **COVERED** | **easy**–**mid** | `writable-ld-so-preload`, `writable-profile`, `writable-bashrc` |
-| Writable `/etc/update-motd.d` / PAM configs | **TODO** | **mid** | Trigger on SSH login |
+| Writable `/etc/update-motd.d` / PAM configs | **PARTIAL** | **mid** | `writable-motd` shipped; PAM still TODO |
 
 ### PATH / library / interpreter hijacking
 
@@ -439,19 +468,19 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 | Writable cwd early on `sys.path` for root python job | **COVERED** | **easy** | `python-cwd` — Cron/poller `cd` + import |
 | `PYTHONPATH` / `PERL5LIB` / `RUBYLIB` kept via sudo | **COVERED** | **easy** | `sudo-pythonpath`, `sudo-perl5lib`, `sudo-rubylib` |
 | Root cron/script uses relative command + writable PATH | **COVERED** | **easy** | `path-hijack` — Poller PATH + planted binary |
-| `LD_PRELOAD` / `LD_LIBRARY_PATH` via root script env | **TODO** | **mid** | Root wrapper script sets env |
+| `LD_PRELOAD` / `LD_LIBRARY_PATH` via root script env | **COVERED** | **mid** | `ld-preload-script` |
 | Ruby/Node/PHP include path hijack | **TODO** | **mid** | Extra runtimes in image |
-| `sudo git` / hooks, `sudo pip install`, plugin dirs | **TODO** | **mid** | Packages + hook/plant path |
+| `sudo git` / hooks, `sudo pip install`, plugin dirs | **PARTIAL** | **mid** | `sudo-git-hook`, `sudo-npm`, `sudo-pip`, `sudo-gem` shipped |
 
 ### Cron / timers / at / anacron
 
 | Vector | Status | Implementation | Service / notes |
 |--------|--------|----------------|-----------------|
 | Writable script run by root cron | **COVERED** | **easy** | `writable-crontab` |
-| Wildcard cron + attacker-controlled filenames | **TODO** | **mid** | Dir owned by lowpriv + root `*` job |
+| Wildcard cron + attacker-controlled filenames | **COVERED** | **mid** | `wildcard-cron` |
 | systemd timers with writable `ExecStart` | **TODO** | **hard** | systemd-in-Docker cost |
-| `at` job abuse via allow files | **TODO** | **mid** | `at`/`atd` + allow file |
-| Logrotate script writable (common CTF) | **TODO** | **mid** | logrotate + force or wait |
+| `at` job abuse via allow files | **COVERED** | **mid** | `at-allow` — writable job + root `at` poller |
+| Logrotate script writable (common CTF) | **COVERED** | **mid** | `logrotate-writable` |
 
 ### NFS / shares / mounts
 
@@ -485,9 +514,9 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 | MySQL/Postgres root sock as lowpriv | **TODO** | **mid** | DB package + UDF/`INTO OUTFILE` path |
 | Writable systemd credentials / sealed secrets | **TODO** | **hard** | systemd features |
 | Jenkins/GitLab runner token → host shell | **TODO** | **hard** | Heavy stack |
-| Readable `/etc/shadow` (mode bug) without write | **TODO** | **mid** | Crack may be slow; use tiny known hash |
+| Readable `/etc/shadow` (mode bug) without write | **COVERED** | **mid** | `cred-shadow-read` — `chmod 644` + su |
 | Cloud metadata SSRF from app → IAM then host | **TODO** | **hard** | Multi-service / mock metadata |
-| Hibernate/core dumps with secrets | **TODO** | **mid** | Plant dump file |
+| Hibernate/core dumps with secrets | **COVERED** | **mid** | `cred-core-dump` |
 
 ### Kernel / D-Bus / polkit / session
 
@@ -506,7 +535,7 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 |--------|--------|----------------|-----------------|
 | Root-owned TCP service with RCE / file write | **TODO** | **mid** | Tiny Python/C daemon as root |
 | Writable webroot + root-run CGI/php | **TODO** | **mid** | php-cgi / busybox httpd |
-| Redis/memcached without auth unbound | **TODO** | **mid** | Package + bind + crontab write |
+| Redis/memcached without auth unbound | **TODO** | **mid** | Redis 8 RDB write breaks cron.d vector in Docker; revisit with pinned redis |
 | Root-owned SNMP/custom UDP agent with injection | **TODO** | **mid** | Custom agent |
 | Jenkins script console / unmanaged agent as root | **TODO** | **hard** | Full Jenkins |
 
@@ -514,8 +543,8 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 
 | Vector | Status | Implementation | Service / notes |
 |--------|--------|----------------|-----------------|
-| Restricted shell escape (rbash) into full LPE path | **TODO** | **mid** | rbash + nested easy vector |
-| Screen/tmux socket attached as other user | **TODO** | **mid** | Shared socket perms |
+| Restricted shell escape (rbash) into full LPE path | **COVERED** | **mid** | `rbash-escape` — python write + root poller |
+| Screen/tmux socket attached as other user | **COVERED** | **mid** | `screen-root-socket` |
 | Writable `/dev/shm` + root cron race | **TODO** | **mid** | Timing; flaky verify |
 | Open `/proc/*/mem` or fd leaks (+ ptrace) | **TODO** | **hard** | Kernel/ptrace coupling |
 | Ansible/Puppet/agent dropped secrets world-readable | **COVERED** | **easy** | `cred-ansible` — Plant files |
@@ -528,7 +557,7 @@ Prefer unmarked **TODO** rows with **easy** (then **mid**) when growing the suit
 | World-writable `/tmp` sticky-bit races vs root jobs | **TODO** | **mid** | Race; flaky CI |
 | `sudoedit` / `sudo -e` symlink race | **TODO** | **hard** | Old sudo + race |
 | Writable `/etc/rc.local` or systemd generators | **TODO** | **mid**–**hard** | Boot trigger awkward in container |
-| `git` hooks executed as root via sudo git | **TODO** | **mid** | |
+| `git` hooks executed as root via sudo git | **COVERED** | **mid** | `sudo-git-hook` |
 | Composer/npm/yarn scripts via sudo | **TODO** | **mid** | |
 | Backup tools overwrite/exclude tricks | **TODO** | **mid** | |
 | `tmux`/`screen` running as root with shared socket | **TODO** | **mid** | |
