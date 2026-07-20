@@ -370,12 +370,23 @@ def _finish_warmup_failed_run(run: BenchmarkRun, warm: ModelWarmupResult) -> Non
         item.status = "skipped"
         item.message = "Skipped — model warmup failed"
         item.finished_at = run.finished_at
+    try:
+        _attach_run_model_identity(run)
+    except Exception:  # noqa: BLE001
+        pass
+    result_settings = {
+        "provider": run.provider,
+        "model": run.model,
+        "model_key_name": run.model_key_name,
+        "model_registry": run.model_registry,
+        "hardware": run.hardware,
+    }
     with _lock:
         _history.append(
             deepcopy(
                 build_result_document(
                     run.to_public_dict(),
-                    settings={"provider": run.provider, "model": run.model},
+                    settings=result_settings,
                 )
             )
         )
@@ -391,6 +402,17 @@ def _finish_warmup_failed_run(run: BenchmarkRun, warm: ModelWarmupResult) -> Non
             )
         except Exception:  # noqa: BLE001
             pass
+    try:
+        result_path = write_benchmark_result(
+            run.to_public_dict(),
+            settings=result_settings,
+            batch_dir=Path(run_batch_dir) if run_batch_dir else None,
+        )
+        run.result_dir = str(result_path.parent)
+        _log(run, f"Results written (warmup failed) → {result_path}")
+    except Exception as exc:  # noqa: BLE001
+        debug_logger.exception("[benchmark] failed to write warmup-failure results")
+        _log(run, f"Failed to write warmup-failure results: {exc}")
 
 
 def _ensure_benchmark_group() -> None:

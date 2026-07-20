@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from ramigpt.paths import ENV_PATH
 
 _REMOTE_AI_PROVIDERS = frozenset({"openwebui"})
+# Exported alias for registry / results normalization.
+REMOTE_AI_PROVIDERS = _REMOTE_AI_PROVIDERS
 
 _HARDWARE_ENV_KEYS = {
     "gpu_name": "BENCHMARK_GPU_NAME",
@@ -114,6 +116,23 @@ def openwebui_hardware_profile() -> Dict[str, Any]:
     (no host/IP) so contributors merge on model + provider, not private URLs.
     """
     return dict(OPENWEBUI_HARDWARE_PROFILE)
+
+
+def normalize_stored_hardware(
+    provider: str,
+    hardware: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Normalize hardware on ingested benchmark sheets.
+
+    Open WebUI runs always use the collaborative proxy profile, including
+    legacy sheets that still carry local ``BENCHMARK_GPU_*`` values.
+    """
+    name = (provider or "").strip().lower()
+    if name in _REMOTE_AI_PROVIDERS:
+        if name == "openwebui":
+            return openwebui_hardware_profile()
+    return dict(hardware) if isinstance(hardware, dict) else {}
 
 
 def resolve_benchmark_hardware(

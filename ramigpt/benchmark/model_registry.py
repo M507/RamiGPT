@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ramigpt.benchmark.hardware import REMOTE_AI_PROVIDERS
 from ramigpt.ai.providers.ollama_provider import (
     fetch_ollama_show,
     fetch_ollama_tag_info,
@@ -115,8 +116,6 @@ def build_provider_fingerprint(settings: Settings) -> Dict[str, Any]:
     }
     if provider == "openai":
         fp["base_url"] = settings.openai_base_url or ""
-    elif provider == "openwebui":
-        fp["base_url"] = settings.openwebui_base_url or ""
     elif provider == "cursor":
         fp["base_url"] = settings.cursor_base_url or ""
     return fp
@@ -141,6 +140,9 @@ def fingerprint_to_key_name(fingerprint: Dict[str, Any]) -> str:
         elif fingerprint.get("parameters"):
             parts.append(_short_hash({"parameters": fingerprint.get("parameters")}))
         return "-".join(part for part in parts if part and part != "unknown")
+
+    if fingerprint.get("provider") in REMOTE_AI_PROVIDERS:
+        return f"{provider}-{model}"
 
     base_url = str(fingerprint.get("base_url") or "").strip()
     suffix = _short_hash({"base_url": base_url}) if base_url else ""

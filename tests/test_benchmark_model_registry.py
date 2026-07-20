@@ -50,6 +50,20 @@ class BenchmarkModelRegistryTests(unittest.TestCase):
         fp_b = {**base, "parameters": {"num_ctx": "8192"}}
         self.assertNotEqual(fingerprint_to_key_name(fp_a), fingerprint_to_key_name(fp_b))
 
+    def test_fingerprint_to_key_name_openwebui_ignores_base_url(self):
+        fp_a = {
+            "provider": "openwebui",
+            "model": "qwen3:14b",
+            "base_url": "http://10.10.10.82:8080",
+        }
+        fp_b = {
+            "provider": "openwebui",
+            "model": "qwen3:14b",
+            "base_url": "http://other-host:8080",
+        }
+        self.assertEqual(fingerprint_to_key_name(fp_a), "openwebui-qwen3-14b")
+        self.assertEqual(fingerprint_to_key_name(fp_a), fingerprint_to_key_name(fp_b))
+
     @patch("ramigpt.benchmark.model_registry.fetch_ollama_tag_info")
     @patch("ramigpt.benchmark.model_registry.fetch_ollama_show")
     def test_ensure_model_registry_entry_writes_json(self, mock_show, mock_tag):

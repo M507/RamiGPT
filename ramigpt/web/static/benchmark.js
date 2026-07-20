@@ -573,12 +573,17 @@
         const vramLabel =
           hardware.gpu_vram != null && hardware.gpu_vram !== ""
             ? `${/^\d+$/.test(String(hardware.gpu_vram)) ? `${hardware.gpu_vram} MiB` : hardware.gpu_vram}`
-            : "?";
+            : "";
+        const hardwareBits = [];
+        if (hardware.gpu_name) hardwareBits.push(String(hardware.gpu_name));
+        if (vramLabel) hardwareBits.push(`VRAM ${vramLabel}`);
+        if (hardware.gpu_driver && !hardwareBits.includes(String(hardware.gpu_driver))) {
+          hardwareBits.push(String(hardware.gpu_driver));
+        }
+        if (hardware.cuda_version) hardwareBits.push(`CUDA ${hardware.cuda_version}`);
         const hardwareLabel =
-          !run.profile_label && hardware.gpu_name
-            ? `<div class="muted small">GPU: ${escapeHtml(hardware.gpu_name)} · VRAM ${escapeHtml(vramLabel)}${
-                hardware.cuda_version ? ` · CUDA ${escapeHtml(hardware.cuda_version)}` : ""
-              }</div>`
+          !run.profile_label && hardwareBits.length
+            ? `<div class="muted small">Hardware: ${escapeHtml(hardwareBits.join(" · "))}</div>`
             : "";
         const roleLabel = run.role_objective
           ? `<div class="muted small">Role: ${escapeHtml(run.role_objective)}</div>`

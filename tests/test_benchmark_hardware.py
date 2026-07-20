@@ -11,6 +11,7 @@ from ramigpt.benchmark.hardware import (
     hardware_key,
     hardware_label,
     load_benchmark_hardware,
+    normalize_stored_hardware,
     openwebui_hardware_profile,
     resolve_benchmark_hardware,
 )
@@ -114,6 +115,17 @@ class BenchmarkHardwareTests(unittest.TestCase):
         profile = resolve_benchmark_hardware(provider="ollama", reload_env=False)
         self.assertEqual(profile["gpu_name"], "NVIDIA GeForce RTX 4070")
         self.assertEqual(profile["gpu_vram"], 12282)
+
+    def test_normalize_stored_hardware_for_openwebui(self):
+        legacy = {
+            "gpu_name": "NVIDIA GeForce RTX 4070",
+            "gpu_vram": 12282,
+            "cuda_version": "13.1",
+        }
+        profile = normalize_stored_hardware("openwebui", legacy)
+        self.assertEqual(profile["gpu_name"], "Online AI Service")
+        self.assertEqual(profile["gpu_driver"], "Open WebUI proxy")
+        self.assertNotIn("gpu_vram", profile)
 
 
 if __name__ == "__main__":

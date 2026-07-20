@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from ramigpt.benchmark.hardware import hardware_identity, hardware_key, hardware_label
+from ramigpt.benchmark.hardware import hardware_identity, hardware_key, hardware_label, normalize_stored_hardware
 from ramigpt.benchmark.profile import (
     aggregate_model_key,
     collaborative_profile_key,
@@ -436,7 +436,10 @@ def _extract_observations(
     model = str(doc.get("model") or "")
     model_key_name = str(doc.get("model_key_name") or "")
     role = str(doc.get("role_objective") or "")
-    hardware = doc.get("hardware") if isinstance(doc.get("hardware"), dict) else {}
+    hardware = normalize_stored_hardware(
+        provider,
+        doc.get("hardware") if isinstance(doc.get("hardware"), dict) else {},
+    )
     run_tools = _tools_from_doc(doc)
     finished_at = doc.get("finished_at")
     result_path = _relative_result_path(path)
@@ -730,7 +733,10 @@ def build_master_document(
         for target in doc.get("targets") or []:
             if isinstance(target, dict) and target.get("target_id"):
                 targets.add(str(target["target_id"]))
-        hardware = doc.get("hardware") if isinstance(doc.get("hardware"), dict) else {}
+        hardware = normalize_stored_hardware(
+            provider,
+            doc.get("hardware") if isinstance(doc.get("hardware"), dict) else {},
+        )
         if hardware:
             hw_key = hardware_key(hardware)
             hw_identity = hardware_identity(hardware)
