@@ -6,7 +6,7 @@ from typing import List
 
 from openai import OpenAI
 
-from ramigpt.ai.providers.compat import ensure_suffix
+from ramigpt.ai.providers.compat import ensure_suffix, openwebui_openai_base_url
 from ramigpt.ai.providers.cursor_provider import DEFAULT_BASE_URL, list_cursor_model_details
 from ramigpt.ai.providers.ollama_provider import list_ollama_models
 from ramigpt.config import Settings, get_settings
@@ -79,6 +79,5 @@ def list_models_for_provider(provider: str, settings: Settings | None = None) ->
     if not cfg.openwebui_base_url:
         raise ValueError("Open WebUI base URL is not configured")
     api_key = cfg.openwebui_api_key or cfg.openai_api_key or "sk-placeholder"
-    base_url = ensure_suffix(cfg.openwebui_base_url, "/api")
-    base_url = ensure_suffix(base_url, "/v1")
+    base_url = openwebui_openai_base_url(cfg.openwebui_base_url)
     return list_openai_compat_models(api_key=api_key, base_url=base_url)

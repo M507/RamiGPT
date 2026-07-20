@@ -43,6 +43,16 @@ def make_openai_compat_client(
     )
 
 
+def openwebui_openai_base_url(base_url: str) -> str:
+    """Return Open WebUI's OpenAI-compatible API root (``…/api/v1``)."""
+    url = (base_url or "").strip().rstrip("/")
+    if url.endswith("/api/v1"):
+        return url
+    if url.endswith("/api"):
+        return f"{url}/v1"
+    return f"{url}/api/v1"
+
+
 def ensure_suffix(base_url: str, suffix: str) -> str:
     """Ensure base_url ends with ``suffix`` (e.g. ``/v1`` or ``/api``)."""
     url = (base_url or "").rstrip("/")

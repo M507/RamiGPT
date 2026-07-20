@@ -7,6 +7,9 @@
 
     let preferredOllamaModel = "";
     let ollamaModelsFetchSeq = 0;
+    let preferredOpenWebUIModel = "";
+    let openWebUIModelsFetchSeq = 0;
+    let openWebUIApiKeySet = false;
     let preferredCursorModel = "";
     let cursorModelsFetchSeq = 0;
     let cursorApiKeySet = false;
@@ -29,6 +32,13 @@
         el.className = "settings-hint" + (isError ? " error" : "");
     }
 
+    function setOpenWebUIHint(message, isError) {
+        const el = $("settings-openwebui-models-hint");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "settings-hint" + (isError ? " error" : "");
+    }
+
     function setCursorHint(message, isError) {
         const el = $("settings-cursor-models-hint");
         if (!el) return;
@@ -44,6 +54,9 @@
         });
         if (provider === "ollama") {
             refreshOllamaModels();
+        }
+        if (provider === "openwebui") {
+            refreshOpenWebUIModels();
         }
         if (provider === "cursor") {
             refreshCursorModels();
@@ -85,6 +98,43 @@
         select.disabled = false;
         select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
         preferredOllamaModel = select.value;
+    }
+
+    function populateOpenWebUIModelSelect(models, selectedModel) {
+        const select = $("settings-openwebui-model");
+        if (!select) return;
+
+        const preferred = (selectedModel || preferredOpenWebUIModel || "").trim();
+        const list = Array.isArray(models) ? models.slice() : [];
+        select.innerHTML = "";
+
+        if (!list.length) {
+            const opt = document.createElement("option");
+            opt.value = preferred;
+            opt.textContent = preferred
+                ? preferred + " (host unreachable — keeping saved model)"
+                : "No models available";
+            select.appendChild(opt);
+            select.value = preferred;
+            select.disabled = !preferred;
+            return;
+        }
+
+        if (preferred && list.indexOf(preferred) === -1) {
+            list.unshift(preferred);
+        }
+
+        list.forEach((name) => {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name === preferred && models.indexOf(name) === -1
+                ? name + " (not on host)"
+                : name;
+            select.appendChild(opt);
+        });
+        select.disabled = false;
+        select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
+        preferredOpenWebUIModel = select.value;
     }
 
     function populateCursorModelSelect(models, selectedModel, details) {
@@ -204,6 +254,66 @@
         }
     }
 
+    async function refreshOpenWebUIModels() {
+        const select = $("settings-openwebui-model");
+        const refreshBtn = $("settings-openwebui-refresh-models");
+        const apiKeyInput = $("settings-openwebui-api-key");
+        const baseUrlInput = $("settings-openwebui-base-url");
+        if (!select) return;
+
+        const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
+        const baseUrl = baseUrlInput ? baseUrlInput.value.trim() : "";
+        const seq = ++openWebUIModelsFetchSeq;
+        const keep = (select.value || preferredOpenWebUIModel || "").trim();
+        preferredOpenWebUIModel = keep;
+
+        if ((!apiKey || apiKey.includes(MASK_HINT)) && !openWebUIApiKeySet) {
+            populateOpenWebUIModelSelect([], keep);
+            setOpenWebUIHint("Enter an API key (or Save one) to load models from Open WebUI.", false);
+            return;
+        }
+
+        select.disabled = true;
+        if (refreshBtn) refreshBtn.disabled = true;
+        setOpenWebUIHint("Loading models from Open WebUI…", false);
+
+        try {
+            const response = await fetch("/api/settings/openwebui/models", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ openwebui_api_key: apiKey, openwebui_base_url: baseUrl }),
+            });
+            const data = await response.json();
+            if (seq !== openWebUIModelsFetchSeq) return;
+
+            if (!response.ok || !data.success) {
+                populateOpenWebUIModelSelect([], keep);
+                setOpenWebUIHint(
+                    data.error || "Could not list models — keeping the saved model.",
+                    true
+                );
+                return;
+            }
+
+            populateOpenWebUIModelSelect(data.models || [], keep);
+            const count = (data.models || []).length;
+            setOpenWebUIHint(
+                count
+                    ? "Loaded " + count + " model" + (count === 1 ? "" : "s") + " from " + (data.base_url || "Open WebUI") + "."
+                    : "Open WebUI responded but reported no models.",
+                false
+            );
+        } catch (err) {
+            if (seq !== openWebUIModelsFetchSeq) return;
+            populateOpenWebUIModelSelect([], keep);
+            setOpenWebUIHint(err.message || "Failed to load Open WebUI models.", true);
+        } finally {
+            if (seq === openWebUIModelsFetchSeq && refreshBtn) {
+                refreshBtn.disabled = false;
+            }
+        }
+    }
+
     async function refreshOllamaModels() {
         const select = $("settings-ollama-model");
         const refreshBtn = $("settings-ollama-refresh-models");
@@ -277,7 +387,12 @@
             : "ollama";
 
         $("settings-openwebui-base-url").value = settings.openwebui_base_url || "";
-        $("settings-openwebui-model").value = settings.openwebui_model || "";
+        openWebUIApiKeySet = !!settings.openwebui_api_key_set;
+        preferredOpenWebUIModel = settings.openwebui_model || "";
+        populateOpenWebUIModelSelect(
+            preferredOpenWebUIModel ? [preferredOpenWebUIModel] : [],
+            preferredOpenWebUIModel
+        );
         $("settings-openwebui-api-key").value = "";
         $("settings-openwebui-api-key").placeholder = settings.openwebui_api_key_set
             ? "•••••••• (leave blank to keep)"
@@ -302,6 +417,7 @@
 
     function collectFormPayload(persist) {
         const modelSelect = $("settings-ollama-model");
+        const openWebUIModelSelect = $("settings-openwebui-model");
         const cursorModelSelect = $("settings-cursor-model");
         const payload = {
             ai_provider: $("settings-provider").value,
@@ -310,7 +426,7 @@
             ollama_base_url: $("settings-ollama-base-url").value.trim(),
             ollama_model: (modelSelect && modelSelect.value || preferredOllamaModel || "").trim(),
             openwebui_base_url: $("settings-openwebui-base-url").value.trim(),
-            openwebui_model: $("settings-openwebui-model").value.trim(),
+            openwebui_model: (openWebUIModelSelect && openWebUIModelSelect.value || preferredOpenWebUIModel || "").trim(),
             cursor_base_url: $("settings-cursor-base-url").value.trim(),
             cursor_model: (cursorModelSelect && cursorModelSelect.value || preferredCursorModel || "").trim(),
             openai_max_num_of_reqs: parseInt($("settings-max-reqs").value, 10) || 10,
@@ -733,6 +849,50 @@
         if (modelSelect) {
             modelSelect.addEventListener("change", function () {
                 preferredOllamaModel = modelSelect.value;
+            });
+        }
+
+        const openWebUIBase = $("settings-openwebui-base-url");
+        if (openWebUIBase) {
+            openWebUIBase.addEventListener("change", function () {
+                if (($("settings-provider") || {}).value === "openwebui") {
+                    refreshOpenWebUIModels();
+                }
+            });
+            openWebUIBase.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    refreshOpenWebUIModels();
+                }
+            });
+        }
+
+        const openWebUIApiKey = $("settings-openwebui-api-key");
+        if (openWebUIApiKey) {
+            openWebUIApiKey.addEventListener("change", function () {
+                if (($("settings-provider") || {}).value === "openwebui") {
+                    refreshOpenWebUIModels();
+                }
+            });
+            openWebUIApiKey.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    refreshOpenWebUIModels();
+                }
+            });
+        }
+
+        const openWebUIRefreshBtn = $("settings-openwebui-refresh-models");
+        if (openWebUIRefreshBtn) {
+            openWebUIRefreshBtn.addEventListener("click", function () {
+                refreshOpenWebUIModels().catch((err) => showStatus(err.message, true));
+            });
+        }
+
+        const openWebUIModelSelect = $("settings-openwebui-model");
+        if (openWebUIModelSelect) {
+            openWebUIModelSelect.addEventListener("change", function () {
+                preferredOpenWebUIModel = openWebUIModelSelect.value;
             });
         }
 
