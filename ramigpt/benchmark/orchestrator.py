@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -393,6 +394,7 @@ def get_status() -> Dict[str, Any]:
                 "role_objective": get_settings().role_objective,
                 "role_objective_options": list(load_role_objectives().keys()),
                 "advanced_mode": get_settings().advanced_mode,
+                "benchmark_parallel_targets": get_settings().benchmark_parallel_targets,
                 "saved_models": {
                     "ollama": get_settings().ollama_model,
                     "openai": get_settings().openai_model,
@@ -452,7 +454,8 @@ def _format_slot_plan(slot: BatchSlot) -> str:
 
 def _log(run: BenchmarkRun, message: str) -> None:
     line = f"[{_utcnow()}] {message}"
-    run.log.append(line)
+    with _lock:
+        run.log.append(line)
     debug_logger.info(f"[benchmark] {message}")
     if run.log_dir:
         append_benchmark_suite_log(Path(run.log_dir), line)
@@ -462,6 +465,66 @@ def _log(run: BenchmarkRun, message: str) -> None:
             emit(message)
         except Exception:  # noqa: BLE001
             pass
+
+
+def _benchmark_parallel_workers() -> int:
+    """Target concurrency for a single benchmark run (App Settings)."""
+    try:
+        workers = int(get_settings().benchmark_parallel_targets or 1)
+    except (TypeError, ValueError):
+        workers = 1
+    return max(1, min(50, workers))
+
+
+def _run_targets_for_run(run: BenchmarkRun, selected: List[BenchmarkTarget]) -> None:
+    """Run all targets in a benchmark suite, optionally in parallel."""
+    target_by_id = {t.id: t for t in selected}
+    pending: List[tuple[TargetRunResult, BenchmarkTarget]] = []
+    for item in run.targets:
+        if run.stop_requested:
+            item.status = "skipped"
+            item.message = "Stopped before start"
+            continue
+        target = target_by_id.get(item.target_id)
+        if target is None:
+            item.status = "error"
+            item.message = f"Unknown target id: {item.target_id}"
+            continue
+        pending.append((item, target))
+
+    if not pending:
+        return
+
+    workers = _benchmark_parallel_workers()
+    if workers <= 1 or len(pending) <= 1:
+        for item, target in pending:
+            if run.stop_requested:
+                item.status = "skipped"
+                item.message = "Stopped before start"
+                continue
+            _run_target(run, item, target)
+        return
+
+    pool_size = min(workers, len(pending))
+    _log(
+        run,
+        f"Running {len(pending)} targets with {pool_size} parallel workers "
+        f"(App Settings → Benchmark parallel targets)",
+    )
+    with ThreadPoolExecutor(max_workers=pool_size) as pool:
+        futures = {
+            pool.submit(_run_target, run, item, target): item
+            for item, target in pending
+        }
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                future.result()
+            except Exception as exc:  # noqa: BLE001
+                if item.status in {"pending", "running"}:
+                    item.status = "error"
+                    item.message = str(exc) or type(exc).__name__
+                _log(run, f"Target {item.name} worker error: {exc}")
 
 
 def _log_model_warmup(run: BenchmarkRun, warm: ModelWarmupResult) -> None:
@@ -779,6 +842,10 @@ def _stop_full_ai(session_id: str) -> None:
 
 
 def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarget) -> None:
+    if run.stop_requested:
+        item.status = "skipped"
+        item.message = "Stopped before start"
+        return
     item.status = "running"
     item.started_at = _utcnow()
     started = time.monotonic()
@@ -1006,14 +1073,7 @@ def _worker(run: BenchmarkRun) -> None:
         )
 
         run.phase = "running"
-        target_by_id = {t.id: t for t in selected}
-        for item in run.targets:
-            if run.stop_requested:
-                item.status = "skipped"
-                item.message = "Stopped before start"
-                continue
-            target = target_by_id[item.target_id]
-            _run_target(run, item, target)
+        _run_targets_for_run(run, selected)
 
         run.phase = "done" if not run.stop_requested else "done"
         run.error = None

@@ -723,6 +723,16 @@
         if (advancedToggle) {
             advancedToggle.checked = !!Number(settings.advanced_mode);
         }
+        const benchParallel = $("app-settings-benchmark-parallel");
+        if (benchParallel) {
+            benchParallel.value = Number.isInteger(Number(settings.benchmark_parallel_targets))
+                ? String(Number(settings.benchmark_parallel_targets))
+                : "1";
+        }
+        const aiQueueToggle = $("app-settings-ai-request-queue");
+        if (aiQueueToggle) {
+            aiQueueToggle.checked = !!Number(settings.ai_request_queue);
+        }
         renderTerminalToolsSettings(settings);
         refreshTerminalToolSelector(settings);
     }
@@ -747,9 +757,15 @@
         const outputToggle = $("app-settings-history-outputs");
         const outputCount = $("app-settings-history-output-count");
         const advancedToggle = $("app-settings-advanced-mode");
+        const benchParallel = $("app-settings-benchmark-parallel");
+        const aiQueueToggle = $("app-settings-ai-request-queue");
         const edgeCount = Number(outputCount ? outputCount.value : 4);
+        const parallelTargets = Number(benchParallel ? benchParallel.value : 1);
         if (!Number.isInteger(edgeCount) || edgeCount < 0 || edgeCount > 40) {
             throw new Error("History output count must be an integer from 0 to 40.");
+        }
+        if (!Number.isInteger(parallelTargets) || parallelTargets < 1 || parallelTargets > 50) {
+            throw new Error("Benchmark parallel targets must be an integer from 1 to 50.");
         }
         const response = await fetch("/api/settings", {
             method: "PUT",
@@ -764,6 +780,8 @@
                 history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
                 history_output_edge_count: edgeCount,
                 advanced_mode: advancedToggle && advancedToggle.checked ? 1 : 0,
+                benchmark_parallel_targets: parallelTargets,
+                ai_request_queue: aiQueueToggle && aiQueueToggle.checked ? 1 : 0,
                 terminal_tools_visible: collectTerminalToolsVisible(),
                 persist: true,
             }),

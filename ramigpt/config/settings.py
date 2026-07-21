@@ -90,6 +90,8 @@ JSON_SETTING_FIELDS = (
     "upgraded_session_v2",
     "advanced_mode",
     "terminal_tools_visible",
+    "benchmark_parallel_targets",
+    "ai_request_queue",
 )
 
 VALID_PROVIDERS = ("openai", "ollama", "openwebui", "cursor")
@@ -121,6 +123,8 @@ class Settings:
     upgraded_session_v2: int = 1
     advanced_mode: int = 0
     terminal_tools_visible: Dict[str, bool] = field(default_factory=dict)
+    benchmark_parallel_targets: int = 1
+    ai_request_queue: int = 0
 
     def active_api_key(self) -> str:
         if self.ai_provider == "ollama":
@@ -184,6 +188,8 @@ class Settings:
             "terminal_tools_visible": normalize_terminal_tools_visible(
                 self.terminal_tools_visible
             ),
+            "benchmark_parallel_targets": self.benchmark_parallel_targets,
+            "ai_request_queue": self.ai_request_queue,
             "providers": list(VALID_PROVIDERS),
         }
 
@@ -255,6 +261,8 @@ def _load_settings_from_env() -> Settings:
         rotate_role_objectives=_env_int("ROTATE_ROLE_OBJECTIVES", 0),
         upgraded_session_v2=_env_int("UPGRADED_SESSION_V2", 1),
         advanced_mode=_env_int("ADVANCED_MODE", 0),
+        benchmark_parallel_targets=_env_int("BENCHMARK_PARALLEL_TARGETS", 1),
+        ai_request_queue=_env_int("AI_REQUEST_QUEUE", 0),
     )
 
 
@@ -285,12 +293,16 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             "rotate_role_objectives",
             "upgraded_session_v2",
             "advanced_mode",
+            "benchmark_parallel_targets",
+            "ai_request_queue",
         ):
             value = int(value)
-        if key in ("history_include_outputs", "rotate_role_objectives", "upgraded_session_v2", "advanced_mode"):
+        if key in ("history_include_outputs", "rotate_role_objectives", "upgraded_session_v2", "advanced_mode", "ai_request_queue"):
             value = 1 if value else 0
         if key == "history_output_edge_count" and not 0 <= value <= 40:
             raise ValueError("History output count must be between 0 and 40.")
+        if key == "benchmark_parallel_targets" and not 1 <= value <= 50:
+            raise ValueError("Benchmark parallel targets must be between 1 and 50.")
         if key == "role_objective":
             value = str(value).strip()
             if value not in load_role_objectives():

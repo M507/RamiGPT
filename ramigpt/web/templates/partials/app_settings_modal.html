@@ -86,6 +86,31 @@
                 >
                 <em>Include outputs for the first and last N commands. Use 0 for all outputs.</em>
             </label>
+
+            <label class="settings-toggle-field" for="app-settings-ai-request-queue">
+                <span class="settings-toggle-copy">
+                    <span class="settings-toggle-title">AI request queuing</span>
+                    <span class="settings-toggle-hint">When on, only one AI API call runs at a time (benchmark targets can still run in parallel). Off by default.</span>
+                </span>
+                <span class="settings-toggle">
+                    <input type="checkbox" id="app-settings-ai-request-queue">
+                    <span class="settings-toggle-slider" aria-hidden="true"></span>
+                </span>
+            </label>
+
+            <label class="settings-field" for="app-settings-benchmark-parallel">
+                Benchmark parallel targets
+                <input
+                    type="number"
+                    id="app-settings-benchmark-parallel"
+                    class="settings-input"
+                    min="1"
+                    max="50"
+                    step="1"
+                    value="1"
+                >
+                <em>How many benchmark targets run at once (1 = sequential). Higher values finish faster but load the AI provider and remote lab harder.</em>
+            </label>
         </div>
 
         <div id="app-settings-tools-panel" class="app-settings-subpanel" hidden>

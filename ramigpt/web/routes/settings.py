@@ -32,6 +32,8 @@ _SETTINGS_ALLOWED = {
     "upgraded_session_v2",
     "advanced_mode",
     "terminal_tools_visible",
+    "benchmark_parallel_targets",
+    "ai_request_queue",
 }
 
 
