@@ -181,6 +181,109 @@ _batch: Dict[str, Any] = {
     "current_role": "",
     "stop": False,
 }
+# Completed runs awaiting explicit "Save collab results" from the UI.
+_pending_collab: Dict[str, Any] = {
+    "batch_id": None,
+    "batch_meta": None,
+    "runs": {},
+}
+
+
+def _result_settings(run: BenchmarkRun) -> Dict[str, Any]:
+    return {
+        "provider": run.provider,
+        "model": run.model,
+        "model_key_name": run.model_key_name,
+        "model_registry": run.model_registry,
+        "hardware": run.hardware,
+    }
+
+
+def _clear_pending_collab() -> None:
+    global _pending_collab
+    _pending_collab = {"batch_id": None, "batch_meta": None, "runs": {}}
+
+
+def clear_pending_collab() -> None:
+    """Discard staged collab results that were never saved to disk."""
+    with _lock:
+        _clear_pending_collab()
+
+
+def _stage_collab_result(run: BenchmarkRun) -> None:
+    """Keep a completed run in memory until the user saves collab results."""
+    settings = _result_settings(run)
+    doc = build_result_document(run.to_public_dict(), settings=settings)
+    with _lock:
+        _history.append(deepcopy(doc))
+        _pending_collab["runs"][run.id] = {
+            "run_public": run.to_public_dict(),
+            "settings": settings,
+            "repetition": run.repetition,
+        }
+        if run.batch_id:
+            _pending_collab["batch_id"] = run.batch_id
+    _log(
+        run,
+        "Results ready — click Save collab results to persist under data/benchmark/results/",
+    )
+
+
+def save_collab_results() -> Dict[str, Any]:
+    """Persist staged benchmark runs to data/benchmark/results/ and rebuild master."""
+    with _lock:
+        if _batch.get("active"):
+            return {"ok": False, "error": "Wait for the benchmark to finish before saving"}
+        pending = deepcopy(_pending_collab)
+    runs_map = pending.get("runs") or {}
+    if not runs_map:
+        return {"ok": False, "error": "No unsaved benchmark results to save"}
+
+    runs_sorted = sorted(
+        runs_map.values(),
+        key=lambda entry: int(entry.get("repetition") or 1),
+    )
+    batch_id = pending.get("batch_id")
+    batch_dir: Optional[Path] = None
+    if batch_id and len(runs_sorted) > 1:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        batch_dir = BENCHMARK_RESULTS_DIR / f"batch_{stamp}_{str(batch_id)[:8]}"
+
+    paths: List[str] = []
+    completed_docs: List[Dict[str, Any]] = []
+    for entry in runs_sorted:
+        result_path = write_benchmark_result(
+            entry["run_public"],
+            settings=entry["settings"],
+            batch_dir=batch_dir,
+        )
+        paths.append(str(result_path))
+        completed_docs.append(json.loads(result_path.read_text(encoding="utf-8")))
+        run_id = entry["run_public"].get("id")
+        result_parent = str(result_path.parent)
+        with _lock:
+            if _current and _current.id == run_id:
+                _current.result_dir = result_parent
+
+    batch_meta = pending.get("batch_meta") or {}
+    if batch_dir is not None and batch_id and completed_docs:
+        write_batch_summary(
+            batch_dir,
+            batch_id=str(batch_id),
+            runs=completed_docs,
+            model_plan=batch_meta.get("model_plan"),
+            role_plan=batch_meta.get("role_plan"),
+        )
+
+    with _lock:
+        _clear_pending_collab()
+
+    return {
+        "ok": True,
+        "paths": paths,
+        "batch_dir": str(batch_dir) if batch_dir else None,
+        "run_count": len(paths),
+    }
 
 
 def mark_root_won(session_id: str) -> None:
@@ -300,6 +403,11 @@ def get_status() -> Dict[str, Any]:
             "available_tools": AVAILABLE_TOOLS,
             "remote_preset": remote_cfg,
             "history": list(_history[-10:]),
+            "collab_save": {
+                "pending": bool((_pending_collab.get("runs") or {})),
+                "run_count": len(_pending_collab.get("runs") or {}),
+                "batch_id": _pending_collab.get("batch_id"),
+            },
         }
 
 
@@ -374,22 +482,7 @@ def _finish_warmup_failed_run(run: BenchmarkRun, warm: ModelWarmupResult) -> Non
         _attach_run_model_identity(run)
     except Exception:  # noqa: BLE001
         pass
-    result_settings = {
-        "provider": run.provider,
-        "model": run.model,
-        "model_key_name": run.model_key_name,
-        "model_registry": run.model_registry,
-        "hardware": run.hardware,
-    }
-    with _lock:
-        _history.append(
-            deepcopy(
-                build_result_document(
-                    run.to_public_dict(),
-                    settings=result_settings,
-                )
-            )
-        )
+    result_settings = _result_settings(run)
     if run.log_dir:
         try:
             write_benchmark_suite_snapshot(
@@ -402,17 +495,7 @@ def _finish_warmup_failed_run(run: BenchmarkRun, warm: ModelWarmupResult) -> Non
             )
         except Exception:  # noqa: BLE001
             pass
-    try:
-        result_path = write_benchmark_result(
-            run.to_public_dict(),
-            settings=result_settings,
-            batch_dir=Path(run_batch_dir) if run_batch_dir else None,
-        )
-        run.result_dir = str(result_path.parent)
-        _log(run, f"Results written (warmup failed) → {result_path}")
-    except Exception as exc:  # noqa: BLE001
-        debug_logger.exception("[benchmark] failed to write warmup-failure results")
-        _log(run, f"Failed to write warmup-failure results: {exc}")
+    _stage_collab_result(run)
 
 
 def _ensure_benchmark_group() -> None:
@@ -945,21 +1028,6 @@ def _worker(run: BenchmarkRun) -> None:
             _sync_run_ai_settings(run)
         except Exception:  # noqa: BLE001
             pass
-        with _lock:
-            _history.append(
-                deepcopy(
-                    build_result_document(
-                        run.to_public_dict(),
-                        settings={
-                            "provider": run.provider,
-                            "model": run.model,
-                            "model_key_name": run.model_key_name,
-                            "model_registry": run.model_registry,
-                            "hardware": run.hardware,
-                        },
-                    )
-                )
-            )
         if run.log_dir:
             try:
                 write_benchmark_suite_snapshot(
@@ -976,29 +1044,7 @@ def _worker(run: BenchmarkRun) -> None:
                 f"[benchmark] suite finished — full details in {run.log_dir}/ "
                 f"(run.json, run.log, per-target events.jsonl)"
             )
-        try:
-            result_path = write_benchmark_result(
-                run.to_public_dict(),
-                settings={
-                    "provider": run.provider,
-                    "model": run.model,
-                    "model_key_name": run.model_key_name,
-                    "model_registry": run.model_registry,
-                    "hardware": run.hardware,
-                },
-                batch_dir=Path(run_batch_dir) if run_batch_dir else None,
-            )
-            run.result_dir = str(result_path.parent)
-            _log(run, f"Results written → {result_path}")
-            try:
-                result_doc = json.loads(result_path.read_text(encoding="utf-8"))
-                for issue in result_doc.get("issues") or []:
-                    _log(run, f"Result issue: {issue}")
-            except Exception:  # noqa: BLE001
-                pass
-        except Exception as exc:  # noqa: BLE001
-            debug_logger.exception(f"[benchmark] failed to write results: {exc}")
-            _log(run, f"Failed to write results: {exc}")
+        _stage_collab_result(run)
         _log(run, f"Benchmark finished (phase={run.phase})")
 
 
@@ -1168,6 +1214,11 @@ def start_run(
     with _lock:
         if _batch.get("active") or (_current and _current.phase not in {"done", "error"}):
             raise RuntimeError("A benchmark run is already in progress")
+        if _pending_collab.get("runs"):
+            debug_logger.info(
+                "[benchmark] discarding unsaved collab results from a previous run"
+            )
+            _clear_pending_collab()
         batch_id = str(uuid.uuid4())
         _batch.update(
             {
@@ -1225,16 +1276,9 @@ def start_run(
 
     def _batch_worker() -> None:
         global _current, run_batch_dir
-        batch_folder: Optional[Path] = None
         completed_docs: List[Dict[str, Any]] = []
         try:
-            if total_runs > 1:
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                batch_folder = BENCHMARK_RESULTS_DIR / f"batch_{stamp}_{batch_id[:8]}"
-                batch_folder.mkdir(parents=True, exist_ok=True)
-                run_batch_dir = str(batch_folder)
-            else:
-                run_batch_dir = None
+            run_batch_dir = None
 
             last_warm: Optional[Tuple[str, str]] = None
 
@@ -1298,33 +1342,22 @@ def start_run(
                     f"role={role_cfg.role_objective} run_id={run.id}"
                 )
                 _worker(run)
-                # Capture result document path from run
-                if run.result_dir:
-                    try:
-                        result_json = Path(run.result_dir) / "result.json"
-                        if result_json.is_file():
-                            completed_docs.append(
-                                json.loads(result_json.read_text(encoding="utf-8"))
-                            )
-                    except Exception:  # noqa: BLE001
-                        completed_docs.append(run.to_public_dict())
-                else:
-                    completed_docs.append(run.to_public_dict())
+                completed_docs.append(
+                    build_result_document(
+                        run.to_public_dict(),
+                        settings=_result_settings(run),
+                    )
+                )
                 with _lock:
                     if _batch.get("stop"):
                         break
         finally:
-            if batch_folder is not None and completed_docs:
-                try:
-                    write_batch_summary(
-                        batch_folder,
-                        batch_id=batch_id,
-                        runs=completed_docs,
-                        model_plan=_batch.get("run_plan"),
-                        role_plan=_batch.get("role_plan"),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    debug_logger.warning(f"[benchmark] batch summary failed: {exc}")
+            if total_runs > 1 and completed_docs:
+                with _lock:
+                    _pending_collab["batch_meta"] = {
+                        "model_plan": _batch.get("run_plan"),
+                        "role_plan": _batch.get("role_plan"),
+                    }
             with _lock:
                 _batch["active"] = False
                 _batch["stop"] = False

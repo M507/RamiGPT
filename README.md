@@ -275,7 +275,7 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-20T20:58:45.714196+00:00 · 0 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-21T11:20:22.071469+00:00 · 0 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 _No benchmark runs yet._
 

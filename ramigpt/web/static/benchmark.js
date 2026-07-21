@@ -522,7 +522,7 @@
     root.setAttribute("aria-label", activity.label || "Benchmark progress");
   }
 
-  function renderRun(run, running, batch) {
+  function renderRun(run, running, batch, collabSave) {
     const phaseEl = $("bench-phase");
     const results = $("bench-results");
     const logEl = $("bench-log");
@@ -594,7 +594,9 @@
           : "";
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
-          : "";
+          : collabSave && collabSave.pending
+            ? `<div class="muted small">Collab results pending — click <strong>Save collab results</strong> to write under <code>data/benchmark/results/</code>.</div>`
+            : "";
         results.innerHTML =
           modelLabel +
           modelKeyLabel +
@@ -671,6 +673,12 @@
     if (cleanBtn) cleanBtn.disabled = !!running;
     const resetBtn = $("bench-reset-results");
     if (resetBtn) resetBtn.disabled = !!running || resetBtn.hidden;
+    const saveBtn = $("bench-save-collab");
+    const pendingSave = !!(collabSave && collabSave.pending);
+    if (saveBtn) {
+      saveBtn.hidden = !pendingSave;
+      saveBtn.disabled = !!running || !pendingSave;
+    }
 
     if (run && run.error) setStatus(run.error, true);
   }
@@ -1076,7 +1084,7 @@
     applyRemotePreset(data.remote_preset);
     renderAiSettings(data.ai_settings);
     syncAdvancedControls(data.ai_settings && data.ai_settings.advanced_mode);
-    renderRun(data.run, data.running, data.batch);
+    renderRun(data.run, data.running, data.batch, data.collab_save);
     // Retune poll cadence when run activity changes.
     startPolling(!!data.running);
     if (data.defaults && $("bench-timeout") && !data.running) {
@@ -1211,6 +1219,19 @@
       if (window.Workspace && typeof window.Workspace.refreshInventory === "function") {
         window.Workspace.refreshInventory();
       }
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  async function saveCollabResults() {
+    setStatus("Saving collab results…");
+    try {
+      const data = await api("/api/benchmark/results/save", { method: "POST", body: {} });
+      const count = data.run_count != null ? data.run_count : "?";
+      const where = data.batch_dir || (data.paths && data.paths[0]) || "data/benchmark/results/";
+      setStatus(`Saved ${count} collab result sheet(s) → ${where}`);
+      await refresh();
     } catch (err) {
       setStatus(err.message || String(err), true);
     }
@@ -1437,6 +1458,7 @@
     const stop = $("bench-stop");
     const cleanBtn = $("bench-clean-logs");
     const resetBtn = $("bench-reset-results");
+    const saveBtn = $("bench-save-collab");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
     const verifyBtn = $("bench-verify-targets");
@@ -1445,6 +1467,7 @@
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
+    if (saveBtn) saveBtn.addEventListener("click", saveCollabResults);
     if (resetBtn) resetBtn.addEventListener("click", resetResults);
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);

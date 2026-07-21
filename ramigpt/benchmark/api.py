@@ -5,7 +5,7 @@ from __future__ import annotations
 from flask import Flask, jsonify, request
 
 from ramigpt.benchmark.deploy import RemoteDeployConfig, test_ssh_access
-from ramigpt.benchmark.orchestrator import get_status, request_stop, start_run
+from ramigpt.benchmark.orchestrator import clear_pending_collab, get_status, request_stop, save_collab_results, start_run
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.ai.model_catalog import list_models_for_provider, saved_model_for_provider
 from ramigpt.benchmark.targets import (
@@ -199,6 +199,23 @@ def register_benchmark_routes(app: Flask) -> None:
             debug_logger.exception("Failed to clean session logs")
             return jsonify(ok=False, error=str(exc)), 500
 
+    @app.route("/api/benchmark/results/save", methods=["POST"])
+    def api_benchmark_results_save():
+        """Persist staged benchmark runs to data/benchmark/results/ for collab stats."""
+        status = get_status()
+        if status.get("running"):
+            return jsonify(
+                ok=False,
+                error="Wait for the benchmark to finish before saving results",
+            ), 409
+        try:
+            result = save_collab_results()
+            code = 200 if result.get("ok") else 400
+            return jsonify(result), code
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to save benchmark collab results")
+            return jsonify(ok=False, error=str(exc)), 500
+
     @app.route("/api/benchmark/results/master", methods=["GET"])
     def api_benchmark_results_master():
         from ramigpt.benchmark.master_results import load_master_results
@@ -246,6 +263,7 @@ def register_benchmark_routes(app: Flask) -> None:
                 error="Enable Advanced in App Settings to reset benchmark results",
             ), 403
         try:
+            clear_pending_collab()
             result = reset_benchmark_results()
             return jsonify(ok=True, **result), 200
         except Exception as exc:  # noqa: BLE001
