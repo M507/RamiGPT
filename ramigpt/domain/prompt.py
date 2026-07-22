@@ -121,20 +121,31 @@ class PrivEscPrompt:
         # Adds a new capability to the list
         self.capabilities.append({"name": name, "description": description})
     
-    def set_BeRoot(self, BeRoot, *, persist: bool = False):
-        """Attach BeRoot scanner output. If persist=True, keep it across Full AI turns."""
+    def set_BeRoot(self, BeRoot, *, persist: bool = True):
+        """Attach BeRoot scanner output. Kept on every Full AI turn unless persist=False."""
         self.BeRoot = BeRoot
         self._beroot_persist = bool(persist) and BeRoot is not None
 
-    def set_LinEnum(self, LinEnum, *, persist: bool = False):
-        """Attach LinEnum scanner output. If persist=True, keep it across Full AI turns."""
+    def set_LinEnum(self, LinEnum, *, persist: bool = True):
+        """Attach LinEnum scanner output. Kept on every Full AI turn unless persist=False."""
         self.LinEnum = LinEnum
         self._linenum_persist = bool(persist) and LinEnum is not None
 
-    def set_LinPEAS(self, LinPEAS, *, persist: bool = False):
-        """Attach LinPEAS scanner output. If persist=True, keep it across Full AI turns."""
+    def set_LinPEAS(self, LinPEAS, *, persist: bool = True):
+        """Attach LinPEAS scanner output. Kept on every Full AI turn unless persist=False."""
         self.LinPEAS = LinPEAS
         self._linpeas_persist = bool(persist) and LinPEAS is not None
+
+    def copy_scanner_findings_from(self, other: "PrivEscPrompt | None") -> None:
+        """Restore pre-tool scanner context from another prompt (e.g. after SSH reconnect)."""
+        if other is None:
+            return
+        if other.BeRoot:
+            self.set_BeRoot(other.BeRoot, persist=getattr(other, "_beroot_persist", True))
+        if other.LinEnum:
+            self.set_LinEnum(other.LinEnum, persist=getattr(other, "_linenum_persist", True))
+        if other.LinPEAS:
+            self.set_LinPEAS(other.LinPEAS, persist=getattr(other, "_linpeas_persist", True))
 
     def clear_scanner_findings(self) -> None:
         """Remove all pre-tool scanner outputs from the prompt context."""
@@ -402,22 +413,21 @@ class PrivEscPrompt:
             report += "The following output is from BeRoot scanner:\n\n"
             report += f"{self.BeRoot}\n"
             report += f"\n"
-            # One-shot by default (saves tokens). Persist when Full AI should keep using findings.
-            if not getattr(self, "_beroot_persist", False):
+            if not getattr(self, "_beroot_persist", True):
                 self.set_BeRoot(None)
 
         if self.LinEnum:
             report += "The following output is from LinEnum scanner:\n\n"
             report += f"{self.LinEnum}\n"
             report += f"\n"
-            if not getattr(self, "_linenum_persist", False):
+            if not getattr(self, "_linenum_persist", True):
                 self.set_LinEnum(None)
 
         if self.LinPEAS:
             report += "The following output is from LinPEAS scanner:\n\n"
             report += f"{self.LinPEAS}\n"
             report += f"\n"
-            if not getattr(self, "_linpeas_persist", False):
+            if not getattr(self, "_linpeas_persist", True):
                 self.set_LinPEAS(None)
 
         report += self._history_block(

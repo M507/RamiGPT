@@ -108,6 +108,44 @@ class PromptHistoryTests(unittest.TestCase):
         self.assertLess(beroot_at, history_at)
         self.assertLess(prompt.index("SUID: /usr/bin/vim"), history_at)
 
+    def test_beroot_persists_across_full_ai_turns_by_default(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        priv.set_BeRoot("rule: /usr/bin/awk")
+        priv.add_history("id", "uid=1001(lowpriv)")
+
+        first = priv.generate_prompt()
+        second = priv.generate_prompt()
+
+        self.assertIn("The following output is from BeRoot scanner:", first)
+        self.assertIn("rule: /usr/bin/awk", first)
+        self.assertIn("The following output is from BeRoot scanner:", second)
+        self.assertIn("rule: /usr/bin/awk", second)
+        self.assertIn("id", second)
+
+    def test_beroot_one_shot_only_when_persist_false(self):
+        priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        priv.set_BeRoot("SUID: /usr/bin/vim", persist=False)
+
+        first = priv.generate_prompt()
+        second = priv.generate_prompt()
+
+        self.assertIn("SUID: /usr/bin/vim", first)
+        self.assertNotIn("The following output is from BeRoot scanner:", second)
+
+    def test_copy_scanner_findings_from_restores_context(self):
+        source = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        source.set_BeRoot("NOPASSWD: /usr/bin/awk")
+        source.set_LinPEAS("peas output")
+
+        dest = PrivEscPrompt("lowpriv", "x", "Linux", "root")
+        dest.copy_scanner_findings_from(source)
+        prompt = dest.generate_prompt()
+
+        self.assertIn("BeRoot scanner", prompt)
+        self.assertIn("NOPASSWD: /usr/bin/awk", prompt)
+        self.assertIn("LinPEAS scanner", prompt)
+        self.assertIn("peas output", prompt)
+
     def test_empty_update_does_not_clobber_real_output(self):
         priv = PrivEscPrompt("lowpriv", "x", "Linux", "root")
         priv.add_history("id", "uid=1001(lowpriv)")

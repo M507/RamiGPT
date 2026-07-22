@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 from ramigpt.paths import BEROOT_DIR, ensure_runtime_dirs
+from ramigpt.tools.linenum import upload_and_run_linenum
+from ramigpt.tools.linpeas import upload_and_run_linpeas
 from ramigpt.web.shell.ssh_remote import _sh_single_quote, _ssh_run_or_shell
 
 _REMOTE_ARCHIVE = "/tmp/ramigpt-beroot-linux.tgz"

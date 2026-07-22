@@ -20,11 +20,11 @@ from ramigpt.web.ai.tasks import start_autonomous_task
 from ramigpt.web.extensions import app
 from ramigpt.web.prompt_helpers import sanitize_beroot_for_prompt
 from ramigpt.web.session_emit import emit_session
-from ramigpt.web.shell.ssh_remote import _ssh_run_or_shell
-from ramigpt.web.tools.beroot import upload_and_run_beroot
-from ramigpt.tools.linenum import upload_and_run_linenum
-from ramigpt.tools.linpeas import upload_and_run_linpeas
-from ramigpt.web.shell.ssh_remote import _sh_single_quote
+from ramigpt.web.tools.beroot import (
+    _run_linenum_on_remote,
+    _run_linpeas_on_remote,
+    upload_and_run_beroot,
+)
 from ramigpt.web.state import (
     beroots,
     linenums,
@@ -39,6 +39,16 @@ from ramigpt.web.state import (
 
 def _emit_tool_progress(session_id, tool_label, message, *, color="#58a6ff") -> None:
     emit_session(session_id, f"[{tool_label}] {message}", color=color)
+
+
+def _record_benchmark_scan_result(session_data, *, ok: bool, error: str = "") -> None:
+    """Report scan outcome to benchmark prefetch (scan-only runs pass ``scan_result``)."""
+    result = session_data.get("scan_result")
+    if not isinstance(result, dict):
+        return
+    result["ok"] = bool(ok)
+    if error:
+        result["error"] = error
 
 
 def _handoff_scanner_to_full_ai(session_data, *, source: str, tool_label: str, slog) -> None:
@@ -112,6 +122,11 @@ def execute_beroot(session_data):
         if ssh_conn is None:
             emit_session(session_id, "[BeRoot] No SSH connection — connect first.", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error="BeRoot failed: no SSH connection",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -163,6 +178,11 @@ def execute_beroot(session_data):
             slog.event("BEROOT_FAILED", str(exc))
             emit_session(session_id, f"[BeRoot] Failed: {exc}", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error=f"BeRoot failed: {exc}",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -189,7 +209,7 @@ def execute_beroot(session_data):
         priv_esc = prompts.get(session_id)
         if priv_esc is not None:
             priv_esc.clear_scanner_findings()
-            priv_esc.set_BeRoot(beroot_for_ai, persist=with_ai)
+            priv_esc.set_BeRoot(beroot_for_ai, persist=True)
 
         _emit_tool_progress(session_id, "BeRoot", "Findings attached to session prompt.")
         preview = beroot_for_ai if len(beroot_for_ai) < 12000 else (
@@ -204,6 +224,7 @@ def execute_beroot(session_data):
             duration_seconds=beroot_duration,
         )
         debug_logger.info(f"beroot.ok session_id={session_id!r} chars={len(beroot_string)} with_ai={with_ai}")
+        _record_benchmark_scan_result(session_data, ok=True)
         _handoff_scanner_to_full_ai(session_data, source="beroot", tool_label="BeRoot", slog=slog)
 
 
@@ -221,6 +242,11 @@ def execute_linenum(session_data):
         if ssh_conn is None:
             emit_session(session_id, "[LinEnum] No SSH connection — connect first.", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error="LinEnum failed: no SSH connection",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -273,6 +299,11 @@ def execute_linenum(session_data):
             slog.event("LINENUM_FAILED", str(exc))
             emit_session(session_id, f"[LinEnum] Failed: {exc}", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error=f"LinEnum failed: {exc}",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -298,7 +329,7 @@ def execute_linenum(session_data):
         priv_esc = prompts.get(session_id)
         if priv_esc is not None:
             priv_esc.clear_scanner_findings()
-            priv_esc.set_LinEnum(linenum_for_ai, persist=with_ai)
+            priv_esc.set_LinEnum(linenum_for_ai, persist=True)
 
         _emit_tool_progress(session_id, "LinEnum", "Findings attached to session prompt.")
         preview = linenum_for_ai if len(linenum_for_ai) < 12000 else (
@@ -319,6 +350,7 @@ def execute_linenum(session_data):
         debug_logger.info(
             f"linenum.ok session_id={session_id!r} chars={len(linenum_string)} with_ai={with_ai}"
         )
+        _record_benchmark_scan_result(session_data, ok=True)
         _handoff_scanner_to_full_ai(session_data, source="linenum", tool_label="LinEnum", slog=slog)
 
 
@@ -336,6 +368,11 @@ def execute_linpeas(session_data):
         if ssh_conn is None:
             emit_session(session_id, "[LinPEAS] No SSH connection — connect first.", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error="LinPEAS failed: no SSH connection",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -388,6 +425,11 @@ def execute_linpeas(session_data):
             slog.event("LINPEAS_FAILED", str(exc))
             emit_session(session_id, f"[LinPEAS] Failed: {exc}", color="#f85149")
             loop[session_id] = 0
+            _record_benchmark_scan_result(
+                session_data,
+                ok=False,
+                error=f"LinPEAS failed: {exc}",
+            )
             if with_ai:
                 try:
                     from ramigpt.benchmark.orchestrator import mark_full_ai_finished
@@ -413,7 +455,7 @@ def execute_linpeas(session_data):
         priv_esc = prompts.get(session_id)
         if priv_esc is not None:
             priv_esc.clear_scanner_findings()
-            priv_esc.set_LinPEAS(linpeas_for_ai, persist=with_ai)
+            priv_esc.set_LinPEAS(linpeas_for_ai, persist=True)
 
         _emit_tool_progress(session_id, "LinPEAS", "Findings attached to session prompt.")
         preview = linpeas_for_ai if len(linpeas_for_ai) < 12000 else (
@@ -434,4 +476,5 @@ def execute_linpeas(session_data):
         debug_logger.info(
             f"linpeas.ok session_id={session_id!r} chars={len(linpeas_string)} with_ai={with_ai}"
         )
+        _record_benchmark_scan_result(session_data, ok=True)
         _handoff_scanner_to_full_ai(session_data, source="linpeas", tool_label="LinPEAS", slog=slog)

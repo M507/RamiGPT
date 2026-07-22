@@ -165,6 +165,19 @@ class BenchmarkRun:
 
 _lock = threading.RLock()
 _current: Optional[BenchmarkRun] = None
+
+
+@dataclass
+class _ScanPrefetch:
+    """Background pre-tool scan for a benchmark target (AI deferred until its turn)."""
+
+    tool_id: str
+    done: threading.Event = field(default_factory=threading.Event)
+    error: Optional[str] = None
+
+
+# run_id -> session_id -> prefetch state (cleared when the run finishes target execution)
+_scan_prefetch_by_run: Dict[str, Dict[str, _ScanPrefetch]] = {}
 _history: List[Dict[str, Any]] = []
 # session_id -> True when Full AI / autonomous detects root
 root_won_by_session: Dict[str, bool] = {}
@@ -476,6 +489,190 @@ def _benchmark_parallel_workers() -> int:
     return max(1, min(50, workers))
 
 
+def _should_prefetch_scans(run: BenchmarkRun, pending_count: int, workers: int) -> bool:
+    """Prefetch pre-tool scans when Full AI is serial but multiple targets are selected."""
+    if workers > 1 or pending_count <= 1:
+        return False
+    return pick_benchmark_tool(run.tools) is not None
+
+
+def _tool_scan_wait_seconds(tool_id: str) -> int:
+    return {"beroot": 240, "linenum": 360, "linpeas": 660}.get(tool_id, 660)
+
+
+def _log_target_session_details(
+    run: BenchmarkRun,
+    item: TargetRunResult,
+    target: BenchmarkTarget,
+    session_id: str,
+) -> None:
+    if not run.log_dir:
+        return
+    slog = begin_benchmark_target_logs(
+        suite_dir=Path(run.log_dir),
+        run_id=run.id,
+        target_id=target.id,
+        target_name=target.name,
+        session_id=session_id,
+        host=run.host,
+        port=target.port,
+    )
+    events = str(slog.events_path) if slog.events_path else ""
+    session_log = str(slog.run_dir / "session.log") if slog.run_dir else ""
+    debug_logger.info(
+        f"[benchmark] target={target.id} session_id={session_id} "
+        f"session details → events={events} session_log={session_log}"
+    )
+    _log(run, f"Target {target.name} session details → {events}")
+
+
+def _run_tool_scan(run: BenchmarkRun, session_id: str, tool_id: str) -> None:
+    """Run a pre-tool scan on the target without starting Full AI."""
+    execute_fn = _hooks.get(f"execute_{tool_id}")
+    if not callable(execute_fn):
+        raise RuntimeError(f"execute_{tool_id} hook not registered")
+
+    with _lock:
+        for item in run.targets:
+            if item.session_id == session_id and tool_id not in item.tools_used:
+                item.tools_used.append(tool_id)
+
+    session_data = _session_data(session_id)
+    session_data["with_ai"] = False
+    session_data["from_benchmark"] = True
+    session_data["use_os_thread"] = True
+    scan_result: Dict[str, Any] = {"ok": False, "error": ""}
+    session_data["scan_result"] = scan_result
+    execute_fn(session_data)
+    if not scan_result.get("ok"):
+        raise RuntimeError(scan_result.get("error") or f"{tool_id} scan failed")
+
+
+def _prepare_prefetch_scan(
+    run: BenchmarkRun,
+    item: TargetRunResult,
+    target: BenchmarkTarget,
+    tool_id: str,
+) -> tuple[str, _ScanPrefetch]:
+    session_id = _upsert_session_for_target(target, run.host)
+    item.session_id = session_id
+    _log_target_session_details(run, item, target, session_id)
+    _connect_session(session_id)
+    prefetch = _ScanPrefetch(tool_id=tool_id)
+    _log(
+        run,
+        f"Prefetch {tool_id} on {target.name} ({run.host}:{target.port}) — "
+        f"scan started (Full AI when this target's turn)",
+    )
+
+    def _runner() -> None:
+        try:
+            _run_tool_scan(run, session_id, tool_id)
+        except Exception as exc:  # noqa: BLE001
+            prefetch.error = str(exc) or type(exc).__name__
+        finally:
+            prefetch.done.set()
+
+    threading.Thread(
+        target=_runner,
+        name=f"bench-prefetch-{session_id[:8]}",
+        daemon=True,
+    ).start()
+    return session_id, prefetch
+
+
+def _prefetch_benchmark_scans(
+    run: BenchmarkRun,
+    pending: List[tuple[TargetRunResult, BenchmarkTarget]],
+    tool_id: str,
+) -> None:
+    """Connect all targets and start pre-tool scans in parallel; Full AI stays serial."""
+    store: Dict[str, _ScanPrefetch] = {}
+    pool_size = len(pending)
+    _log(
+        run,
+        f"Prefetching {tool_id} on {pool_size} target(s) in parallel "
+        f"(Full AI runs one target at a time)",
+    )
+    with ThreadPoolExecutor(max_workers=pool_size) as pool:
+        futures = {
+            pool.submit(_prepare_prefetch_scan, run, item, target, tool_id): item
+            for item, target in pending
+        }
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                session_id, prefetch = future.result()
+                store[session_id] = prefetch
+            except Exception as exc:  # noqa: BLE001
+                if item.session_id:
+                    failed = _ScanPrefetch(tool_id=tool_id, error=str(exc) or type(exc).__name__)
+                    failed.done.set()
+                    store[item.session_id] = failed
+                _log(run, f"Prefetch setup failed for {item.name}: {exc}")
+    _scan_prefetch_by_run[run.id] = store
+
+
+def _clear_scan_prefetch(run_id: str) -> None:
+    _scan_prefetch_by_run.pop(run_id, None)
+
+
+def _session_is_connected(session_id: str) -> bool:
+    shells = _hooks.get("ssh_shells")
+    if isinstance(shells, dict) and session_id in shells:
+        return True
+    conns = _hooks.get("ssh_ssh_conns")
+    return isinstance(conns, dict) and session_id in conns
+
+
+def _wait_for_prefetched_scan(
+    run: BenchmarkRun,
+    item: TargetRunResult,
+    target: BenchmarkTarget,
+    session_id: str,
+    prefetch: _ScanPrefetch,
+) -> None:
+    if prefetch.done.is_set():
+        if prefetch.error:
+            _log(
+                run,
+                f"Target {target.name}: prefetched {prefetch.tool_id} scan failed "
+                f"— skipping Full AI ({prefetch.error})",
+            )
+            raise RuntimeError(f"{prefetch.tool_id} failed: {prefetch.error}")
+        _log(
+            run,
+            f"Target {target.name}: prefetched {prefetch.tool_id} scan ready — starting Full AI",
+        )
+        return
+
+    _log(
+        run,
+        f"Target {target.name}: waiting for prefetched {prefetch.tool_id} scan…",
+    )
+    wait_seconds = _tool_scan_wait_seconds(prefetch.tool_id)
+    if not prefetch.done.wait(timeout=wait_seconds):
+        _log(
+            run,
+            f"Target {target.name}: prefetched {prefetch.tool_id} scan timed out "
+            f"— skipping Full AI",
+        )
+        raise RuntimeError(
+            f"{prefetch.tool_id} prefetch timed out after {wait_seconds}s"
+        )
+    if prefetch.error:
+        _log(
+            run,
+            f"Target {target.name}: prefetched {prefetch.tool_id} scan failed "
+            f"— skipping Full AI ({prefetch.error})",
+        )
+        raise RuntimeError(f"{prefetch.tool_id} failed: {prefetch.error}")
+    _log(
+        run,
+        f"Target {target.name}: prefetched {prefetch.tool_id} scan ready — starting Full AI",
+    )
+
+
 def _run_targets_for_run(run: BenchmarkRun, selected: List[BenchmarkTarget]) -> None:
     """Run all targets in a benchmark suite, optionally in parallel."""
     target_by_id = {t.id: t for t in selected}
@@ -496,35 +693,51 @@ def _run_targets_for_run(run: BenchmarkRun, selected: List[BenchmarkTarget]) -> 
         return
 
     workers = _benchmark_parallel_workers()
-    if workers <= 1 or len(pending) <= 1:
-        for item, target in pending:
-            if run.stop_requested:
-                item.status = "skipped"
-                item.message = "Stopped before start"
-                continue
-            _run_target(run, item, target)
-        return
+    tool_id = pick_benchmark_tool(run.tools)
+    use_prefetch = _should_prefetch_scans(run, len(pending), workers)
 
-    pool_size = min(workers, len(pending))
-    _log(
-        run,
-        f"Running {len(pending)} targets with {pool_size} parallel workers "
-        f"(App Settings → Benchmark parallel targets)",
-    )
-    with ThreadPoolExecutor(max_workers=pool_size) as pool:
-        futures = {
-            pool.submit(_run_target, run, item, target): item
-            for item, target in pending
-        }
-        for future in as_completed(futures):
-            item = futures[future]
-            try:
-                future.result()
-            except Exception as exc:  # noqa: BLE001
-                if item.status in {"pending", "running"}:
-                    item.status = "error"
-                    item.message = str(exc) or type(exc).__name__
-                _log(run, f"Target {item.name} worker error: {exc}")
+    try:
+        if use_prefetch and tool_id:
+            _prefetch_benchmark_scans(run, pending, tool_id)
+            for item, target in pending:
+                if run.stop_requested:
+                    item.status = "skipped"
+                    item.message = "Stopped before start"
+                    continue
+                _run_target(run, item, target)
+            return
+
+        if workers <= 1 or len(pending) <= 1:
+            for item, target in pending:
+                if run.stop_requested:
+                    item.status = "skipped"
+                    item.message = "Stopped before start"
+                    continue
+                _run_target(run, item, target)
+            return
+
+        pool_size = min(workers, len(pending))
+        _log(
+            run,
+            f"Running {len(pending)} targets with {pool_size} parallel workers "
+            f"(App Settings → Benchmark parallel targets)",
+        )
+        with ThreadPoolExecutor(max_workers=pool_size) as pool:
+            futures = {
+                pool.submit(_run_target, run, item, target): item
+                for item, target in pending
+            }
+            for future in as_completed(futures):
+                item = futures[future]
+                try:
+                    future.result()
+                except Exception as exc:  # noqa: BLE001
+                    if item.status in {"pending", "running"}:
+                        item.status = "error"
+                        item.message = str(exc) or type(exc).__name__
+                    _log(run, f"Target {item.name} worker error: {exc}")
+    finally:
+        _clear_scan_prefetch(run.id)
 
 
 def _log_model_warmup(run: BenchmarkRun, warm: ModelWarmupResult) -> None:
@@ -640,12 +853,14 @@ def _connect_session(session_id: str) -> None:
             raise RuntimeError(f"Failed to SSH to {saved.host}:{saved.port}")
 
         # Privilege-escalation goal is root; hostname is only for logging/root detection.
+        existing_priv = prompts.get(session_id)
         priv = PrivEscPrompt(
             saved.username,
             flask_session["password"],
             f"{saved.username}@{saved.host}",
             "root",
         )
+        priv.copy_scanner_findings_from(existing_priv)
         for fact in saved.facts:
             priv.add_facts(fact)
         for hint in saved.hints:
@@ -849,37 +1064,26 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
     item.status = "running"
     item.started_at = _utcnow()
     started = time.monotonic()
-    _log(run, f"Target {target.name} ({run.host}:{target.port}) — connecting")
+
+    prefetch_map = _scan_prefetch_by_run.get(run.id) or {}
+    prefetch = prefetch_map.get(item.session_id) if item.session_id else None
+    using_prefetch = prefetch is not None
+
+    if using_prefetch:
+        _log(run, f"Target {target.name} ({run.host}:{target.port}) — active")
+    else:
+        _log(run, f"Target {target.name} ({run.host}:{target.port}) — connecting")
 
     session_id: Optional[str] = None
     try:
-        session_id = _upsert_session_for_target(target, run.host)
-        item.session_id = session_id
+        if using_prefetch and item.session_id:
+            session_id = item.session_id
+        else:
+            session_id = _upsert_session_for_target(target, run.host)
+            item.session_id = session_id
+            _log_target_session_details(run, item, target, session_id)
+            _connect_session(session_id)
 
-        if run.log_dir:
-            slog = begin_benchmark_target_logs(
-                suite_dir=Path(run.log_dir),
-                run_id=run.id,
-                target_id=target.id,
-                target_name=target.name,
-                session_id=session_id,
-                host=run.host,
-                port=target.port,
-            )
-            events = str(slog.events_path) if slog.events_path else ""
-            session_log = (
-                str(slog.run_dir / "session.log") if slog.run_dir else ""
-            )
-            debug_logger.info(
-                f"[benchmark] target={target.id} session_id={session_id} "
-                f"session details → events={events} session_log={session_log}"
-            )
-            _log(
-                run,
-                f"Target {target.name} session details → {events}",
-            )
-
-        _connect_session(session_id)
         planned_provider, planned_model = run.provider, run.model
         planned_role = run.role_objective
         ai_cfg = _sync_run_ai_settings(run)
@@ -912,7 +1116,15 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
             )
         else:
             _log(run, f"Starting Full AI on {target.name} (timeout {run.timeout_seconds}s)")
-        _start_tools_then_full_ai(run, session_id)
+
+        if using_prefetch and prefetch is not None:
+            assert session_id is not None
+            _wait_for_prefetched_scan(run, item, target, session_id, prefetch)
+            if not _session_is_connected(session_id):
+                _connect_session(session_id)
+            _start_full_ai(session_id)
+        else:
+            _start_tools_then_full_ai(run, session_id)
 
         deadline = started + run.timeout_seconds
         while time.monotonic() < deadline:

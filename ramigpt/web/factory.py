@@ -66,6 +66,8 @@ def create_web_app():
         open_ssh_connection=get_or_create_ssh_shell,
         close_ssh_connection=close_ssh_connection,
         start_shell_listener=start_shell_listener,
+        ssh_shells=ssh_shells,
+        ssh_ssh_conns=ssh_ssh_conns,
         autonomous=autonomous,
         execute_beroot=execute_beroot,
         execute_linenum=execute_linenum,
