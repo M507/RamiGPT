@@ -316,6 +316,62 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             finally:
                 master_module.BENCHMARK_RESULTS_DIR = original_dir
 
+    def test_infra_errors_excluded_from_pass_rate_and_timing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run_infra"
+            run_dir.mkdir()
+            doc = _sample_run_doc(run_id="infra-mix", status="passed", elapsed=60.0)
+            doc["targets"] = [
+                {
+                    **_sample_run_doc(run_id="x")["targets"][0],
+                    "target_id": "sudo-vim",
+                    "status": "passed",
+                    "elapsed_seconds": 60.0,
+                    "got_root": True,
+                },
+                {
+                    **_sample_run_doc(run_id="x")["targets"][0],
+                    "target_id": "sudo-awk",
+                    "status": "failed",
+                    "elapsed_seconds": 180.0,
+                    "got_root": False,
+                },
+                {
+                    **_sample_run_doc(run_id="x")["targets"][0],
+                    "target_id": "sudo-curl",
+                    "status": "error",
+                    "elapsed_seconds": 0.5,
+                    "got_root": None,
+                    "message": "[Errno 51] Network is unreachable",
+                    "ai_requests": None,
+                    "commands_count": None,
+                    "tokens_total": None,
+                    "timing_summary": {},
+                },
+            ]
+            (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+
+            master = build_master_document(root)
+            overall = master["aggregate"]["overall"]
+            self.assertEqual(overall["observations"], 3)
+            self.assertEqual(overall["attempted"], 2)
+            self.assertEqual(overall["error"], 1)
+            self.assertEqual(overall["pass_rate"], 0.5)
+            self.assertEqual(overall["elapsed_seconds"]["mean"], 120.0)
+            failed = overall["failed_outcomes"]
+            self.assertEqual(failed["count"], 1)
+            self.assertEqual(failed["elapsed_seconds"]["mean"], 180.0)
+
+            from ramigpt.benchmark.results import build_run_summary, refresh_result_document_summary
+
+            summary = build_run_summary(doc["targets"])
+            self.assertEqual(summary["attempted"], 2)
+            self.assertEqual(summary["pass_rate"], 0.5)
+            self.assertEqual(summary["elapsed_seconds_total"], 240.0)
+
+            refreshed = refresh_result_document_summary(doc)
+            self.assertEqual(refreshed["summary"]["pass_rate"], 0.5)
 
     def test_got_root_token_metrics(self):
         with tempfile.TemporaryDirectory() as tmp:

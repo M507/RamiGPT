@@ -16,6 +16,7 @@ from ramigpt.benchmark.profile import (
     parse_profile_key,
     profile_display_label,
 )
+from ramigpt.benchmark.results import is_benchmark_attempt, normalize_target_status
 from ramigpt.benchmark.tools import enabled_tool_ids, normalize_tools
 from ramigpt.paths import BENCHMARK_RESULTS_DIR, PROJECT_ROOT, ensure_runtime_dirs
 from ramigpt.utils import debug_logger
@@ -193,6 +194,11 @@ def _rate(numerator: int, denominator: int) -> Optional[float]:
     return round(numerator / denominator, 4)
 
 
+def _benchmark_attempted_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Targets that actually ran — excludes infra errors and skipped."""
+    return [o for o in obs if is_benchmark_attempt(o.get("status"))]
+
+
 def _root_success_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Observations that obtained root (primary signal for tokens-to-root metrics)."""
     rooted = [o for o in obs if o.get("got_root") is True]
@@ -204,9 +210,12 @@ def _root_success_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]
 def _failed_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [
         o
-        for o in obs
+        for o in _benchmark_attempted_observations(obs)
         if o.get("got_root") is False
-        or (o.get("got_root") is None and (o.get("status") or "").lower() in {"failed", "error"})
+        or (
+            o.get("got_root") is None
+            and normalize_target_status(o.get("status")) == "failed"
+        )
     ]
 
 
@@ -338,9 +347,11 @@ class _StatsAccumulator:
 
     def finalize(self) -> Dict[str, Any]:
         obs = self.observations
-        statuses = [o["status"] for o in obs]
+        statuses = [normalize_target_status(o.get("status")) for o in obs]
         counts = _status_counts(statuses)
         total = len(obs)
+        attempted_obs = _benchmark_attempted_observations(obs)
+        attempted = len(attempted_obs)
         got_root_true = sum(1 for o in obs if o.get("got_root") is True)
         got_root_known = sum(1 for o in obs if o.get("got_root") is not None)
         root_obs = _root_success_observations(obs)
@@ -351,25 +362,26 @@ class _StatsAccumulator:
 
         return {
             "observations": total,
+            "attempted": attempted,
             "runs": len(self.run_ids),
             "passed": counts["passed"],
             "failed": counts["failed"],
             "error": counts["error"],
             "skipped": counts["skipped"],
             "other": counts["other"],
-            "pass_rate": _rate(counts["passed"], total),
+            "pass_rate": _rate(counts["passed"], attempted),
             "got_root_count": got_root_true,
             "got_root_rate": _rate(got_root_true, got_root_known),
-            "elapsed_seconds": _numeric_stats(o.get("elapsed_seconds") for o in obs),
-            "beroot_seconds": _numeric_stats(o.get("beroot_seconds") for o in obs),
-            "ai_llm_seconds": _numeric_stats(o.get("ai_llm_seconds") for o in obs),
-            "shell_seconds": _numeric_stats(o.get("shell_seconds") for o in obs),
-            "other_seconds": _numeric_stats(o.get("other_seconds") for o in obs),
-            "tokens_total": _numeric_stats(o.get("tokens_total") for o in obs),
-            "prompt_tokens": _numeric_stats(o.get("prompt_tokens") for o in obs),
-            "completion_tokens": _numeric_stats(o.get("completion_tokens") for o in obs),
-            "commands_count": _numeric_stats(o.get("commands_count") for o in obs),
-            "ai_requests": _numeric_stats(o.get("ai_requests") for o in obs),
+            "elapsed_seconds": _numeric_stats(o.get("elapsed_seconds") for o in attempted_obs),
+            "beroot_seconds": _numeric_stats(o.get("beroot_seconds") for o in attempted_obs),
+            "ai_llm_seconds": _numeric_stats(o.get("ai_llm_seconds") for o in attempted_obs),
+            "shell_seconds": _numeric_stats(o.get("shell_seconds") for o in attempted_obs),
+            "other_seconds": _numeric_stats(o.get("other_seconds") for o in attempted_obs),
+            "tokens_total": _numeric_stats(o.get("tokens_total") for o in attempted_obs),
+            "prompt_tokens": _numeric_stats(o.get("prompt_tokens") for o in attempted_obs),
+            "completion_tokens": _numeric_stats(o.get("completion_tokens") for o in attempted_obs),
+            "commands_count": _numeric_stats(o.get("commands_count") for o in attempted_obs),
+            "ai_requests": _numeric_stats(o.get("ai_requests") for o in attempted_obs),
             "got_root": got_root_block,
             "failed_outcomes": failed_block,
             "mean_tokens_to_root": got_root_summary.get("mean_tokens"),
@@ -501,6 +513,7 @@ def _extract_observations(
 def _stats_ranking_fields(stats: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "observations": stats.get("observations", 0),
+        "attempted": stats.get("attempted", 0),
         "runs": stats.get("runs", 0),
         "pass_rate": stats.get("pass_rate"),
         "got_root_rate": stats.get("got_root_rate"),
@@ -875,7 +888,7 @@ def _format_overall_metrics_table(stats: Dict[str, Any]) -> List[str]:
         "|--------|------:|",
         f"| Observations | {stats.get('observations', 0)} |",
         f"| Runs | {stats.get('runs', 0)} |",
-        f"| Pass rate | {_format_rate(stats.get('pass_rate'))} |",
+        f"| Pass rate (attempted) | {_format_rate(stats.get('pass_rate'))} |",
         f"| Got root rate | {_format_rate(stats.get('got_root_rate'))} |",
         f"| Got root count | {stats.get('got_root_count', 0)} |",
         f"| Median elapsed (s) | {_format_num(elapsed.get('median'))} |",

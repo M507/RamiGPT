@@ -17,7 +17,109 @@ from ramigpt.utils import debug_logger
 # Detailed timing breakdown (beroot / ai_turn / shell_io) — sole result format.
 BENCHMARK_RESULT_SCHEMA_VERSION = 2
 
+# Infra/setup failures (network, deploy, etc.) — excluded from pass rate and timing averages.
+INFRA_EXCLUDED_TARGET_STATUSES = frozenset({"error", "skipped"})
+
 _LOG_PREFIX = "[benchmark-results]"
+
+
+def normalize_target_status(status: Any) -> str:
+    st = (str(status or "other")).strip().lower()
+    if st in {"passed", "failed", "error", "skipped"}:
+        return st
+    return "other"
+
+
+def is_benchmark_attempt(status: Any) -> bool:
+    """True when the target actually ran (not infra error / skipped)."""
+    return normalize_target_status(status) not in INFRA_EXCLUDED_TARGET_STATUSES
+
+
+def build_run_summary(targets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate per-run summary; infra errors/skips do not affect pass rate or timing totals."""
+    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0, "other": 0}
+    for target in targets:
+        st = normalize_target_status(target.get("status"))
+        if st in counts:
+            counts[st] += 1
+        else:
+            counts["other"] += 1
+
+    attempted_targets = [t for t in targets if is_benchmark_attempt(t.get("status"))]
+    attempted = len(attempted_targets)
+
+    elapsed_total = 0.0
+    for target in attempted_targets:
+        try:
+            elapsed_total += float(target.get("elapsed_seconds") or 0)
+        except (TypeError, ValueError):
+            pass
+
+    pass_rate = round(counts["passed"] / attempted, 4) if attempted else None
+
+    return {
+        **counts,
+        "target_count": len(targets),
+        "attempted": attempted,
+        "pass_rate": pass_rate,
+        "elapsed_seconds_total": round(elapsed_total, 3),
+        "commands_total": sum(
+            int(
+                target["commands_count"]
+                if target.get("commands_count") is not None
+                else target["ai_requests"]
+            )
+            for target in attempted_targets
+            if target.get("commands_count") is not None or target.get("ai_requests") is not None
+        ),
+        "ai_requests_total": sum(
+            int(target["ai_requests"])
+            for target in attempted_targets
+            if target.get("ai_requests") is not None
+        ),
+        "prompt_tokens_total": sum(
+            int(target["prompt_tokens"])
+            for target in attempted_targets
+            if target.get("prompt_tokens") is not None
+        ),
+        "completion_tokens_total": sum(
+            int(target["completion_tokens"])
+            for target in attempted_targets
+            if target.get("completion_tokens") is not None
+        ),
+        "tokens_total": sum(
+            int(target["tokens_total"])
+            for target in attempted_targets
+            if target.get("tokens_total") is not None
+        ),
+        "tools_used_any": sorted(
+            {tool for target in attempted_targets for tool in (target.get("tools_used") or [])}
+        ),
+        "beroot_seconds_total": _sum_optional(
+            [
+                (target.get("timing_summary") or {}).get("beroot_seconds")
+                for target in attempted_targets
+            ]
+        ),
+        "ai_llm_seconds_total": _sum_optional(
+            [
+                (target.get("timing_summary") or {}).get("ai_llm_seconds")
+                for target in attempted_targets
+            ]
+        ),
+        "shell_seconds_total": _sum_optional(
+            [
+                (target.get("timing_summary") or {}).get("shell_seconds")
+                for target in attempted_targets
+            ]
+        ),
+        "other_seconds_total": _sum_optional(
+            [
+                (target.get("timing_summary") or {}).get("other_seconds")
+                for target in attempted_targets
+            ]
+        ),
+    }
 
 
 def _log_info(message: str) -> None:
@@ -848,14 +950,6 @@ def build_result_document(
         all_issues.insert(0, f"suite: run error — {run_public.get('error')}")
     if not suite_dir:
         all_issues.insert(0, "suite: log_dir missing — timing enrichment limited")
-    counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0, "other": 0}
-    for t in targets:
-        st = (t.get("status") or "other").lower()
-        if st in counts:
-            counts[st] += 1
-        else:
-            counts["other"] += 1
-
     suite_provider = settings.get("provider") or ""
     suite_model = settings.get("model") or ""
     suite_model_key_name = settings.get("model_key_name") or run_public.get("model_key_name") or ""
@@ -867,13 +961,6 @@ def build_result_document(
         t.setdefault("model_key_name", suite_model_key_name or "")
         t.setdefault("model", suite_model)
         t.setdefault("provider", suite_provider)
-
-    elapsed_total = 0.0
-    for t in targets:
-        try:
-            elapsed_total += float(t.get("elapsed_seconds") or 0)
-        except (TypeError, ValueError):
-            pass
 
     doc = {
         "schema_version": BENCHMARK_RESULT_SCHEMA_VERSION,
@@ -911,67 +998,7 @@ def build_result_document(
         "tools_configured": tools_configured,
         "tools": run_tools,
         "targets": targets,
-        "summary": {
-            **counts,
-            "target_count": len(targets),
-            "elapsed_seconds_total": round(elapsed_total, 3),
-            "commands_total": sum(
-                int(
-                    t["commands_count"]
-                    if t.get("commands_count") is not None
-                    else t["ai_requests"]
-                )
-                for t in targets
-                if t.get("commands_count") is not None or t.get("ai_requests") is not None
-            ),
-            "ai_requests_total": sum(
-                int(t["ai_requests"])
-                for t in targets
-                if t.get("ai_requests") is not None
-            ),
-            "prompt_tokens_total": sum(
-                int(t["prompt_tokens"])
-                for t in targets
-                if t.get("prompt_tokens") is not None
-            ),
-            "completion_tokens_total": sum(
-                int(t["completion_tokens"])
-                for t in targets
-                if t.get("completion_tokens") is not None
-            ),
-            "tokens_total": sum(
-                int(t["tokens_total"])
-                for t in targets
-                if t.get("tokens_total") is not None
-            ),
-            "tools_used_any": sorted(
-                {tool for t in targets for tool in (t.get("tools_used") or [])}
-            ),
-            "beroot_seconds_total": _sum_optional(
-                [
-                    (t.get("timing_summary") or {}).get("beroot_seconds")
-                    for t in targets
-                ]
-            ),
-            "ai_llm_seconds_total": _sum_optional(
-                [
-                    (t.get("timing_summary") or {}).get("ai_llm_seconds")
-                    for t in targets
-                ]
-            ),
-            "shell_seconds_total": _sum_optional(
-                [
-                    (t.get("timing_summary") or {}).get("shell_seconds")
-                    for t in targets
-                ]
-            ),
-            "other_seconds_total": _sum_optional(
-                [
-                    (t.get("timing_summary") or {}).get("other_seconds")
-                    for t in targets
-                ]
-            ),
-        },
+        "summary": build_run_summary(targets),
         "suite_log_dir": suite_dir,
         "result_dir": None,
         "issues": all_issues,
@@ -986,6 +1013,79 @@ def build_result_document(
             f"({len(targets)} target(s), schema v{BENCHMARK_RESULT_SCHEMA_VERSION})"
         )
     return doc
+
+
+def refresh_result_document_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Recompute summary fields from targets (e.g. after changing aggregation rules)."""
+    updated = dict(doc)
+    updated["summary"] = build_run_summary(list(doc.get("targets") or []))
+    return updated
+
+
+def _write_result_summary_txt(doc: Dict[str, Any], result_dir: Path) -> None:
+    summary_lines = [
+        f"Benchmark result {doc.get('id')}",
+        f"phase={doc.get('phase')} mode={doc.get('mode')} host={doc.get('host')}",
+        f"model={doc.get('provider')}/{doc.get('model')}",
+        f"model_key_name={doc.get('model_key_name') or '—'}",
+        f"profile_label={doc.get('profile_label') or '—'}",
+        f"hardware={json.dumps(doc.get('hardware') or {})}",
+        f"started={doc.get('started_at')} finished={doc.get('finished_at')}",
+        f"repetition={doc.get('repetition')}/{doc.get('repetitions')}",
+        f"tools_configured={json.dumps(doc.get('tools_configured') or {})}",
+        f"summary={json.dumps(doc.get('summary') or {})}",
+        (
+            "timing_totals: "
+            f"beroot={((doc.get('summary') or {}).get('beroot_seconds_total'))}s "
+            f"ai_llm={((doc.get('summary') or {}).get('ai_llm_seconds_total'))}s "
+            f"shell={((doc.get('summary') or {}).get('shell_seconds_total'))}s "
+            f"other={((doc.get('summary') or {}).get('other_seconds_total'))}s"
+        ),
+        "",
+        "targets:",
+    ]
+    for t in doc.get("targets") or []:
+        summary_lines.append(
+            f"  - {t.get('target_id')}: {t.get('status')} "
+            f"elapsed={t.get('elapsed_seconds')}s "
+            f"commands={t.get('commands_count') if t.get('commands_count') is not None else t.get('ai_requests')} "
+            f"ai_requests={t.get('ai_requests')} "
+            f"tokens={t.get('tokens_total')} (prompt={t.get('prompt_tokens')}, completion={t.get('completion_tokens')}) "
+            f"tools={t.get('tools_used')} "
+            f"model={t.get('provider')}/{t.get('model')} "
+            f"got_root={t.get('got_root')} "
+            f"msg={t.get('message')}"
+        )
+        summary_lines.extend(_format_target_timing_summary(t))
+        for issue in t.get("issues") or []:
+            summary_lines.append(f"      ! {issue}")
+    if doc.get("issues"):
+        summary_lines.extend(["", "issues:"])
+        summary_lines.extend(f"  - {line}" for line in doc["issues"])
+    (result_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+
+
+def refresh_saved_result(path: Path) -> Path:
+    """Refresh summary in a persisted result.json and its summary.txt."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = refresh_result_document_summary(doc)
+    path.write_text(
+        json.dumps(doc, indent=2, ensure_ascii=False, default=str) + "\n",
+        encoding="utf-8",
+    )
+    _write_result_summary_txt(doc, path.parent)
+    return path
+
+
+def refresh_all_saved_results(*, results_dir: Optional[Path] = None) -> int:
+    """Recompute summaries for every result.json under the results tree."""
+    root = results_dir or BENCHMARK_RESULTS_DIR
+    count = 0
+    for path in sorted(root.rglob("result.json")):
+        if path.is_file():
+            refresh_saved_result(path)
+            count += 1
+    return count
 
 
 def write_benchmark_result(
@@ -1047,46 +1147,7 @@ def write_benchmark_result(
     )
 
     # Human-readable one-pager next to JSON.
-    summary_lines = [
-        f"Benchmark result {doc.get('id')}",
-        f"phase={doc.get('phase')} mode={doc.get('mode')} host={doc.get('host')}",
-        f"model={doc.get('provider')}/{doc.get('model')}",
-        f"model_key_name={doc.get('model_key_name') or '—'}",
-        f"profile_label={doc.get('profile_label') or '—'}",
-        f"hardware={json.dumps(doc.get('hardware') or {})}",
-        f"started={doc.get('started_at')} finished={doc.get('finished_at')}",
-        f"repetition={doc.get('repetition')}/{doc.get('repetitions')}",
-        f"tools_configured={json.dumps(doc.get('tools_configured') or {})}",
-        f"summary={json.dumps(doc.get('summary') or {})}",
-        (
-            "timing_totals: "
-            f"beroot={((doc.get('summary') or {}).get('beroot_seconds_total'))}s "
-            f"ai_llm={((doc.get('summary') or {}).get('ai_llm_seconds_total'))}s "
-            f"shell={((doc.get('summary') or {}).get('shell_seconds_total'))}s "
-            f"other={((doc.get('summary') or {}).get('other_seconds_total'))}s"
-        ),
-        "",
-        "targets:",
-    ]
-    for t in doc.get("targets") or []:
-        summary_lines.append(
-            f"  - {t.get('target_id')}: {t.get('status')} "
-            f"elapsed={t.get('elapsed_seconds')}s "
-            f"commands={t.get('commands_count') if t.get('commands_count') is not None else t.get('ai_requests')} "
-            f"ai_requests={t.get('ai_requests')} "
-            f"tokens={t.get('tokens_total')} (prompt={t.get('prompt_tokens')}, completion={t.get('completion_tokens')}) "
-            f"tools={t.get('tools_used')} "
-            f"model={t.get('provider')}/{t.get('model')} "
-            f"got_root={t.get('got_root')} "
-            f"msg={t.get('message')}"
-        )
-        summary_lines.extend(_format_target_timing_summary(t))
-        for issue in t.get("issues") or []:
-            summary_lines.append(f"      ! {issue}")
-    if doc.get("issues"):
-        summary_lines.extend(["", "issues:"])
-        summary_lines.extend(f"  - {line}" for line in doc["issues"])
-    (result_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    _write_result_summary_txt(doc, result_dir)
     _write_results_log(result_dir, issue_lines)
 
     index_path = BENCHMARK_RESULTS_DIR / "index.jsonl"
