@@ -18,8 +18,6 @@ from ramigpt.web.tools.beroot import _upload_beroot_tree
 
 context.log_level = "error"
 
-PARTIAL_IDS = frozenset()
-
 
 def _cred_targets():
     return sorted(
@@ -48,9 +46,7 @@ def _classify(target_id: str, output: str, error: str | None) -> tuple[str, str]
         return "Error", error[:160]
     if not output:
         return "No", "credential_leaks returned empty"
-    if target_id in PARTIAL_IDS:
-        return "Partial", output.replace("\n", " | ")[:160]
-    # Heuristic partial: only flags unrelated tmp keys without lab-specific path
+    # Heuristic miss: only flags unrelated tmp keys without lab-specific path
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
     if len(lines) == 1 and "/tmp/" in lines[0] and "root_id_rsa" in lines[0]:
         return "No", output.replace("\n", " | ")[:160]

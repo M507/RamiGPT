@@ -215,17 +215,31 @@ def _match_line(line, secret_path=False):
     return False
 
 
-def _docker_config_hit(path, text):
-    if not path.endswith(".docker/config.json") and "/.docker/config.json" not in path:
-        return None
+def _base64_auth_hit(path, text):
+    """
+    Decode JSON-style "auth": "<base64>" blobs (Docker config and similar).
+    Generic: any readable file with auth base64 that decodes to user:pass.
+    """
     match = re.search(r'"auth"\s*:\s*"([A-Za-z0-9+/=]+)"', text)
     if not match:
         return None
+    raw = match.group(1)
     try:
-        decoded = base64.b64decode(match.group(1)).decode("utf-8", errors="replace")
+        decoded = base64.b64decode(raw).decode("utf-8", errors="replace")
     except Exception:
-        return "%s: docker auth (base64)" % path
-    return "%s: docker auth decoded %s" % (path, _truncate(decoded))
+        return None
+    # Expect user:password (or user:token) shape after decode.
+    if ":" not in decoded or len(decoded) < 3:
+        return None
+    user, _, secret = decoded.partition(":")
+    if not user or not secret:
+        return None
+    return "%s: auth decoded %s" % (path, _truncate(decoded))
+
+
+def _docker_config_hit(path, text):
+    # Backward-compatible name; decoding is generic for any auth base64 JSON.
+    return _base64_auth_hit(path, text)
 
 
 def _openvpn_auth_hit(path, text):

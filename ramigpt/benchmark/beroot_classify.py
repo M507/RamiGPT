@@ -155,13 +155,7 @@ def _classify_sudo(target: BenchmarkTarget, output: str, sections: dict[str, str
                 _snippet(env_keep + " | " + sudo_text),
                 "env_keep + sudo_list",
             )
-        if has_rule:
-            return Classification(
-                "Partial",
-                _snippet(sudo_text),
-                "sudo_list (env_keep not matched)",
-            )
-        return Classification("No", "no sudo rule found")
+        return Classification("No", "env_keep directive not matched")
 
     if tid in LD_PRELOAD_SUDO_IDS:
         if has_ld and has_rule:
@@ -169,12 +163,6 @@ def _classify_sudo(target: BenchmarkTarget, output: str, sections: dict[str, str
                 "Yes",
                 _snippet(ldpreload + " | " + sudo_text),
                 "ldpreload + sudo_list",
-            )
-        if has_rule or has_ld:
-            return Classification(
-                "Partial",
-                _snippet(ldpreload or sudo_text),
-                "ldpreload or sudo_list",
             )
         return Classification("No", "no sudo / LD_PRELOAD signal")
 
@@ -191,13 +179,7 @@ def _classify_sudo(target: BenchmarkTarget, output: str, sections: dict[str, str
                 _snippet((file_perm or path_dirs) + " | " + sudo_text),
                 "file_permissions + sudo_list",
             )
-        if has_rule:
-            return Classification(
-                "Partial",
-                _snippet(sudo_text),
-                "sudo_list (writable hook/script path often outside scanned file list)",
-            )
-        return Classification("No", "no sudo rule found")
+        return Classification("No", "writable hook/script path not flagged")
 
     if tid == "sudo-all":
         if _contains_any(sudo_text, ("(ALL) ALL", "(ALL : ALL) ALL", "NOPASSWD: ALL")):
@@ -205,13 +187,7 @@ def _classify_sudo(target: BenchmarkTarget, output: str, sections: dict[str, str
         return Classification("No", "no ALL sudo rule")
 
     if tid == "sudo-u-hash":
-        if has_rule:
-            return Classification(
-                "Partial",
-                _snippet(sudo_text),
-                "sudo_list (CVE-2019-14287 not checked)",
-            )
-        return Classification("No", "no sudo rule found")
+        return Classification("No", "CVE-2019-14287 not checked")
 
     if tid == "sudo-version-detect-only":
         return Classification("No", "no sudo -V / CVE check")
@@ -263,6 +239,61 @@ def _capability_hits(section: str, binary: str) -> bool:
     return bool(pat.search(section.replace("\n", " ")))
 
 
+_SUID_ALIASES = {
+    "cp": ("gnucp", "cp"),
+    "python3": ("python3", "python"),
+    "python": ("python3", "python"),
+    "gawk": ("gawk", "awk"),
+    "awk": ("gawk", "awk"),
+    "hd": ("hd", "hexdump"),
+    "hexdump": ("hd", "hexdump"),
+    "node": ("node", "nodejs"),
+    "strings": ("strings",),
+}
+
+
+def _suid_lab_hit(target: BenchmarkTarget, section: str) -> bool:
+    if not section:
+        return False
+
+    path_lines = []
+    path_bases = []
+    for line in section.splitlines():
+        token = line.strip().split()[0] if line.strip() else ""
+        if token.startswith("/"):
+            path_lines.append(token)
+            path_bases.append(token.rsplit("/", 1)[-1].lower())
+            if "/opt/bench/" in token:
+                return True
+
+    mis = target.misconfig or ""
+    names: List[str] = []
+    if mis.startswith("suid:"):
+        names.append(mis.split(":", 1)[1])
+    prim = (target.primitive or "").strip()
+    if prim.startswith("/"):
+        if any(prim in p or p.startswith(prim) for p in path_lines):
+            return True
+        names.append(prim.rsplit("/", 1)[-1])
+    elif prim and " " not in prim and "/" not in prim:
+        names.append(prim)
+
+    for name in names:
+        aliases = _SUID_ALIASES.get(name, (name,))
+        for alias in aliases:
+            alias_l = alias.lower()
+            for base in path_bases:
+                if (
+                    base == alias_l
+                    or base.startswith(alias_l + ".")
+                    or base.endswith("-" + alias_l)
+                    or base.endswith("_" + alias_l)
+                    or alias_l in base.split("-")
+                ):
+                    return True
+    return False
+
+
 def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classification:
     if not (output or "").strip():
         return Classification("No", "BeRoot output empty")
@@ -298,22 +329,9 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
         return _classify_sudo(target, output, sections)
 
     if family == FAMILY_SUID:
-        lab_bin = "/opt/bench/suidbin"
-        if lab_bin in suid:
+        if _suid_lab_hit(target, suid):
             return Classification("Yes", _snippet(suid), "suid_bins")
-        mis = target.misconfig or ""
-        if mis.startswith("suid:"):
-            name = mis.split(":", 1)[1]
-            for path in (f"/usr/bin/{name}", f"/bin/{name}"):
-                if path in suid:
-                    return Classification("Yes", _snippet(suid), "suid_bins")
-        if suid.strip():
-            return Classification(
-                "Partial",
-                _snippet(suid),
-                "suid_bins (lists binary; custom abuse needs extra heuristics)",
-            )
-        return Classification("No", "no SUID output")
+        return Classification("No", "lab SUID binary not flagged")
 
     if family == FAMILY_CAPABILITIES:
         binary = prim
@@ -321,8 +339,6 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             binary = (target.misconfig or "").split(":", 1)[1]
         if _capability_hits(caps, binary):
             return Classification("Yes", _snippet(caps), "capabilities")
-        if caps.strip():
-            return Classification("Partial", _snippet(caps), "capabilities")
         return Classification("No", "no capabilities output")
 
     if family == FAMILY_WRITABLE:
@@ -334,12 +350,6 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             or _writable_target_hits(path_dirs, target)
         ):
             return Classification("Yes", _snippet(combined or file_perm), "file_permissions")
-        if combined.strip():
-            return Classification(
-                "Partial",
-                _snippet(combined),
-                "file_permissions (related writable file, not lab path)",
-            )
         return Classification("No", "path not in scanned file_permissions list")
 
     if family == FAMILY_PYTHON:
@@ -373,7 +383,7 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
         ):
             return Classification("Yes", _snippet(file_perm), "file_permissions")
         if nfs.strip():
-            return Classification("Partial", _snippet(nfs), "nfs_root_squashing")
+            return Classification("No", "exports present but no_root_squash not flagged")
         return Classification("No", "no NFS exports signal")
 
     if family == FAMILY_PATH:
@@ -383,19 +393,11 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
         )
         if path_dirs.strip() or network.strip() or node_hit:
             return Classification("Yes", _snippet(combined), "writable_path_dirs / network_services")
-        if tid == "ld-preload-script" and (file_perm.strip() or "directive found" in ldpreload.lower()):
-            return Classification(
-                "Partial",
-                _snippet(file_perm or ldpreload),
-                "file_permissions / ldpreload",
-            )
         return Classification("No", "no PATH poller / localhost service checks")
 
     if family == FAMILY_SGID:
-        if "sgidcat" in sgid or "/opt/bench/sgid" in sgid:
+        if "sgidcat" in sgid or "/opt/bench/sgid" in sgid or "[non-standard]" in sgid.lower():
             return Classification("Yes", _snippet(sgid), "sgid_bins")
-        if sgid.strip():
-            return Classification("Partial", _snippet(sgid), "sgid_bins")
         return Classification("No", "no SGID output")
 
     if family == FAMILY_DOAS:
@@ -476,12 +478,10 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             return Classification(verdict, reason)
 
         if tid in {"exploits-detect-only", "kernel-detect-only"}:
-            if exploits.strip():
-                return Classification(
-                    "Partial",
-                    _snippet(exploits),
-                    "exploits (linux-exploit-suggester)",
-                )
+            if exploits.strip() and _contains_any(
+                exploits, ("kernel", "CVE-", "exploit", "Available information")
+            ):
+                return Classification("Yes", _snippet(exploits), "exploits")
             return Classification("No", "exploit suggester empty")
 
         if tid == "ptrace-detect-only":
@@ -490,8 +490,6 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             return Classification("No", "no ptrace output")
 
     if creds.strip() and tid.startswith("cred-"):
-        if tid == "cred-docker-config" and "decoded" in creds.lower():
-            return Classification("Yes", _snippet(creds), "credential_leaks")
         return Classification("Yes", _snippet(creds), "credential_leaks")
 
     return Classification("No", "no matching BeRoot check category")

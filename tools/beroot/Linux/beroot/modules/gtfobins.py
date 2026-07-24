@@ -264,11 +264,61 @@ class GTFOBins:
       }
 
 
+    # Basename aliases for renamed / versioned binaries (generic, not lab-specific).
+    ALIASES = {
+        "gnucp": "cp",
+        "gawk": "awk",
+        "python": "python",
+        "python2": "python",
+        "python3": "python",
+        "node": "node",
+        "nodejs": "node",
+        "ruby": "ruby",
+        "perl": "perl",
+        "php": "php",
+        "lua": "lua",
+        "vim.basic": "vim",
+        "vim.tiny": "vim",
+        "rview": "vim",
+        "rvim": "vim",
+        "view": "vim",
+        "hexdump": "hd",
+        "busybox": "busybox",
+        "x86_64-linux-gnu-strings": "strings",
+        "strings": "strings",
+    }
+
     def find_binary(self, binary):
         """
-        Found the associated command line to execute system code using the binary
+        Resolve GTFOBins by basename, including version suffixes and common aliases.
         """
-        for b in self.binaries:
-            if b == binary.lower():
-                return self.binaries[b]
+        if not binary:
+            return False
+
+        name = binary.lower()
+        candidates = [name]
+
+        # python3.14 / lua5.4 → python3 / lua5 / lua
+        stripped = name
+        while stripped and stripped[-1].isdigit():
+            stripped = stripped.rstrip("0123456789")
+            stripped = stripped.rstrip(".")
+            if stripped and stripped not in candidates:
+                candidates.append(stripped)
+
+        for cand in list(candidates):
+            alias = self.ALIASES.get(cand)
+            if alias and alias not in candidates:
+                candidates.append(alias)
+            # python3 → python
+            if cand.startswith("python"):
+                if "python" not in candidates:
+                    candidates.append("python")
+            if cand.startswith("lua"):
+                if "lua" not in candidates:
+                    candidates.append("lua")
+
+        for cand in candidates:
+            if cand in self.binaries:
+                return self.binaries[cand]
         return False

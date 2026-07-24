@@ -14,7 +14,8 @@ from ramigpt.benchmark.targets import TARGETS, get_target
 
 
 ROW_RE = re.compile(
-    r"^\| `(?P<id>[^`]+)` \| (?P<port>\d+) \| (?P<family>[^|]+) \| \*\*(?P<verdict>Yes|Partial|No)\*\* \| (?P<note>.*?) \|$",
+    r"^\| `(?P<id>[^`]+)` \| (?P<port>\d+) \| (?P<family>[^|]+) \| "
+    r"\*\*(?P<verdict>Yes|Partial|No)\*\* \| (?P<note>.*?) \|$",
     re.MULTILINE,
 )
 
@@ -42,7 +43,17 @@ def _load_results(*paths: Path) -> dict[str, dict]:
         host = data.get("host", "?")
         verified_at = (data.get("verified_at") or "")[:10] or str(date.today())
         for row in data.get("results", []):
-            merged[row["id"]] = {**row, "_host": host, "_date": verified_at}
+            verdict = row.get("verdict", "No")
+            if verdict == "Partial":
+                verdict = "No"
+            elif verdict == "Error":
+                verdict = "No"
+            merged[row["id"]] = {
+                **row,
+                "verdict": verdict,
+                "_host": host,
+                "_date": verified_at,
+            }
     return merged
 
 
@@ -69,16 +80,25 @@ def main() -> int:
     text = coverage_path.read_text(encoding="utf-8")
     results = _load_results(*(repo / p for p in args.verify))
 
-    counts = {"Yes": 0, "Partial": 0, "No": 0}
+    counts = {"Yes": 0, "No": 0}
 
     def replace_row(match: re.Match[str]) -> str:
         tid = match.group("id")
         if tid not in results:
-            counts[match.group("verdict")] = counts.get(match.group("verdict"), 0) + 1
-            return match.group(0)
+            verdict = match.group("verdict")
+            if verdict == "Partial":
+                verdict = "No"
+            counts[verdict] = counts.get(verdict, 0) + 1
+            note = match.group("note")
+            if match.group("verdict") == "Partial":
+                note = f"reclassified from Partial → No — {note}"
+            return (
+                f"| `{tid}` | {match.group('port')} | {match.group('family').strip()} | "
+                f"**{verdict}** | {note} |"
+            )
         row = results[tid]
         verdict = row.get("verdict", "No")
-        if verdict not in counts:
+        if verdict not in ("Yes", "No"):
             verdict = "No"
         counts[verdict] += 1
         try:
@@ -97,7 +117,6 @@ def main() -> int:
         "| Verdict | Count |\n"
         "|---------|------:|\n"
         f"| Yes | {counts['Yes']} |\n"
-        f"| Partial | {counts['Partial']} |\n"
         f"| No | {counts['No']} |\n"
         f"| **Total** | **{total}** |"
     )
@@ -108,27 +127,38 @@ def main() -> int:
         count=1,
     )
 
+    # Legend: drop Partial.
+    updated = re.sub(
+        r"\| \*\*Partial\*\* \|[^\n]+\n",
+        "",
+        updated,
+        count=1,
+    )
+
     hosts = sorted({row.get("_host", "?") for row in results.values()})
-    cred_yes = sum(1 for r in results.values() if r["id"].startswith("cred-") and r.get("verdict") == "Yes")
-    cred_partial = sum(1 for r in results.values() if r["id"].startswith("cred-") and r.get("verdict") == "Partial")
+    cred_yes = sum(
+        1 for r in results.values() if r["id"].startswith("cred-") and r.get("verdict") == "Yes"
+    )
+    cred_no = sum(
+        1 for r in results.values() if r["id"].startswith("cred-") and r.get("verdict") == "No"
+    )
     noncred = [r for r in results.values() if not r["id"].startswith("cred-")]
     if noncred:
-        nc_summary = {}
+        nc_summary: dict[str, int] = {}
         for row in noncred:
             v = row.get("verdict", "No")
             nc_summary[v] = nc_summary.get(v, 0) + 1
         banner = (
             f"**Remote verification** on `{hosts[0] if hosts else '?'}` "
-            f"(cred: {cred_yes} Yes, {cred_partial} Partial; "
-            f"other: {nc_summary.get('Yes', 0)} Yes, {nc_summary.get('Partial', 0)} Partial, "
-            f"{nc_summary.get('No', 0)} No) — see "
+            f"(cred: {cred_yes} Yes, {cred_no} No; "
+            f"other: {nc_summary.get('Yes', 0)} Yes, {nc_summary.get('No', 0)} No) — see "
             f"[`beroot-cred-verify.json`](beroot-cred-verify.json) and "
             f"[`beroot-verify.json`](beroot-verify.json)."
         )
     else:
         banner = (
             f"**cred-\\* labs verified remotely** on `{hosts[0] if hosts else '?'}` "
-            f"({cred_yes} Yes, {cred_partial} Partial) — see [`beroot-cred-verify.json`](beroot-cred-verify.json)."
+            f"({cred_yes} Yes, {cred_no} No) — see [`beroot-cred-verify.json`](beroot-cred-verify.json)."
         )
 
     if "**Remote verification**" in updated or "**cred-\\* labs verified remotely**" in updated:
