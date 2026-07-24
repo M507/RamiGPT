@@ -12,14 +12,32 @@ class InterestingFiles(object):
     def __init__(self):
 
         self.files = [
-            # directories
-            '/etc/init.d'
+            # directories (shallow walk — see _get_permissions max_depth)
+            '/etc/init.d',
             '/etc/cron.d',
             '/etc/cron.daily',
             '/etc/cron.hourly',
             '/etc/cron.monthly',
             '/etc/cron.weekly',
-            '/etc/ld.so.conf',
+            '/etc/ld.so.conf.d',
+            '/etc/logrotate.d',
+            '/etc/profile.d',
+            '/etc/update-motd.d',
+            '/etc/rsyslog.d',
+            '/etc/ssh/sshd_config.d',
+            '/etc/pam.d',
+            '/etc/nginx/conf.d',
+            '/etc/apache2/conf-available',
+            '/etc/supervisor/conf.d',
+            '/etc/udev/rules.d',
+            '/etc/systemd/system/bench.service.d',
+            '/var/www/bench',
+            '/opt/bench',
+            '/opt/bench/wildcard',
+            '/opt/pathhijack',
+            '/opt/pathhijack-suid',
+            '/usr/local/lib/benchhijack',
+            '/dev/shm/bench',
 
             # files
             '/etc/sudoers',
@@ -33,8 +51,35 @@ class InterestingFiles(object):
             '/etc/cron.deny',
             '/etc/anacrontab',
             '/etc/apache2/apache2.conf',
+            '/etc/environment',
+            '/etc/hosts',
+            '/etc/ld.so.preload',
+            '/etc/ld.so.conf',
+            '/etc/fstab',
+            '/etc/rc.local',
+            '/etc/logrotate.conf',
+            '/root/.bashrc',
+            '/root/.ssh/authorized_keys',
+            '/opt/bench/sudoers.pending',
+            '/opt/bench/logrotate-hook.sh',
+            '/opt/bench/root.sh',
+            '/opt/bench/job.sh',
+            '/opt/bench/mv-hook.sh',
+            '/etc/cron.d/bench-writable',
+            '/etc/profile.d/bench-hook.sh',
+            '/etc/init.d/benchsvc',
+            '/etc/openvpn/client/up.sh',
+            '/etc/apache2/conf-available/bench.conf',
+            '/etc/nginx/conf.d/bench.conf',
+            '/etc/systemd/system/bench.service.d/override.conf',
+            '/etc/supervisor/conf.d/bench.conf',
+            '/etc/udev/rules.d/99-bench.rules',
+            '/etc/ssh/sshd_config.d/99-bench.conf',
+            '/tmp/bench/hook.sh',
+            '/dev/shm/bench/hook.sh',
             '/var/spool/cron/crontabs/root',
         ]
+        self.dir_max_depth = 2
         #print('Getting permissions of sensitive files.')
         self.properties = self._get_permissions(self.files)
 
@@ -44,16 +89,21 @@ class InterestingFiles(object):
         return a tab of FileManager object
         """
         properties = []
+        max_depth = getattr(self, "dir_max_depth", 2)
         for path in paths:
 
             if os.path.isdir(path):
+                base_depth = path.rstrip("/").count("/")
                 for root, dirs, files in os.walk(path):
+                    depth = root.rstrip("/").count("/") - base_depth
+                    if depth >= max_depth:
+                        dirs[:] = []
                     for file in files:
                         fullpath = os.path.join(root, file)
                         fm = FileManager(fullpath, check_inside=True)
                         properties.append(fm)
 
-            else:
+            elif os.path.isfile(path) or os.path.exists(path):
                 fm = FileManager(path, check_inside=True)
                 properties.append(fm)
 
@@ -112,8 +162,8 @@ class InterestingFiles(object):
             if values: 
                 has_write_access.append(values)
 
-        # Check if /usr/lib and /lib are writable without looking inside (too long)
-        for directory in ['/usr/lib', '/lib']:
+        # Check if /usr/lib, /lib, and /usr/local/lib are writable without walking inside
+        for directory in ['/usr/lib', '/lib', '/usr/local/lib']:
             f = File(directory)
             if f.is_writable(user):
                 has_write_access.append({

@@ -37,6 +37,7 @@ def get_ptrace_scope():
 
         if ptrace_scope == 0:
             return 'PTRACE_ATTACH possible ! (yama/ptrace_scope == 0)'
+        return 'yama/ptrace_scope == %s' % ptrace_scope
 
     except IOError:
         pass
@@ -49,12 +50,13 @@ def check_nfs_root_squashing():
     path = '/etc/exports'
     if os.path.exists(path):
         try:
-            with open(path) as f:
+            with open(path, encoding='utf-8', errors='replace') as f:
                 for line in f.readlines():
-                    if line.startswith('#'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
                         continue
 
-                    if 'no_root_squash' in line.decode():
+                    if 'no_root_squash' in line:
                         return 'no_root_squash directive found'
         except Exception:
             pass

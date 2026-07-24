@@ -14,7 +14,19 @@ from .modules.useful.useful import tab_of_dict_to_string, tab_to_string
 from .modules.sudoers import check_sudoers_misconfigurations
 from .modules.fast_checks import (
     get_capabilities, get_ptrace_scope,
-    check_nfs_root_squashing, check_python_library_hijacking, 
+    check_nfs_root_squashing, check_python_library_hijacking,
+)
+from .modules.credentials import scan_credential_leaks
+from .modules.extended_checks import (
+    format_hits,
+    scan_doas,
+    scan_env_keep_directives,
+    scan_mysql_socket,
+    scan_network_services,
+    scan_sgid_bins,
+    scan_shell_restrictions,
+    scan_system_info,
+    scan_writable_path_dirs,
 )
 
 
@@ -179,6 +191,65 @@ class RunChecks(object):
             Exploit().run()
         )
 
+    # ------------------------ Credential leaks ------------------------
+
+    def credential_leaks(self):
+        """
+        Readable secrets: configs, histories, SSH keys, shadow, adm logs.
+        """
+        return (
+            'Credential leaks',
+            tab_to_string(scan_credential_leaks(self.current_user)),
+        )
+
+    def sgid_bins(self):
+        return (
+            'SGID binaries',
+            format_hits(scan_sgid_bins(self.current_user)),
+        )
+
+    def doas_rules(self):
+        return (
+            'Doas',
+            format_hits(scan_doas(self.current_user)),
+        )
+
+    def network_services(self):
+        return (
+            'Network services',
+            format_hits(scan_network_services()),
+        )
+
+    def env_keep_directives(self):
+        return (
+            'Sudo env_keep',
+            format_hits(scan_env_keep_directives()),
+        )
+
+    def shell_restrictions(self):
+        return (
+            'Shell restrictions',
+            format_hits(scan_shell_restrictions()),
+        )
+
+    def system_info(self):
+        return (
+            'System configuration',
+            format_hits(scan_system_info()),
+        )
+
+    def mysql_socket(self):
+        return (
+            'MySQL socket',
+            format_hits(scan_mysql_socket(self.current_user)),
+        )
+
+    def writable_path_dirs(self):
+        return (
+            'Writable PATH / hook directories',
+            format_hits(scan_writable_path_dirs(self.current_user)),
+        )
+
 
 def print_output(output, to_print):
     category, result = output
@@ -216,7 +287,16 @@ def run(password, to_print=True):
         checks.capabilities,
         checks.ptrace_scope,
         checks.exploits,
-        checks.python_library_hijacking
+        checks.python_library_hijacking,
+        checks.credential_leaks,
+        checks.sgid_bins,
+        checks.doas_rules,
+        checks.network_services,
+        checks.env_keep_directives,
+        checks.shell_restrictions,
+        checks.system_info,
+        checks.mysql_socket,
+        checks.writable_path_dirs,
     ]
 
     for c in to_checks:
