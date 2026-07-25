@@ -230,11 +230,23 @@ def _writable_target_hits(section: str, target: BenchmarkTarget) -> bool:
 def _snippet(text: str, limit: int = 160, prefer: tuple[str, ...] | None = None) -> str:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if prefer:
-        preferred = [
-            ln for ln in lines if any(p.lower() in ln.lower() for p in prefer)
-        ]
+        preferred: list[str] = []
+        seen: set[str] = set()
+        for idx, ln in enumerate(lines):
+            if not any(p.lower() in ln.lower() for p in prefer):
+                continue
+            if ln not in seen:
+                preferred.append(ln)
+                seen.add(ln)
+            # Keep immediately following next: cues with the matched finding.
+            for nxt in lines[idx + 1 : idx + 4]:
+                if not nxt.lower().startswith("next:"):
+                    break
+                if nxt not in seen:
+                    preferred.append(nxt)
+                    seen.add(nxt)
         if preferred:
-            lines = preferred + [ln for ln in lines if ln not in preferred]
+            lines = preferred + [ln for ln in lines if ln not in seen]
     one_line = " | ".join(lines)
     return one_line[:limit]
 
@@ -443,7 +455,7 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
             ("cgroup-detect-only", "cgroup-surface:", system, "system_info"),
             ("selinux-detect-only", "selinux-status:", system, "system_info"),
             ("fstab-detect-only", ("fstab-entry:", "fstab-status:", "fstab-surface:"), system, "system_info"),
-            ("mounts-detect-only", "mount-option:", system, "system_info"),
+            ("mounts-detect-only", ("mount-option:", "mounts-surface:"), system, "system_info"),
             ("pkexec-detect-only", "pkexec-surface:", system, "system_info"),
             ("dbus-detect-only", "dbus-surface:", system, "system_info"),
             ("namespaces-detect-only", "userns-surface:", system, "system_info"),
@@ -462,7 +474,11 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
         if tid == "capabilities-detect-only" and (
             caps.strip() or "cap-hints:" in sys_l
         ):
-            return Classification("Yes", _snippet(caps or system), "capabilities / system_info")
+            return Classification(
+                "Yes",
+                _snippet(caps or system, prefer=("cap-hints:", "cap_")),
+                "capabilities / system_info",
+            )
         if tid == "redis-unauth" and (
             "redis" in network.lower() or "unauthenticated" in network.lower()
         ):
@@ -487,13 +503,23 @@ def classify_beroot_output(target: BenchmarkTarget, output: str) -> Classificati
                 _snippet(network, prefer=("9998", "localhost udp")),
                 "network_services",
             )
-        if tid == "ptrace-detect-only" and ptrace.strip():
-            return Classification("Yes", _snippet(ptrace), "ptrace_scope")
+        if tid == "ptrace-detect-only" and (
+            ptrace.strip() or "ptrace-surface:" in sys_l
+        ):
+            return Classification(
+                "Yes",
+                _snippet(ptrace or system, prefer=("ptrace", "yama/ptrace")),
+                "ptrace_scope",
+            )
         if tid in {"exploits-detect-only", "kernel-detect-only"}:
             if exploits.strip() and _contains_any(
                 exploits, ("kernel", "CVE-", "exploit", "Available information")
             ):
-                return Classification("Yes", _snippet(exploits), "exploits")
+                return Classification(
+                    "Yes",
+                    _snippet(exploits, prefer=("next:", "CVE-", "Possible Exploits")),
+                    "exploits",
+                )
             return Classification("No", "exploit suggester empty")
 
         detect_map = {

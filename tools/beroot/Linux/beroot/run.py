@@ -186,9 +186,16 @@ class RunChecks(object):
         """
         Run Linux exploit suggester
         """
+        result = Exploit().run()
+        if result:
+            result = (
+                "next: review Possible Exploits CVEs below; verify "
+                "kernel/package versions before attempting\n"
+                + result.lstrip()
+            )
         return (
             'Exploits',
-            Exploit().run()
+            result
         )
 
     # ------------------------ Credential leaks ------------------------

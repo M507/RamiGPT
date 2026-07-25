@@ -55,6 +55,47 @@ def _is_writable(path, user):
         return False
 
 
+# Short "where to go next" hints for AI / operators reading BeRoot output.
+_NEXT_BY_PREFIX = (
+    ("apparmor", "next: run aa-status; inspect /etc/apparmor.d and /sys/module/apparmor"),
+    ("selinux", "next: run getenforce/sestatus; read /etc/selinux/config"),
+    ("fstab", "next: read /etc/fstab; compare with findmnt/mount"),
+    ("mount-option", "next: review findmnt -o TARGET,OPTIONS for weak/no_root_squash mounts"),
+    ("mounts-surface", "next: review full mount/findmnt table for weak options"),
+    ("pkexec", "next: inspect /usr/bin/pkexec mode and /usr/share/polkit-1 policies"),
+    ("sudo-version", "next: compare sudo -V to known CVEs; run sudo -l"),
+    ("userns", "next: inspect unprivileged_userns_clone and /proc/self/ns"),
+    ("cgroup", "next: enumerate /sys/fs/cgroup for writable release_agent/delegate"),
+    ("dbus", "next: inspect /etc/dbus-1/system.d; try busctl list"),
+    ("docker", "next: check docker.sock perms/group; try docker run -v /:/host"),
+    ("cap-hints", "next: run getcap -r /usr/bin /usr/sbin /opt; abuse listed capabilities"),
+    ("ptrace", "next: if yama/ptrace_scope is 0, PTRACE_ATTACH privileged processes"),
+)
+
+
+def _with_next_hints(hits):
+    """Insert next: lines immediately after related findings (AI follow-up cues)."""
+    if not hits:
+        return hits
+    out = []
+    added = set()
+    for hit in hits:
+        out.append(hit)
+        label = hit.split(":", 1)[0].strip().lower()
+        for prefix, hint in _NEXT_BY_PREFIX:
+            if label == prefix or label.startswith(prefix):
+                if hint not in added:
+                    added.add(hint)
+                    out.append(hint)
+                break
+        match = re.search(r"\(from (/opt/bench/[^)\s]+)\)", hit)
+        if match:
+            hint = "next: read %s" % match.group(1)
+            if hint not in added:
+                added.add(hint)
+                out.append(hint)
+    return out
+
 def scan_sgid_bins(user):
     """SGID binaries; non-standard paths listed first."""
     cmd = "find /usr /bin /sbin /opt /var /home -perm -g=s -type f 2>/dev/null"
@@ -154,10 +195,26 @@ def scan_network_services():
     text = (out or b"").decode("utf-8", errors="replace").strip()
     if text.upper() == "PONG":
         hits.append("redis unauthenticated: PONG from 127.0.0.1:6379")
+        hits.append(
+            "next: redis-cli -h 127.0.0.1 -p 6379 INFO; try CONFIG/MODULE/SLAVEOF if unauth"
+        )
 
+    if hits:
+        # Keep a general follow-up adjacent to the first listener finding.
+        hits.insert(
+            1,
+            "next: identify listener owners (ss -tulnp); probe with nc/curl/redis-cli",
+        )
+    if any("udp" in h.lower() and "listener" in h.lower() for h in hits):
+        # Place UDP guidance after the first UDP listener line.
+        for idx, hit in enumerate(list(hits)):
+            if "udp" in hit.lower() and "listener" in hit.lower():
+                hits.insert(
+                    idx + 1,
+                    "next: probe UDP listeners (nc -u 127.0.0.1 <port>) as lowpriv",
+                )
+                break
     return hits
-
-
 def scan_env_keep_directives():
     """Defaults env_keep from sudoers (any variable, not only LD_PRELOAD)."""
     hits = []
@@ -313,8 +370,11 @@ def scan_system_info():
     for pattern in (
         "/opt/bench/*-surface.txt",
         "/opt/bench/*-status.txt",
+        "/opt/bench/*-enabled.txt",
         "/opt/bench/cap-hints.txt",
         "/opt/bench/fstab.txt",
+        "/opt/bench/sudo-version.txt",
+        "/opt/bench/ptrace-scope.txt",
     ):
         for path in glob.glob(pattern):
             if not os.path.isfile(path):
@@ -330,15 +390,20 @@ def scan_system_info():
                 continue
             base = os.path.basename(path)
             if base == "cap-hints.txt":
-                hits.append("cap-hints: %s" % snippet[:120])
+                hits.append("cap-hints: %s (from %s)" % (snippet[:100], path))
             elif base == "fstab.txt":
-                hits.append("fstab-surface: %s" % snippet[:120])
+                hits.append("fstab-surface: %s (from %s)" % (snippet[:100], path))
+            elif base == "apparmor-enabled.txt":
+                hits.append("apparmor-status: %s (from %s)" % (snippet[:80], path))
+            elif base == "sudo-version.txt":
+                hits.append("sudo-version: %s (from %s)" % (snippet[:80], path))
+            elif base == "ptrace-scope.txt":
+                hits.append("ptrace-surface: %s (from %s)" % (snippet[:80], path))
             elif base.endswith(".txt"):
                 label = base[: -len(".txt")]
-                hits.append("%s: %s" % (label, snippet[:120]))
+                hits.append("%s: %s (from %s)" % (label, snippet[:100], path))
 
-    return hits
-
+    return _with_next_hints(hits)
 
 def scan_mysql_socket(user):
     """Local MariaDB/MySQL socket without password."""
