@@ -20,6 +20,20 @@ BENCHMARK_RESULT_SCHEMA_VERSION = 2
 # Infra/setup failures (network, deploy, etc.) — excluded from pass rate and timing averages.
 INFRA_EXCLUDED_TARGET_STATUSES = frozenset({"error", "skipped"})
 
+# Full-AI stop reasons that abort a run without a countable pass/fail outcome.
+# Only wall-clock timeouts count as negative scoreable outcomes alongside passes.
+NON_SCOREABLE_STOP_REASONS = frozenset(
+    {
+        "ai_provider_error",
+        "ai_empty_response",
+        "reconnect_failed",
+        "reconnect_exhausted",
+        "error",
+        "max_requests",
+        "stopped",
+    }
+)
+
 _LOG_PREFIX = "[benchmark-results]"
 
 
@@ -30,13 +44,57 @@ def normalize_target_status(status: Any) -> str:
     return "other"
 
 
-def is_benchmark_attempt(status: Any) -> bool:
-    """True when the target actually ran (not infra error / skipped)."""
-    return normalize_target_status(status) not in INFRA_EXCLUDED_TARGET_STATUSES
+def _stop_reason_from_record(record: Dict[str, Any]) -> str:
+    stop = str(record.get("stop_reason") or "").strip().lower()
+    if stop:
+        return stop
+    for entry in record.get("timeline") or []:
+        if not isinstance(entry, dict):
+            continue
+        sr = str(entry.get("stop_reason") or "").strip().lower()
+        if sr:
+            return sr
+    return ""
+
+
+def is_timeout_failure(record: Any) -> bool:
+    """True when a failed target hit the wall-clock timeout (countable miss)."""
+    if not isinstance(record, dict):
+        return False
+    message = str(record.get("message") or "").strip().lower()
+    if message.startswith("timeout after"):
+        return True
+    stop = _stop_reason_from_record(record)
+    return stop in {"timeout", "timed_out"}
+
+
+def is_benchmark_attempt(record: Any) -> bool:
+    """True when the target counts toward collab pass rate / timing averages.
+
+    Scoreable outcomes:
+      - passed (got root)
+      - failed due to wall-clock timeout
+
+    Excluded (do not affect pass rate or averages):
+      - infra error / skipped
+      - non-timeout aborts (ai_provider_error, max_requests, tool upload failures, etc.)
+    """
+    if isinstance(record, dict):
+        status = normalize_target_status(record.get("status"))
+        if status == "passed":
+            return True
+        if status == "failed":
+            return is_timeout_failure(record)
+        return False
+
+    # Legacy callers sometimes pass a bare status string. Without a message we
+    # cannot tell timeout from provider abort — treat failed as non-scoreable.
+    status = normalize_target_status(record)
+    return status == "passed"
 
 
 def build_run_summary(targets: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Aggregate per-run summary; infra errors/skips do not affect pass rate or timing totals."""
+    """Aggregate per-run summary; only passes + timeouts affect pass rate / timing."""
     counts = {"passed": 0, "failed": 0, "error": 0, "skipped": 0, "other": 0}
     for target in targets:
         st = normalize_target_status(target.get("status"))
@@ -45,7 +103,7 @@ def build_run_summary(targets: List[Dict[str, Any]]) -> Dict[str, Any]:
         else:
             counts["other"] += 1
 
-    attempted_targets = [t for t in targets if is_benchmark_attempt(t.get("status"))]
+    attempted_targets = [t for t in targets if is_benchmark_attempt(t)]
     attempted = len(attempted_targets)
 
     elapsed_total = 0.0

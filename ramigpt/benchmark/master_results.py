@@ -195,16 +195,17 @@ def _rate(numerator: int, denominator: int) -> Optional[float]:
 
 
 def _benchmark_attempted_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Targets that actually ran — excludes infra errors and skipped."""
-    return [o for o in obs if is_benchmark_attempt(o.get("status"))]
+    """Scoreable targets only — passes + wall-clock timeouts (not provider/tool aborts)."""
+    return [o for o in obs if is_benchmark_attempt(o)]
 
 
 def _root_success_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Observations that obtained root (primary signal for tokens-to-root metrics)."""
-    rooted = [o for o in obs if o.get("got_root") is True]
+    attempted = _benchmark_attempted_observations(obs)
+    rooted = [o for o in attempted if o.get("got_root") is True]
     if rooted:
         return rooted
-    return [o for o in obs if (o.get("status") or "").lower() == "passed"]
+    return [o for o in attempted if (o.get("status") or "").lower() == "passed"]
 
 
 def _failed_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -295,6 +296,9 @@ class _StatsAccumulator:
         tools: Optional[List[str]] = None,
         hardware: Optional[Dict[str, Any]] = None,
         profile_key: str = "",
+        message: str = "",
+        stop_reason: str = "",
+        timeline: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self.run_ids.add(run_id)
         agg_key = _aggregate_model_key(model_key_name, provider, model)
@@ -327,6 +331,9 @@ class _StatsAccumulator:
                     tools=tools,
                 ),
                 "status": (status or "other").lower(),
+                "message": message or "",
+                "stop_reason": stop_reason or "",
+                "timeline": list(timeline or []),
                 "got_root": got_root,
                 "elapsed_seconds": _float_or_none(elapsed_seconds),
                 "beroot_seconds": _float_or_none(timing.get("beroot_seconds")),
@@ -352,8 +359,9 @@ class _StatsAccumulator:
         total = len(obs)
         attempted_obs = _benchmark_attempted_observations(obs)
         attempted = len(attempted_obs)
-        got_root_true = sum(1 for o in obs if o.get("got_root") is True)
-        got_root_known = sum(1 for o in obs if o.get("got_root") is not None)
+        # Root rate uses scoreable attempts only (pass + timeout), not provider aborts.
+        got_root_true = sum(1 for o in attempted_obs if o.get("got_root") is True)
+        got_root_known = sum(1 for o in attempted_obs if o.get("got_root") is not None)
         root_obs = _root_success_observations(obs)
         failed_obs = _failed_observations(obs)
         got_root_block = _outcome_block(root_obs)
@@ -465,6 +473,13 @@ def _extract_observations(
         t_model_key_name = str(target.get("model_key_name") or model_key_name)
         t_role = str(target.get("role_objective") or role)
         target_id = str(target.get("target_id") or "unknown")
+        stop_reason = str(target.get("stop_reason") or "").strip()
+        if not stop_reason:
+            for entry in target.get("timeline") or []:
+                if isinstance(entry, dict) and entry.get("stop_reason"):
+                    stop_reason = str(entry.get("stop_reason") or "").strip()
+                    if stop_reason:
+                        break
         kwargs = dict(
             run_id=run_id,
             batch_id=batch_id,
@@ -487,6 +502,9 @@ def _extract_observations(
             tools=run_tools,
             hardware=hardware,
             profile_key=profile_key,
+            message=str(target.get("message") or ""),
+            stop_reason=stop_reason,
+            timeline=list(target.get("timeline") or []),
         )
         accumulator.add(**kwargs)
         by_model.setdefault(

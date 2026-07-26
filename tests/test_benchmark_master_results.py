@@ -336,6 +336,7 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
                     "status": "failed",
                     "elapsed_seconds": 180.0,
                     "got_root": False,
+                    "message": "Timeout after 180s",
                 },
                 {
                     **_sample_run_doc(run_id="x")["targets"][0],
@@ -373,6 +374,69 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             refreshed = refresh_result_document_summary(doc)
             self.assertEqual(refreshed["summary"]["pass_rate"], 0.5)
 
+    def test_ai_provider_error_excluded_from_pass_rate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run_provider"
+            run_dir.mkdir()
+            doc = _sample_run_doc(run_id="provider-mix", status="passed", elapsed=60.0)
+            base = _sample_run_doc(run_id="x")["targets"][0]
+            doc["targets"] = [
+                {
+                    **base,
+                    "target_id": "sudo-vim",
+                    "status": "passed",
+                    "elapsed_seconds": 60.0,
+                    "got_root": True,
+                    "message": "Root achieved",
+                },
+                {
+                    **base,
+                    "target_id": "sudo-awk",
+                    "status": "failed",
+                    "elapsed_seconds": 180.0,
+                    "got_root": False,
+                    "message": "Timeout after 180s",
+                },
+                {
+                    **base,
+                    "target_id": "writable-passwd",
+                    "status": "failed",
+                    "elapsed_seconds": 12.0,
+                    "got_root": False,
+                    "message": "ai_provider_error",
+                    "timeline": [
+                        {"phase": "full_ai_end", "stop_reason": "ai_provider_error"},
+                    ],
+                },
+                {
+                    **base,
+                    "target_id": "suid-python",
+                    "status": "failed",
+                    "elapsed_seconds": 40.0,
+                    "got_root": False,
+                    "message": "max_requests",
+                },
+            ]
+            (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+
+            master = build_master_document(root)
+            overall = master["aggregate"]["overall"]
+            self.assertEqual(overall["observations"], 4)
+            self.assertEqual(overall["attempted"], 2)
+            self.assertEqual(overall["passed"], 1)
+            self.assertEqual(overall["failed"], 3)
+            self.assertEqual(overall["pass_rate"], 0.5)
+            self.assertEqual(overall["got_root_rate"], 0.5)
+            self.assertEqual(overall["elapsed_seconds"]["mean"], 120.0)
+
+            from ramigpt.benchmark.results import build_run_summary
+
+            summary = build_run_summary(doc["targets"])
+            self.assertEqual(summary["attempted"], 2)
+            self.assertEqual(summary["pass_rate"], 0.5)
+            self.assertEqual(summary["elapsed_seconds_total"], 240.0)
+
     def test_got_root_token_metrics(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -387,6 +451,7 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             fail_doc = _sample_run_doc(run_id="bad", status="failed", elapsed=90.0)
             fail_doc["targets"][0]["tokens_total"] = 900
             fail_doc["targets"][0]["got_root"] = False
+            fail_doc["targets"][0]["message"] = "Timeout after 180s"
             (fail / "result.json").write_text(json.dumps(fail_doc), encoding="utf-8")
 
             master = build_master_document(root)

@@ -1139,7 +1139,9 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
                 _stop_full_ai(session_id)
                 break
             if full_ai_finished_by_session.get(session_id) and not root_won_by_session.get(session_id):
-                item.status = "failed"
+                # Provider/tool aborts (ai_provider_error, max_requests, etc.) are not
+                # countable misses — only wall-clock timeouts below count as failed.
+                item.status = "error"
                 item.message = item.message or "Full AI finished without root"
                 break
             time.sleep(0.5)
