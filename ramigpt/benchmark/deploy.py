@@ -43,6 +43,67 @@ def _default_log(message: str) -> None:
     debug_logger.info(message)
 
 
+def _combine_process_output(stdout: str = "", stderr: str = "") -> str:
+    """Merge stdout/stderr without dropping either stream."""
+    parts: List[str] = []
+    out = (stdout or "").strip()
+    err = (stderr or "").strip()
+    if out:
+        parts.append(out)
+    if err and err != out:
+        parts.append(err)
+    return "\n".join(parts).strip()
+
+
+def _ansible_failure_summary(output: str) -> str:
+    """Pull the most useful Ansible failure line(s) for UI status."""
+    text = (output or "").strip()
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    fatal = [ln for ln in lines if ln.lower().startswith("fatal:") or "[error]" in ln.lower()]
+    if fatal:
+        # Prefer the concrete msg= / connection-plugin line when present.
+        preferred = [
+            ln
+            for ln in fatal
+            if "connection plugin" in ln.lower()
+            or '"msg"' in ln
+            or "msg=" in ln.lower()
+            or "unreachable" in ln.lower()
+        ]
+        picks = preferred or fatal
+        summary = picks[-1]
+        # Keep short enough for the status strip but preserve the key detail.
+        if len(summary) > 400:
+            summary = summary[:397] + "..."
+        return summary
+    # Fall back to the last non-recap line.
+    for ln in reversed(lines):
+        if ln.startswith("PLAY RECAP") or ln.startswith("PLAY [") or ln.startswith("TASK ["):
+            continue
+        if ln.startswith("*$") or ln.startswith("$ "):
+            continue
+        return ln[:400]
+    return lines[-1][:400]
+
+
+def _command_failure_message(returncode: int, cmd: Sequence[str], stdout: str, stderr: str) -> str:
+    """Build a UI-friendly multi-line failure for ansible-playbook / shell commands."""
+    output = _combine_process_output(stdout, stderr)
+    cmd_s = " ".join(cmd)
+    headline = f"Command failed ({returncode}): {cmd_s}"
+    if not output:
+        return headline
+
+    summary = _ansible_failure_summary(output) if "ansible-playbook" in cmd_s else ""
+    blocks = [headline]
+    if summary and summary not in headline:
+        blocks.insert(0, f"Ansible deploy failed: {summary}")
+    blocks.append(output)
+    return "\n\n".join(blocks)
+
+
 def _run(
     cmd: Sequence[str],
     *,
@@ -61,13 +122,17 @@ def _run(
         timeout=timeout,
         check=False,
     )
-    if result.stdout.strip():
-        log(result.stdout.strip())
-    if result.stderr.strip():
-        log(result.stderr.strip())
+    combined = _combine_process_output(result.stdout or "", result.stderr or "")
+    if combined:
+        log(combined)
     if result.returncode != 0:
         raise RuntimeError(
-            f"Command failed ({result.returncode}): {' '.join(cmd)}\n{result.stderr or result.stdout}"
+            _command_failure_message(
+                result.returncode,
+                cmd,
+                result.stdout or "",
+                result.stderr or "",
+            )
         )
     return result
 
