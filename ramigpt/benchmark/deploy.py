@@ -169,6 +169,14 @@ def deploy_remote(
     # Pre-flight SSH so we fail fast with a clear error before Ansible.
     test_ssh_access(cfg, log=log)
 
+    # Password auth over the ssh connection plugin needs sshpass (ansible-core no
+    # longer ships the old paramiko connection plugin).
+    if not shutil.which("sshpass"):
+        raise RuntimeError(
+            "sshpass not found. Install it for remote Ansible password auth "
+            "(e.g. apt install sshpass / brew install sshpass)."
+        )
+
     # Keep secrets out of inventory.ini (passwords may contain @ / spaces).
     inventory_body = "\n".join(
         [
@@ -176,7 +184,7 @@ def deploy_remote(
             f"bench ansible_host={cfg.host} ansible_user={cfg.username} ansible_port={cfg.port}",
             "",
             "[all:vars]",
-            "ansible_connection=paramiko",
+            "ansible_connection=ssh",
             "ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'",
             "ansible_python_interpreter=auto_silent",
             "ansible_become=true",

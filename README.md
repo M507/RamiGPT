@@ -614,6 +614,7 @@ Ensure the following are installed:
 - Python 3 and pip
 - An AI backend (Ollama, Open WebUI, OpenAI, or Cursor API)
 - `ansible-core` (for Benchmark remote deploy; installed via `requirements.txt`)
+- `sshpass` (for Ansible password auth to the remote lab host; e.g. `apt install sshpass`)
 
 ### Setup
 
@@ -694,7 +695,7 @@ ansible-playbook -i ansible/benchmark/inventory.example.ini ansible/benchmark/pl
 
 Remote mode from the UI prompts for SSH user/password, installs Docker if needed, copies `docker/benchmark`, brings containers up, and verifies suite SSH ports before Full AI starts.
 
-Requires `ansible-core` (installed via `requirements.txt`).
+Requires `ansible-core` (via `requirements.txt`) and `sshpass` on the RamiGPT host for password SSH.
 
 ### Bundled enumeration tools
 
