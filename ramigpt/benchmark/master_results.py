@@ -1364,7 +1364,12 @@ def write_master_results(
     summary_path.write_text(format_master_summary(master), encoding="utf-8")
     should_update_readme = update_readme
     if should_update_readme is None:
-        should_update_readme = root.resolve() == BENCHMARK_RESULTS_DIR.resolve()
+        # Only auto-update the project README when writing the real live results
+        # dir (compare against paths.BENCHMARK_RESULTS_DIR so tests that patch
+        # this module's BENCHMARK_RESULTS_DIR cannot clobber README.md).
+        from ramigpt.paths import BENCHMARK_RESULTS_DIR as live_results_dir
+
+        should_update_readme = root.resolve() == live_results_dir.resolve()
     if should_update_readme:
         update_readme_benchmark_section(master)
     _log_info(

@@ -552,6 +552,31 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertIn("ollama-qwen3-14b", readme.read_text(encoding="utf-8"))
 
+    def test_patched_results_dir_does_not_clobber_project_readme(self):
+        """Regression: patching BENCHMARK_RESULTS_DIR must not rewrite project README."""
+        import ramigpt.benchmark.master_results as master_module
+        from ramigpt.paths import README_PATH
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run1"
+            run_dir.mkdir()
+            (run_dir / "result.json").write_text(
+                json.dumps(_sample_run_doc(run_id="r1")), encoding="utf-8"
+            )
+            before = README_PATH.read_text(encoding="utf-8") if README_PATH.is_file() else None
+            original_dir = master_module.BENCHMARK_RESULTS_DIR
+            try:
+                master_module.BENCHMARK_RESULTS_DIR = root
+                master = build_master_document(root)
+                write_master_results(master, results_dir=root)
+            finally:
+                master_module.BENCHMARK_RESULTS_DIR = original_dir
+            if before is not None:
+                after = README_PATH.read_text(encoding="utf-8")
+                self.assertEqual(before, after)
+                self.assertNotIn("ollama/qwen3:14b", after.split("<!-- benchmark-master:start -->")[1].split("<!-- benchmark-master:end -->")[0] if "<!-- benchmark-master:start -->" in after else after)
+
     def test_tools_from_configured_and_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
