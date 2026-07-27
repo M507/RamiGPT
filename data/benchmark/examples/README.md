@@ -18,4 +18,4 @@ Each run sheet includes **`model_key_name`** (model config), **`profile_label`**
 | `data/benchmark/results/` | **Live** collaborative store — empty until you run the suite |
 | `data/benchmark/examples/` | **Reference** fixtures for contributors (this folder) |
 
-After a real benchmark finishes, the app writes to `data/benchmark/results/`, rebuilds `master.json`, and updates the README stats section automatically.
+After a real benchmark finishes, the app writes to `data/benchmark/results/`, rebuilds `master.json`, and updates the **Collaborative benchmark results** section near the top of `README.md` (between `<!-- benchmark-master:start -->` / `<!-- benchmark-master:end -->`) automatically.

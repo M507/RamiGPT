@@ -54,8 +54,8 @@ That file holds the **physical/lab SSH host** used to deploy the containers (not
 After deploy, verify every target can actually escalate:
 
 ```sh
-./scripts/benchmark/verify-misconfigs.sh 10.10.1.109
-python3 -m ramigpt.benchmark.verify 10.10.1.109
+./scripts/benchmark/verify-misconfigs.sh <ip of the testing host where docker will start and can be used for testing and/or benchmarking>
+python3 -m ramigpt.benchmark.verify <ip of the testing host where docker will start and can be used for testing and/or benchmarking>
 ```
 
 UI: Benchmark modal → **Test targets (get root)** against the configured remote host. Detect-only labs (`expects_root=false`, e.g. `nfs-exports`) are flagged, not counted as root failures.

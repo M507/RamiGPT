@@ -18,14 +18,25 @@ from ramigpt.benchmark.profile import (
 )
 from ramigpt.benchmark.results import is_benchmark_attempt, normalize_target_status
 from ramigpt.benchmark.tools import enabled_tool_ids, normalize_tools
-from ramigpt.paths import BENCHMARK_RESULTS_DIR, PROJECT_ROOT, ensure_runtime_dirs
+from ramigpt.paths import BENCHMARK_RESULTS_DIR, PROJECT_ROOT, README_PATH, ensure_runtime_dirs
 from ramigpt.utils import debug_logger
 
 MASTER_RESULT_SCHEMA_VERSION = 2
 MASTER_JSON_NAME = "master.json"
 MASTER_SUMMARY_NAME = "master_summary.txt"
+
+# Live collaborative stats live in README.md immediately after the project intro
+# (first ``---`` under the title), under this heading. Merged run sheets update
+# only the region between the start/end markers.
+README_BENCHMARK_HEADING = "## Collaborative benchmark results"
 README_BENCHMARK_START = "<!-- benchmark-master:start -->"
 README_BENCHMARK_END = "<!-- benchmark-master:end -->"
+README_BENCHMARK_SECTION_INTRO = (
+    "**Live stats only** — the section below is rebuilt from real runs under "
+    "[`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` "
+    "sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated "
+    "sheets when you want to share results with the team (no automatic git actions).\n"
+)
 
 _LOG_PREFIX = "[benchmark-master]"
 
@@ -1190,13 +1201,106 @@ def format_master_markdown(master: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _readme_has_benchmark_markers(readme: str) -> bool:
+    return README_BENCHMARK_START in readme and README_BENCHMARK_END in readme
+
+
+def _insert_after_first_intro_rule(readme: str, block: str) -> Optional[str]:
+    """Insert ``block`` after the first top-level ``---`` following the title."""
+    match = re.search(r"(?m)^---\s*$", readme)
+    if not match:
+        return None
+    insert_at = match.end()
+    prefix = readme[:insert_at].rstrip("\n")
+    suffix = readme[insert_at:].lstrip("\n")
+    return f"{prefix}\n\n{block.rstrip()}\n\n{suffix}"
+
+
+def _append_markers_under_heading(readme: str) -> Optional[str]:
+    """Place empty markers at the end of the collaborative results section."""
+    heading_match = re.search(
+        rf"(?m)^{re.escape(README_BENCHMARK_HEADING)}\s*$",
+        readme,
+    )
+    if not heading_match:
+        return None
+
+    after_heading = readme[heading_match.end() :]
+    # End of this section: next top-level heading or horizontal rule.
+    end_match = re.search(r"(?m)^(?:##\s|---\s*$)", after_heading)
+    if end_match:
+        insert_at = heading_match.end() + end_match.start()
+        prefix = readme[:insert_at].rstrip("\n")
+        suffix = readme[insert_at:].lstrip("\n")
+        markers = f"{README_BENCHMARK_START}\n{README_BENCHMARK_END}"
+        return f"{prefix}\n\n{markers}\n\n{suffix}"
+
+    prefix = readme.rstrip("\n")
+    markers = f"{README_BENCHMARK_START}\n{README_BENCHMARK_END}"
+    return f"{prefix}\n\n{markers}\n"
+
+
+def ensure_readme_benchmark_markers(readme: str) -> Tuple[str, bool]:
+    """
+    Ensure README contains the collaborative stats heading + splice markers.
+
+    Expected layout (project README): intro → ``---`` →
+    ``## Collaborative benchmark results`` → prose → markers → rest of docs.
+
+    Returns ``(readme, changed)``.
+    """
+    if _readme_has_benchmark_markers(readme):
+        return readme, False
+
+    under_heading = _append_markers_under_heading(readme)
+    if under_heading is not None:
+        _log_info(
+            f"inserted {README_BENCHMARK_START}/{README_BENCHMARK_END} "
+            f"under {README_BENCHMARK_HEADING!r}"
+        )
+        return under_heading, True
+
+    section = (
+        f"{README_BENCHMARK_HEADING}\n\n"
+        f"{README_BENCHMARK_SECTION_INTRO}\n"
+        f"{README_BENCHMARK_START}\n"
+        f"{README_BENCHMARK_END}\n"
+    )
+    inserted = _insert_after_first_intro_rule(readme, section)
+    if inserted is not None:
+        _log_info(
+            f"created {README_BENCHMARK_HEADING!r} after intro rule "
+            f"with {README_BENCHMARK_START}/{README_BENCHMARK_END}"
+        )
+        return inserted, True
+
+    # Last resort: append at end of file.
+    _log_warning(
+        "could not find intro --- or collaborative heading; "
+        "appending benchmark markers at end of README"
+    )
+    suffix = (
+        f"\n\n{README_BENCHMARK_HEADING}\n\n"
+        f"{README_BENCHMARK_SECTION_INTRO}\n"
+        f"{README_BENCHMARK_START}\n"
+        f"{README_BENCHMARK_END}\n"
+    )
+    return readme.rstrip("\n") + suffix, True
+
+
 def update_readme_benchmark_section(
     master: Dict[str, Any],
     *,
     readme_path: Optional[Path] = None,
 ) -> bool:
-    """Splice auto-generated benchmark stats into README.md between marker comments."""
-    path = readme_path or (PROJECT_ROOT / "README.md")
+    """
+    Splice auto-generated benchmark stats into README.md between marker comments.
+
+    Targets the top-of-file ``## Collaborative benchmark results`` section
+    (after the project intro). If markers are missing, they are created there
+    before merging.
+    """
+    path = readme_path or README_PATH
     if not path.is_file():
         _log_warning(f"README not found — skipping benchmark section update ({path})")
         return False
@@ -1207,10 +1311,12 @@ def update_readme_benchmark_section(
         _log_warning(f"failed to read README for benchmark section update: {exc}")
         return False
 
-    if README_BENCHMARK_START not in readme or README_BENCHMARK_END not in readme:
+    readme, markers_added = ensure_readme_benchmark_markers(readme)
+    if not _readme_has_benchmark_markers(readme):
         _log_warning(
             "README missing benchmark-master markers — add "
-            f"{README_BENCHMARK_START} / {README_BENCHMARK_END} to enable auto-update"
+            f"{README_BENCHMARK_START} / {README_BENCHMARK_END} under "
+            f"{README_BENCHMARK_HEADING!r} to enable auto-update"
         )
         return False
 
@@ -1224,7 +1330,7 @@ def update_readme_benchmark_section(
         re.DOTALL,
     )
     updated = pattern.sub(block, readme, count=1)
-    if updated == readme:
+    if updated == readme and not markers_added:
         _log_warning("README benchmark section unchanged")
         return False
 
@@ -1234,7 +1340,10 @@ def update_readme_benchmark_section(
         _log_warning(f"failed to write README benchmark section: {exc}")
         return False
 
-    _log_info(f"README benchmark section updated → {path}")
+    _log_info(
+        f"README benchmark section updated → {path}"
+        + (" (markers ensured)" if markers_added else "")
+    )
     return True
 
 

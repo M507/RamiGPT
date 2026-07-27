@@ -9,9 +9,11 @@ from pathlib import Path
 
 from ramigpt.benchmark.master_results import (
     README_BENCHMARK_END,
+    README_BENCHMARK_HEADING,
     README_BENCHMARK_START,
     build_master_document,
     discover_result_documents,
+    ensure_readme_benchmark_markers,
     format_master_markdown,
     format_master_summary,
     update_readme_benchmark_section,
@@ -290,6 +292,51 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertNotIn("old", text)
             self.assertIn(README_BENCHMARK_START, text)
             self.assertIn(README_BENCHMARK_END, text)
+
+    def test_ensure_readme_markers_under_collaborative_heading(self):
+        readme = (
+            "# Demo\n\nintro\n\n---\n\n"
+            f"{README_BENCHMARK_HEADING}\n\n"
+            "Live stats only.\n\n"
+            "---\n\n## Web workspace\n"
+        )
+        updated, changed = ensure_readme_benchmark_markers(readme)
+        self.assertTrue(changed)
+        self.assertIn(README_BENCHMARK_START, updated)
+        self.assertIn(README_BENCHMARK_END, updated)
+        heading_at = updated.index(README_BENCHMARK_HEADING)
+        start_at = updated.index(README_BENCHMARK_START)
+        web_at = updated.index("## Web workspace")
+        self.assertLess(heading_at, start_at)
+        self.assertLess(start_at, web_at)
+        unchanged, changed_again = ensure_readme_benchmark_markers(updated)
+        self.assertFalse(changed_again)
+        self.assertEqual(unchanged, updated)
+
+    def test_update_readme_creates_section_after_intro_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            readme = root / "README.md"
+            readme.write_text(
+                "# Demo\n\nShort intro.\n\n---\n\n## Web workspace\n\nBody.\n",
+                encoding="utf-8",
+            )
+            run_dir = root / "run1"
+            run_dir.mkdir()
+            (run_dir / "result.json").write_text(
+                json.dumps(_sample_run_doc(run_id="r1")), encoding="utf-8"
+            )
+            master = build_master_document(root)
+            ok = update_readme_benchmark_section(master, readme_path=readme)
+            self.assertTrue(ok)
+            text = readme.read_text(encoding="utf-8")
+            self.assertIn(README_BENCHMARK_HEADING, text)
+            self.assertIn("ollama-qwen3-14b", text)
+            intro_rule = text.index("---")
+            heading_at = text.index(README_BENCHMARK_HEADING)
+            web_at = text.index("## Web workspace")
+            self.assertLess(intro_rule, heading_at)
+            self.assertLess(heading_at, web_at)
 
     def test_reset_benchmark_results_clears_and_rebuilds_empty_master(self):
         with tempfile.TemporaryDirectory() as tmp:
