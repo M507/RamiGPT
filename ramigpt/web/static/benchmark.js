@@ -17,6 +17,7 @@
   ];
   const MAX_PLAN_ENTRIES = 10;
   const MAX_TOTAL_RUNS = 50;
+  const AUTO_SAVE_COLLAB_KEY = "ramigpt.bench.autoSaveCollab";
   /** @type {Record<string, string[]>} */
   const modelListCache = {};
   /** @type {Record<string, string>} */
@@ -595,7 +596,9 @@
         const resultDir = run.result_dir
           ? `<div class="muted small">Results: <code>${escapeHtml(run.result_dir)}</code></div>`
           : collabSave && collabSave.pending
-            ? `<div class="muted small">Collab results pending — click <strong>Save collab results</strong> to write under <code>data/benchmark/results/</code>.</div>`
+            ? collabSave.auto_save
+              ? `<div class="muted small">Collab results pending — will auto-save when the batch finishes.</div>`
+              : `<div class="muted small">Collab results pending — click <strong>Save collab results</strong> to write under <code>data/benchmark/results/</code>.</div>`
             : "";
         results.innerHTML =
           modelLabel +
@@ -1174,6 +1177,7 @@
       tools: selectedTools(),
       target_ids: targetIds,
       suite_profile_id: selectedTargetProfileId() || undefined,
+      auto_save_collab: isAutoSaveCollabChecked(),
       remote: {
         host: ($("bench-remote-host").value || "").trim(),
         port: parseInt($("bench-remote-port").value, 10) || 22,
@@ -1234,6 +1238,31 @@
       await refresh();
     } catch (err) {
       setStatus(err.message || String(err), true);
+    }
+  }
+
+  function isAutoSaveCollabChecked() {
+    const el = $("bench-auto-save-collab");
+    return !!(el && el.checked);
+  }
+
+  function loadAutoSaveCollabPreference() {
+    const el = $("bench-auto-save-collab");
+    if (!el) return;
+    try {
+      el.checked = localStorage.getItem(AUTO_SAVE_COLLAB_KEY) === "1";
+    } catch (_err) {
+      /* ignore storage errors */
+    }
+  }
+
+  function persistAutoSaveCollabPreference() {
+    const el = $("bench-auto-save-collab");
+    if (!el) return;
+    try {
+      localStorage.setItem(AUTO_SAVE_COLLAB_KEY, el.checked ? "1" : "0");
+    } catch (_err) {
+      /* ignore storage errors */
     }
   }
 
@@ -1459,6 +1488,7 @@
     const cleanBtn = $("bench-clean-logs");
     const resetBtn = $("bench-reset-results");
     const saveBtn = $("bench-save-collab");
+    const autoSave = $("bench-auto-save-collab");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
     const verifyBtn = $("bench-verify-targets");
@@ -1469,6 +1499,10 @@
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
     if (saveBtn) saveBtn.addEventListener("click", saveCollabResults);
     if (resetBtn) resetBtn.addEventListener("click", resetResults);
+    if (autoSave) {
+      loadAutoSaveCollabPreference();
+      autoSave.addEventListener("change", persistAutoSaveCollabPreference);
+    }
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);

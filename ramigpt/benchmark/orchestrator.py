@@ -194,8 +194,10 @@ _batch: Dict[str, Any] = {
     "current_model": "",
     "current_role": "",
     "stop": False,
+    "auto_save_collab": False,
 }
-# Completed runs awaiting explicit "Save collab results" from the UI.
+# Completed runs awaiting explicit "Save collab results" from the UI
+# (or auto-save when the batch was started with auto_save_collab).
 _pending_collab: Dict[str, Any] = {
     "batch_id": None,
     "batch_meta": None,
@@ -237,10 +239,17 @@ def _stage_collab_result(run: BenchmarkRun) -> None:
         }
         if run.batch_id:
             _pending_collab["batch_id"] = run.batch_id
-    _log(
-        run,
-        "Results ready — click Save collab results to persist under data/benchmark/results/",
-    )
+        auto_save = bool(_batch.get("auto_save_collab"))
+    if auto_save:
+        _log(
+            run,
+            "Results staged — collab sheets will auto-save when the batch finishes",
+        )
+    else:
+        _log(
+            run,
+            "Results ready — click Save collab results to persist under data/benchmark/results/",
+        )
 
 
 def save_collab_results() -> Dict[str, Any]:
@@ -422,6 +431,7 @@ def get_status() -> Dict[str, Any]:
                 "pending": bool((_pending_collab.get("runs") or {})),
                 "run_count": len(_pending_collab.get("runs") or {}),
                 "batch_id": _pending_collab.get("batch_id"),
+                "auto_save": bool(_batch.get("auto_save_collab")),
             },
         }
 
@@ -1410,6 +1420,7 @@ def start_run(
     role_repetitions: int = 1,
     target_ids: Optional[List[str]] = None,
     suite_profile_id: Optional[str] = None,
+    auto_save_collab: bool = False,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
 
@@ -1506,6 +1517,7 @@ def start_run(
                 "current_model": ai_cfg.active_model(),
                 "current_role": role_cfg.role_objective,
                 "stop": False,
+                "auto_save_collab": bool(auto_save_collab),
             }
         )
         first = _make_run(
@@ -1632,7 +1644,9 @@ def start_run(
                         "model_plan": _batch.get("run_plan"),
                         "role_plan": _batch.get("role_plan"),
                     }
+            auto_save = False
             with _lock:
+                auto_save = bool(_batch.get("auto_save_collab"))
                 _batch["active"] = False
                 _batch["stop"] = False
             run_batch_dir = None
@@ -1650,6 +1664,53 @@ def start_run(
                 f"[benchmark] batch finished id={batch_id[:8]} "
                 f"completed={len(completed_docs)}/{total_runs}"
             )
+            if auto_save:
+                try:
+                    saved = save_collab_results()
+                    if saved.get("ok"):
+                        where = saved.get("batch_dir") or (
+                            (saved.get("paths") or ["data/benchmark/results/"])[0]
+                        )
+                        msg = (
+                            f"Auto-saved {saved.get('run_count', 0)} collab result "
+                            f"sheet(s) → {where}"
+                        )
+                        debug_logger.info(f"[benchmark] {msg}")
+                        with _lock:
+                            run_for_log = _current
+                        if run_for_log is not None:
+                            _log(run_for_log, msg)
+                    else:
+                        err = saved.get("error") or "unknown error"
+                        debug_logger.warning(
+                            f"[benchmark] auto-save collab results failed: {err}"
+                        )
+                        with _lock:
+                            run_for_log = _current
+                        if run_for_log is not None:
+                            _log(
+                                run_for_log,
+                                f"Auto-save collab results failed: {err} — "
+                                "use Save collab results",
+                            )
+                except Exception as exc:  # noqa: BLE001
+                    debug_logger.exception(
+                        "[benchmark] auto-save collab results raised"
+                    )
+                    with _lock:
+                        run_for_log = _current
+                    if run_for_log is not None:
+                        _log(
+                            run_for_log,
+                            f"Auto-save collab results failed: {exc} — "
+                            "use Save collab results",
+                        )
+                finally:
+                    with _lock:
+                        _batch["auto_save_collab"] = False
+            else:
+                with _lock:
+                    _batch["auto_save_collab"] = False
 
     thread = threading.Thread(
         target=_batch_worker,
