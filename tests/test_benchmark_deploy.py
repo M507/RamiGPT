@@ -136,6 +136,29 @@ class BenchmarkDeployFastPathTests(unittest.TestCase):
         # Headline + full play output both present and separated.
         self.assertIn("\n\n", msg)
 
+    def test_ansible_python38_target_failure_message_for_ui(self):
+        from ramigpt.benchmark.deploy import _ansible_failure_hint
+
+        play_out = (
+            "TASK [Gathering Facts] *********************************************************\n"
+            "Ansible requires Python 3.9 or newer on the target. Current version: 3.8.10 "
+            "(default, Mar 18 2025, 20:04:55) [GCC 9.4.0]\n"
+            'fatal: [bench]: FAILED! => {"msg": "The following modules failed to execute: ansible.legacy.setup."}'
+        )
+        summary = _ansible_failure_summary(play_out)
+        self.assertIn("Python 3.9", summary)
+        hint = _ansible_failure_hint(play_out)
+        self.assertIn("3.8", hint)
+        msg = _command_failure_message(
+            2,
+            ["ansible-playbook", "playbook.yml"],
+            play_out,
+            "",
+        )
+        self.assertIn("Ansible deploy failed:", msg)
+        self.assertIn("Hint:", msg)
+        self.assertIn("Command failed (2):", msg)
+
     def test_command_failure_keeps_both_stdout_and_stderr(self):
         msg = _command_failure_message(
             1,

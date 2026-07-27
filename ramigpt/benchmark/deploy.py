@@ -55,12 +55,37 @@ def _combine_process_output(stdout: str = "", stderr: str = "") -> str:
     return "\n".join(parts).strip()
 
 
+def _ansible_failure_hint(output: str) -> str:
+    """Extra remediation text for common Ansible deploy failures."""
+    lower = (output or "").lower()
+    if "requires python 3.9" in lower or (
+        "python 3.9 or newer on the target" in lower
+    ):
+        return (
+            "Hint: the remote lab host needs Python 3.9+ for ansible-core 2.20+, "
+            "or install ansible-core 2.18/2.19 on the RamiGPT host "
+            "(requirements.txt pins <2.20 for Ubuntu 20.04 / Python 3.8 labs)."
+        )
+    if "connection plugin 'paramiko'" in lower or "connection plugin \"paramiko\"" in lower:
+        return (
+            "Hint: ansible-core no longer ships the paramiko connection plugin; "
+            "use ansible_connection=ssh and install sshpass."
+        )
+    if "sshpass" in lower and ("not found" in lower or "to use the ssh" in lower):
+        return "Hint: install sshpass on the RamiGPT host (apt install sshpass)."
+    return ""
+
+
 def _ansible_failure_summary(output: str) -> str:
     """Pull the most useful Ansible failure line(s) for UI status."""
     text = (output or "").strip()
     if not text:
         return ""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # Prefer the human-readable Sub-Event / requires-Python lines when present.
+    for ln in lines:
+        if "requires python" in ln.lower() and "target" in ln.lower():
+            return ln[:400]
     fatal = [ln for ln in lines if ln.lower().startswith("fatal:") or "[error]" in ln.lower()]
     if fatal:
         # Prefer the concrete msg= / connection-plugin line when present.
@@ -68,6 +93,7 @@ def _ansible_failure_summary(output: str) -> str:
             ln
             for ln in fatal
             if "connection plugin" in ln.lower()
+            or "requires python" in ln.lower()
             or '"msg"' in ln
             or "msg=" in ln.lower()
             or "unreachable" in ln.lower()
@@ -97,9 +123,12 @@ def _command_failure_message(returncode: int, cmd: Sequence[str], stdout: str, s
         return headline
 
     summary = _ansible_failure_summary(output) if "ansible-playbook" in cmd_s else ""
+    hint = _ansible_failure_hint(output) if "ansible-playbook" in cmd_s else ""
     blocks = [headline]
     if summary and summary not in headline:
         blocks.insert(0, f"Ansible deploy failed: {summary}")
+    if hint:
+        blocks.insert(1 if summary else 0, hint)
     blocks.append(output)
     return "\n\n".join(blocks)
 
@@ -220,6 +249,10 @@ def deploy_remote(
     Use Ansible to install Docker (if needed), copy compose assets, bring selected
     targets up, and verify only those SSH ports on the remote host.
     """
+    from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
+
+    ensure_ubuntu_requirements(install=True, log=log)
+
     ensure_compose_assets()
     selected = _selected_targets(targets)
     services = [t.service for t in selected]
@@ -233,14 +266,6 @@ def deploy_remote(
 
     # Pre-flight SSH so we fail fast with a clear error before Ansible.
     test_ssh_access(cfg, log=log)
-
-    # Password auth over the ssh connection plugin needs sshpass (ansible-core no
-    # longer ships the old paramiko connection plugin).
-    if not shutil.which("sshpass"):
-        raise RuntimeError(
-            "sshpass not found. Install it for remote Ansible password auth "
-            "(e.g. apt install sshpass / brew install sshpass)."
-        )
 
     # Keep secrets out of inventory.ini (passwords may contain @ / spaces).
     inventory_body = "\n".join(
@@ -425,6 +450,11 @@ def ensure_remote_benchmark(
     Fast path: when every selected SSH port is open and accepts lowpriv login,
     skip Ansible entirely. Otherwise run the full playbook deploy.
     """
+    from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
+
+    # Fast path still needs OpenSSH tooling; full deploy needs sshpass + ansible.
+    ensure_ubuntu_requirements(install=True, log=log, check_ansible=True)
+
     selected = _selected_targets(targets)
     host = cfg.host
 
