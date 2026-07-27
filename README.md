@@ -24,7 +24,7 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-27T15:44:27.442085+00:00 · 1 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-27T15:48:48.903016+00:00 · 1 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Catalog:** 1 model key(s), 1 profile(s) (model + hardware), 1 role(s), 1 target(s), 1 tool(s), 0 hardware profile(s)
 

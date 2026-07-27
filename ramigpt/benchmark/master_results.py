@@ -1175,7 +1175,7 @@ def format_master_markdown(master: Dict[str, Any]) -> str:
                 "|---------|------|--------|-------|--:|-----:|---------:|------------:|-----------------:|-------:|---------:|",
             ]
         )
-        for row in scenario_rows[:40]:
+        for row in scenario_rows:
             scenario_profile = profile_display_label(
                 row.get("model") or "",
                 hardware_by_key.get(row.get("hardware_key") or "", {}),
@@ -1193,9 +1193,6 @@ def format_master_markdown(master: Dict[str, Any]) -> str:
                 f"| {_format_num(row.get('mean_ai_requests_to_root'))} "
                 f"| {_format_num(row.get('mean_commands_to_root'))} |"
             )
-        if len(scenario_rows) > 40:
-            lines.append("")
-            lines.append(f"_Showing top 40 of {len(scenario_rows)} scenarios — see master.json for all._")
         lines.append("")
 
     return "\n".join(lines)
