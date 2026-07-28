@@ -54,9 +54,48 @@
 
   function setStatus(msg, isError) {
     const el = $("bench-status");
+    const wrap = $("bench-status-wrap");
     if (!el) return;
-    el.textContent = msg || "";
+    const text = msg || "";
+    el.textContent = text;
     el.style.color = isError ? "var(--danger)" : "var(--muted)";
+    if (wrap) wrap.hidden = !text;
+    if (text && isError) {
+      el.scrollTop = 0;
+    }
+  }
+
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+
+  function flashCopyButton(btn) {
+    if (!btn) return;
+    btn.classList.add("is-copied");
+    const icon = btn.querySelector("i");
+    if (icon) {
+      icon.classList.remove("fa-copy");
+      icon.classList.add("fa-check");
+    }
+    window.setTimeout(() => {
+      btn.classList.remove("is-copied");
+      if (icon) {
+        icon.classList.remove("fa-check");
+        icon.classList.add("fa-copy");
+      }
+    }, 1200);
   }
 
   function syncAdvancedControls(advancedMode) {
@@ -1389,37 +1428,25 @@
       return;
     }
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
+      await copyTextToClipboard(text);
       setStatus("Run log copied.");
-      if (btn) {
-        btn.classList.add("is-copied");
-        const icon = btn.querySelector("i");
-        if (icon) {
-          icon.classList.remove("fa-copy");
-          icon.classList.add("fa-check");
-        }
-        window.setTimeout(() => {
-          btn.classList.remove("is-copied");
-          if (icon) {
-            icon.classList.remove("fa-check");
-            icon.classList.add("fa-copy");
-          }
-        }, 1200);
-      }
+      flashCopyButton(btn);
     } catch (err) {
       setStatus(err.message || "Copy failed", true);
+    }
+  }
+
+  async function copyStatusMessage() {
+    const statusEl = $("bench-status");
+    const btn = $("bench-copy-status");
+    const text = (statusEl && statusEl.textContent) || "";
+    if (!text.trim()) return;
+    try {
+      await copyTextToClipboard(text);
+      // Don't call setStatus — that would replace the message being copied.
+      flashCopyButton(btn);
+    } catch (_err) {
+      flashCopyButton(btn);
     }
   }
 
@@ -1494,6 +1521,7 @@
     const verifyBtn = $("bench-verify-targets");
     const verifyStop = $("bench-verify-stop");
     const copyLog = $("bench-copy-log");
+    const copyStatus = $("bench-copy-status");
     if (start) start.addEventListener("click", startBenchmark);
     if (stop) stop.addEventListener("click", stopBenchmark);
     if (cleanBtn) cleanBtn.addEventListener("click", cleanLogs);
@@ -1508,6 +1536,7 @@
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);
     if (verifyStop) verifyStop.addEventListener("click", stopVerify);
     if (copyLog) copyLog.addEventListener("click", copyRunLog);
+    if (copyStatus) copyStatus.addEventListener("click", copyStatusMessage);
     updateRunPlanSummary();
     updateRolePlanSummary();
   }

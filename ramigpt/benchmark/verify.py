@@ -313,6 +313,15 @@ def run_verify(
     log: Optional[LogFn] = None,
 ) -> Dict[str, Any]:
     """Synchronously verify targets; returns a public dict."""
+    from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
+
+    def _emit_req(msg: str) -> None:
+        if log:
+            log(msg)
+        else:
+            debug_logger.info(f"[verify] {msg}")
+
+    ensure_ubuntu_requirements(install=True, log=_emit_req, check_ansible=False)
     if not shutil.which("sshpass"):
         raise RuntimeError("sshpass is required on PATH to verify benchmark targets")
     write_catalog()

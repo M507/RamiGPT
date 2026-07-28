@@ -10,6 +10,8 @@ from ramigpt.benchmark.deploy import (
     check_target_ports,
     ensure_remote_benchmark,
     verify_targets_ssh,
+    _ansible_failure_summary,
+    _command_failure_message,
 )
 from ramigpt.benchmark.targets import TARGETS
 
@@ -102,6 +104,70 @@ class BenchmarkDeployFastPathTests(unittest.TestCase):
         )
         self.assertFalse(ok)
         self.assertEqual(failed, [self.targets[1].id])
+
+    def test_ansible_paramiko_failure_message_for_ui(self):
+        play_out = "\n".join(
+            [
+                "PLAY [Deploy RamiGPT privilege-escalation benchmark targets] *******************",
+                "",
+                "TASK [Gathering Facts] *********************************************************",
+                "[ERROR]: Task failed: the connection plugin 'paramiko' was not found",
+                'fatal: [bench]: FAILED! => {"changed": false, "msg": "Task failed: the connection plugin \'paramiko\' was not found"}',
+                "",
+                "PLAY RECAP *********************************************************************",
+                "bench                      : ok=0    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0",
+            ]
+        )
+        summary = _ansible_failure_summary(play_out)
+        self.assertIn("paramiko", summary)
+        self.assertIn("connection plugin", summary.lower())
+
+        msg = _command_failure_message(
+            2,
+            ["/root/RamiGPT/venv/bin/ansible-playbook", "-i", "/tmp/inv.ini", "playbook.yml"],
+            play_out,
+            "",
+        )
+        self.assertIn("Ansible deploy failed:", msg)
+        self.assertIn("paramiko", msg)
+        self.assertIn("Command failed (2):", msg)
+        self.assertIn("PLAY [Deploy RamiGPT", msg)
+        self.assertIn("Gathering Facts", msg)
+        # Headline + full play output both present and separated.
+        self.assertIn("\n\n", msg)
+
+    def test_ansible_python38_target_failure_message_for_ui(self):
+        from ramigpt.benchmark.deploy import _ansible_failure_hint
+
+        play_out = (
+            "TASK [Gathering Facts] *********************************************************\n"
+            "Ansible requires Python 3.9 or newer on the target. Current version: 3.8.10 "
+            "(default, Mar 18 2025, 20:04:55) [GCC 9.4.0]\n"
+            'fatal: [bench]: FAILED! => {"msg": "The following modules failed to execute: ansible.legacy.setup."}'
+        )
+        summary = _ansible_failure_summary(play_out)
+        self.assertIn("Python 3.9", summary)
+        hint = _ansible_failure_hint(play_out)
+        self.assertIn("3.8", hint)
+        msg = _command_failure_message(
+            2,
+            ["ansible-playbook", "playbook.yml"],
+            play_out,
+            "",
+        )
+        self.assertIn("Ansible deploy failed:", msg)
+        self.assertIn("Hint:", msg)
+        self.assertIn("Command failed (2):", msg)
+
+    def test_command_failure_keeps_both_stdout_and_stderr(self):
+        msg = _command_failure_message(
+            1,
+            ["ansible-playbook", "x.yml"],
+            "PLAY [x]\nfatal: [bench]: FAILED! => {\"msg\": \"boom\"}",
+            "warning: something",
+        )
+        self.assertIn("boom", msg)
+        self.assertIn("warning: something", msg)
 
 
 if __name__ == "__main__":

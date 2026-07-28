@@ -153,6 +153,26 @@ def _silence_eventlet_ssl_noise() -> None:
     green_ssl.GreenSSLSocket.accept = _quiet_green_accept
 
 
+def _ensure_ubuntu_requirements_on_startup() -> None:
+    """Install missing Ubuntu host packages once at boot (best-effort)."""
+    from ramigpt.utils.logging import debug_logger
+    from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
+
+    try:
+        result = ensure_ubuntu_requirements(
+            install=True,
+            log=lambda msg: print(f"[RamiGPT] {msg}", flush=True),
+        )
+        debug_logger.info(
+            f"ubuntu.requirements.startup ok={result.ok} "
+            f"installed={result.installed} ansible={result.ansible_detail}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Don't block the UI if apt/sudo isn't available — deploy/verify will retry.
+        print(f"[RamiGPT] Ubuntu requirements check: {exc}", flush=True)
+        debug_logger.warning(f"ubuntu.requirements.startup failed: {exc}")
+
+
 if __name__ == "__main__":
     # Default on for local development; set APP_RELOAD=0 to disable.
     use_reloader = _env_flag("APP_RELOAD", "1")
@@ -168,6 +188,11 @@ if __name__ == "__main__":
         "APP_CLEAN_LOGS_ON_START", "1"
     ):
         _clean_logs_on_startup()
+
+    if _should_run_startup_side_effects(use_reloader) and _env_flag(
+        "APP_ENSURE_UBUNTU_REQUIREMENTS", "1"
+    ):
+        _ensure_ubuntu_requirements_on_startup()
 
     _silence_eventlet_ssl_noise()
     socketio.run(
