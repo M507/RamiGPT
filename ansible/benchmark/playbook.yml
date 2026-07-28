@@ -1,0 +1,204 @@
+---
+# Deploy RamiGPT benchmark SSH targets on a remote host.
+# Expected vars (extra-vars or inventory):
+#   ansible_user, ansible_password, ansible_port (optional)
+# Optional selective deploy (from ramigpt.benchmark.deploy):
+#   bench_compose_services: [bench-sudo-vim, ...]  # compose service names to start
+#   bench_ssh_ports: [2211, ...]                   # only wait for these
+#   bench_all_ssh_ports: [2211, 2212, ...]         # all suite ports (teardown/DNAT cleanup)
+
+- name: Deploy RamiGPT privilege-escalation benchmark targets
+  hosts: benchmark_hosts
+  become: true
+  gather_facts: true
+  vars:
+    bench_remote_dir: "{{ ansible_env.HOME | default('/root') }}/ramigpt-benchmark"
+    bench_compose_src: "{{ playbook_dir }}/../../docker/benchmark"
+    # Overridden by deploy_remote extra-vars for selected targets.
+    bench_compose_services: []
+    bench_ssh_ports: []
+    bench_all_ssh_ports: []
+    bench_wait_timeout: 120
+
+  tasks:
+    - name: Ensure apt cache is fresh
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - python3
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check if Docker is already installed
+      ansible.builtin.command: docker --version
+      register: docker_version_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install Docker Engine (official convenience script when missing)
+      ansible.builtin.shell: |
+        set -e
+        curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+      when: docker_version_check.rc != 0
+
+    - name: Detect systemd Docker unit (classic or snap)
+      ansible.builtin.shell: |
+        if systemctl list-unit-files 2>/dev/null | grep -q '^docker\.service'; then
+          echo docker
+        elif systemctl list-unit-files 2>/dev/null | grep -q '^snap\.docker\.dockerd\.service'; then
+          echo snap.docker.dockerd
+        else
+          echo none
+        fi
+      register: docker_unit
+      changed_when: false
+
+    - name: Ensure Docker daemon service is running
+      ansible.builtin.systemd:
+        name: "{{ docker_unit.stdout | trim }}"
+        state: started
+        enabled: true
+      when: docker_unit.stdout | trim != "none"
+
+    - name: Verify Docker daemon responds
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      retries: 10
+      delay: 3
+      until: docker_info.rc == 0
+
+    - name: Ensure Docker Compose plugin is available
+      ansible.builtin.shell: docker compose version
+      register: compose_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if Docker Compose plugin is missing
+      ansible.builtin.fail:
+        msg: "docker compose plugin is required on the remote host"
+      when: compose_check.rc != 0
+
+    - name: Create benchmark directory on remote host
+      ansible.builtin.file:
+        path: "{{ bench_remote_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync benchmark Docker assets to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ bench_remote_dir }}/{{ item | basename }}"
+        mode: preserve
+      loop:
+        - "{{ bench_compose_src }}/docker-compose.yml"
+        - "{{ bench_compose_src }}/Dockerfile"
+        - "{{ bench_compose_src }}/entrypoint.sh"
+        - "{{ bench_compose_src }}/apply-misconfig.sh"
+
+    - name: Ensure bench scripts are executable
+      ansible.builtin.file:
+        path: "{{ bench_remote_dir }}/{{ item }}"
+        mode: "0755"
+      loop:
+        - entrypoint.sh
+        - apply-misconfig.sh
+
+    - name: Force remove any running RamiGPT benchmark containers
+      # Host-network labs can leave listeners if compose down missed a container.
+      ansible.builtin.shell: |
+        set +e
+        ids="$(docker ps -aq --filter 'name=ramigpt_bench_')"
+        if [ -n "$ids" ]; then
+          docker rm -f $ids
+        fi
+        exit 0
+      args:
+        executable: /bin/bash
+      register: bench_force_rm
+      changed_when: bench_force_rm.stdout | trim != ''
+      failed_when: false
+
+    - name: Tear down previous benchmark containers before recreate
+      # Always down: removes publish/DNAT leftovers and host-mode listeners cleanly.
+      ansible.builtin.command:
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          down --remove-orphans
+      register: compose_down
+      changed_when: compose_down.rc == 0
+      failed_when: false
+
+    - name: Drop stale Docker DNAT rules for benchmark SSH ports
+      # Host-network sshd must not compete with leftover `docker publish` DNATs.
+      ansible.builtin.shell: |
+        set +e
+        for port in {{ (bench_all_ssh_ports | default(bench_ssh_ports)) | map('string') | join(' ') }}; do
+          iptables-save -t nat 2>/dev/null | grep -E "^-A DOCKER .*--dport ${port}( |$)" | while read -r rule; do
+            del="${rule/-A /-D }"
+            # shellcheck disable=SC2086
+            iptables -t nat $del
+          done
+        done
+        exit 0
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Build and start selected benchmark containers
+      # Absolute paths: snap-hosted Docker cannot see /opt and mishandles relative -f paths.
+      # Host networking: sshd binds SSH_PORT on the lab host (no Docker publish/DNAT).
+      ansible.builtin.command:
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          up -d --build --force-recreate
+          {{ bench_compose_services | join(' ') }}
+      register: compose_up
+      changed_when: >-
+        'Started' in (compose_up.stdout | default(''))
+        or 'Creating' in (compose_up.stdout | default(''))
+        or 'Built' in (compose_up.stdout | default(''))
+        or compose_up.rc == 0
+
+    - name: Fail when no SSH ports were provided to wait on
+      ansible.builtin.fail:
+        msg: "bench_ssh_ports must list at least one selected target port"
+      when: (bench_ssh_ports | default([]) | length) == 0
+
+    - name: Wait for selected SSH ports on lab host IP (direct, not DNAT)
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ item }}"
+        timeout: "{{ bench_wait_timeout }}"
+        state: started
+      loop: "{{ bench_ssh_ports }}"
+
+    - name: Summarize running benchmark containers
+      ansible.builtin.command:
+        cmd: >-
+          docker compose
+          -f {{ bench_remote_dir }}/docker-compose.yml
+          --project-directory {{ bench_remote_dir }}
+          ps
+      register: compose_ps
+      changed_when: false
+
+    - name: Show compose ps output
+      ansible.builtin.debug:
+        var: compose_ps.stdout_lines

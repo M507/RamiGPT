@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RamiGPT</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+  <link rel="stylesheet" href="/static/settings.css">
+  <link rel="stylesheet" href="/static/benchmark.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" onclick="Workspace.showLanding()">
+        <span class="brand-mark">RG</span>
+        <span class="brand-name">RamiGPT</span>
+      </div>
+      <div class="topbar-search">
+        <i class="fas fa-search"></i>
+        <input type="search" id="session-search" placeholder="Search sessions…" autocomplete="off">
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-secondary" id="btn-benchmark" title="Privilege escalation benchmark">
+          <i class="fas fa-flag-checkered"></i> Benchmark
+        </button>
+        <button type="button" class="btn btn-primary" id="btn-new-session">
+          <i class="fas fa-plus"></i> New Session
+        </button>
+        <button type="button" class="btn btn-ghost" onclick="openSettings()" title="AI Settings">
+          <i class="fas fa-robot"></i>
+        </button>
+        <button type="button" class="btn btn-ghost" onclick="openAppSettings()" title="App Settings">
+          <i class="fas fa-sliders-h"></i>
+        </button>
+        <button type="button" class="btn btn-ghost danger" id="btn-delete-logs" title="Delete all logs under data/logs">
+          <i class="fas fa-broom"></i>
+        </button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar" id="sidebar">
+        <section class="side-section">
+          <div class="side-section-head">
+            <h3>Favorites</h3>
+          </div>
+          <ul class="session-list" id="list-favorites"></ul>
+        </section>
+
+        <section class="side-section">
+          <div class="side-section-head">
+            <h3>Recent</h3>
+          </div>
+          <ul class="session-list" id="list-recent"></ul>
+        </section>
+
+        <section class="side-section flex-grow">
+          <div class="side-section-head">
+            <h3>Groups</h3>
+          </div>
+          <div id="groups-tree"></div>
+        </section>
+      </aside>
+
+      <main class="workspace" id="workspace">
+        <!-- Landing / empty state -->
+        <section class="pane landing" id="pane-landing">
+          <div class="welcome">
+            <h1>Welcome</h1>
+            <p class="muted">No session selected. Manage your servers from the sidebar, or create a new session.</p>
+            <div class="welcome-actions">
+              <button type="button" class="btn btn-primary" id="btn-landing-new">
+                <i class="fas fa-plus"></i> New Session
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-landing-ai" onclick="openSettings()">
+                <i class="fas fa-robot"></i> AI Settings
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-landing-app" onclick="openAppSettings()">
+                <i class="fas fa-sliders-h"></i> App Settings
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-landing-bench" onclick="BenchmarkUI.open()">
+                <i class="fas fa-flag-checkered"></i> Benchmark
+              </button>
+            </div>
+          </div>
+          <div class="landing-grid">
+            <div class="card">
+              <h3>Recent Sessions</h3>
+              <ul class="plain-list" id="landing-recent"></ul>
+            </div>
+            <div class="card">
+              <h3>Favorites</h3>
+              <ul class="plain-list" id="landing-favorites"></ul>
+            </div>
+            <div class="card tips">
+              <h3>Tips</h3>
+              <ul>
+                <li>Credentials are remembered per <code>user@host:port</code>.</li>
+                <li>Connect a session, then use the Terminal tab for RamiGPT AI tools.</li>
+                <li>Use <strong>Benchmark</strong> to deploy targets, run BeRoot or LinEnum + Full AI, and record pass/fail.</li>
+                <li>Drag sessions between groups in the sidebar.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- Selected session workspace -->
+        <section class="pane session-pane hidden" id="pane-session">
+          <header class="session-header">
+            <div class="session-title-block">
+              <h2 id="sess-name">Session</h2>
+              <div class="session-meta">
+                <span id="sess-host">—</span>
+                <span class="tag" id="sess-env">dev</span>
+                <span class="status-pill" id="sess-status"><i class="dot"></i> Disconnected</span>
+              </div>
+              <div class="muted small" id="sess-last">Last connected: never</div>
+            </div>
+            <div class="quick-actions" id="quick-actions">
+              <button type="button" class="btn btn-primary" data-action="connect"><i class="fas fa-plug"></i> Connect</button>
+              <button type="button" class="btn btn-secondary" data-action="disconnect" disabled><i class="fas fa-unlink"></i> Disconnect</button>
+              <button type="button" class="btn btn-secondary" data-action="reconnect" disabled><i class="fas fa-sync"></i> Reconnect</button>
+              <button type="button" class="btn btn-secondary" data-action="open-terminal"><i class="fas fa-terminal"></i> Terminal</button>
+              <button type="button" class="btn btn-ghost" data-action="edit" title="Edit session"><i class="fas fa-edit"></i></button>
+              <button type="button" class="btn btn-ghost danger" data-action="delete" title="Delete session"><i class="fas fa-trash"></i></button>
+            </div>
+          </header>
+
+          <nav class="tabs" id="session-tabs">
+            <button type="button" class="tab active" data-tab="terminal">Terminal</button>
+            <button type="button" class="tab" data-tab="files">Files</button>
+            <button type="button" class="tab" data-tab="commands">Commands</button>
+            <button type="button" class="tab" data-tab="tasks">Tasks</button>
+            <button type="button" class="tab" data-tab="monitoring">Monitoring</button>
+            <button type="button" class="tab" data-tab="settings">Settings</button>
+          </nav>
+
+          <div class="tab-panels">
+            <div class="tab-panel active" id="tab-terminal">
+              <div class="terminal-layout">
+                <div class="terminal-main">
+                  <div class="terminal" id="terminal">
+                    <div class="output muted">* Awaiting connection. Output streams here.</div>
+                  </div>
+                  <div class="command-input">
+                    <span id="current-prompt">user@host:~$</span>
+                    <input type="text" id="command-field" spellcheck="false" placeholder="Enter command…" disabled>
+                  </div>
+                </div>
+                <aside class="ai-panel">
+                  <div class="ai-block">
+                    <h4>Facts <span class="muted">(this session)</span></h4>
+                    <input type="text" id="queue1-input" placeholder="Add fact — Enter">
+                    <table class="queue-table" id="queue1"><tbody></tbody></table>
+                  </div>
+                  <div class="ai-block">
+                    <h4>Hints <span class="muted">(this session)</span></h4>
+                    <input type="text" id="queue2-input" placeholder="Add hint — Enter">
+                    <table class="queue-table" id="queue2"><tbody></tbody></table>
+                  </div>
+                  <div class="ai-block">
+                    <h4>Avoid <span class="muted">(this session)</span></h4>
+                    <input type="text" id="queue3-input" placeholder="Add avoid — Enter">
+                    <table class="queue-table" id="queue3"><tbody></tbody></table>
+                  </div>
+                    <div class="ai-actions">
+                    <button type="button" class="btn btn-primary" id="action1">Full AI</button>
+                    <button type="button" class="btn btn-secondary" onclick="Workspace.guideMe()">Guide Me</button>
+                    <button type="button" class="btn btn-ghost" id="btn-clear-terminal" onclick="Workspace.clearChat()" title="Clear terminal scrollback for this session">Clear</button>
+                    <div class="tool-row">
+                      <select id="toolSelector" title="Enumeration tools (configure visibility in App Settings → Tools)">
+                      </select>
+                      <label class="tool-ai-check" title="After the scan, run Full AI using tool findings">
+                        <input type="checkbox" id="toolAiCheckbox" checked>
+                        <span>AI</span>
+                      </label>
+                      <button type="button" class="btn btn-secondary" onclick="Workspace.runTool()">Run</button>
+                    </div>
+                    <div class="tool-row">
+                      <button type="button" class="btn btn-ghost" onclick="Workspace.importConfig()">Import</button>
+                      <button type="button" class="btn btn-ghost" onclick="Workspace.exportConfig()">Export</button>
+                    </div>
+                    <input type="file" id="file-input" style="display:none" onchange="Workspace.importConfigFile(this)">
+                  </div>
+                </aside>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-files">
+              <div class="placeholder-panel">
+                <h3>File Browser</h3>
+                <p class="muted">Browse and transfer files over the active SSH session. Coming next — use the Terminal for now.</p>
+              </div>
+            </div>
+            <div class="tab-panel" id="tab-commands">
+              <div class="placeholder-panel">
+                <h3>Saved Commands</h3>
+                <p class="muted">Store reusable command snippets per host. Coming next.</p>
+              </div>
+            </div>
+            <div class="tab-panel" id="tab-tasks">
+              <div class="placeholder-panel">
+                <h3>Tasks</h3>
+                <p class="muted">Run BeRoot, LinEnum, and other automation from the Terminal AI panel.</p>
+              </div>
+            </div>
+            <div class="tab-panel" id="tab-monitoring">
+              <div class="metrics-grid" id="metrics-grid">
+                <div class="metric"><span>CPU</span><strong>—</strong></div>
+                <div class="metric"><span>Memory</span><strong>—</strong></div>
+                <div class="metric"><span>Disk</span><strong>—</strong></div>
+                <div class="metric"><span>Uptime</span><strong>—</strong></div>
+              </div>
+              <p class="muted small">Connect, then click Refresh to sample live metrics via SSH.</p>
+              <button type="button" class="btn btn-secondary" id="btn-refresh-metrics">Refresh metrics</button>
+            </div>
+            <div class="tab-panel" id="tab-settings">
+              <div class="placeholder-panel">
+                <h3>Session Settings</h3>
+                <p class="muted">Edit connection details with the pencil icon in the header. AI provider settings are available from the top bar.</p>
+                <button type="button" class="btn btn-secondary" data-action="edit">Edit Session</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- New / Edit session modal -->
+  <div id="session-modal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" role="dialog">
+      <div class="modal-head">
+        <h2 id="session-modal-title">New Session</h2>
+        <button type="button" class="icon-btn" data-close>&times;</button>
+      </div>
+      <form id="session-form">
+        <input type="hidden" id="sf-id">
+        <label>Name<input type="text" id="sf-name" required placeholder="Prod-01"></label>
+        <label>Host / IP<input type="text" id="sf-host" required placeholder="10.10.1.109"></label>
+        <div class="form-row">
+          <label>Port<input type="number" id="sf-port" value="22" required></label>
+          <label>Username<input type="text" id="sf-username" required placeholder="root"></label>
+        </div>
+        <label>Password
+          <input type="password" id="sf-password" placeholder="Leave blank to use saved creds">
+        </label>
+        <label class="check"><input type="checkbox" id="sf-remember" checked> Remember credentials for user@host:port</label>
+        <div class="form-row">
+          <label>Group
+            <select id="sf-group"></select>
+          </label>
+          <label>Environment
+            <select id="sf-env">
+              <option value="production">production</option>
+              <option value="staging">staging</option>
+              <option value="development" selected>development</option>
+              <option value="database">database</option>
+            </select>
+          </label>
+        </div>
+        <label>Hostname (prompt)<input type="text" id="sf-hostname" value="pehost"></label>
+        <label class="check"><input type="checkbox" id="sf-favorite"> Favorite</label>
+        <label>Notes<textarea id="sf-notes" rows="2"></textarea></label>
+        <p class="form-status" id="sf-status"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% include 'partials/settings_modal.html' %}
+  {% include 'partials/app_settings_modal.html' %}
+  {% include 'partials/benchmark_modal.html' %}
+
+  <script src="/static/settings.js"></script>
+  <script src="/static/benchmark.js"></script>
+  <script src="/static/workspace.js"></script>
+</body>
+</html>

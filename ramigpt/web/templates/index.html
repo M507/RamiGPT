@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hacker Terminal</title>
+    <link href='/static/styles.css' rel='stylesheet'>
+    <link href='/static/settings.css' rel='stylesheet'>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Section: Terminal -->
+        <div class="left-section">
+            <div class="header">SSH Terminal powered by RamiGPT</div>
+            <div class="matrix-bg" id="matrix-canvas"></div>
+            <div class="terminal" id="terminal">
+                <div class="output typing">
+                    * Connection established
+                </div>
+            </div>
+            <div class="command-input">
+                <span id="current-prompt">{{username}}@{{hostname}}:~$</span>
+                <input type="text" id="command-field" autofocus spellcheck="false">
+            </div>
+            <div class="status-bar">
+                <span id="current-dir">/home/user</span>
+                <span id="status">SECURE</span>
+                <span id="time"></span>
+                <button class="logout-button" type="button" onclick="openSettings()">AI Settings</button>
+                <button class="logout-button" type="button" onclick="openAppSettings()">App Settings</button>
+                <button class="logout-button" onclick="logout()">Logout</button>
+                <button class="logout-button" onclick="goham()">Go Ham</button>
+            </div>
+        </div>
+    
+        <div class="right-section">
+            <div class="queue" id="queue1">
+                <h3>Facts</h3>
+                <input type="text" id="queue1-input" placeholder="Enter item">
+                <table class="queue-table">
+                    <tbody></tbody>
+                </table>
+            </div>
+        
+            <div class="queue" id="queue2">
+                <h3>Hints</h3>
+                <input type="text" id="queue2-input" placeholder="Enter item">
+                <table class="queue-table">
+                    <tbody></tbody>
+                </table>
+            </div>
+        
+            <div class="queue" id="queue3">
+                <h3>Avoid</h3>
+                <input type="text" id="queue3-input" placeholder="Enter item">
+                <table class="queue-table">
+                    <tbody></tbody>
+                </table>
+            </div>
+        
+            <div class="queue" id="queue4">
+                <table class="queue-table">
+                    <tbody>
+                        <tr>
+                            <button class="logout-button" id="action1" onclick="action1()">Full AI</button>
+                        </tr>
+                        <tr>
+                            <button class="logout-button" onclick="sendEmptyCommand()">Guide Me</button>
+                        </tr>
+                        <tr>
+                            <button class="logout-button" id="action4" onclick="action4()">Import</button>
+                        </tr>
+                        <tr>
+                            <button class="logout-button" id="action5" onclick="action5()">Export</button>
+                        </tr>
+                        <tr>
+                            <td>
+                                <!-- Dropdown for selecting tools -->
+                                <select id="toolSelector" class="queue-select" title="Enumeration tools (App Settings → Tools)">
+                                </select>
+                            </td>
+                            <td>
+                                <label title="After the scan, run Full AI using tool findings" style="white-space:nowrap;">
+                                    <input type="checkbox" id="toolAiCheckbox" checked> AI
+                                </label>
+                            </td>
+                            <td>
+                                <!-- Run button for the selected tool -->
+                                <button class="logout-button" onclick="runSelectedTool()">Run</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>                
+                <input type="file" id="file-input" style="display: none;" onchange="importConfigFile(this)">
+            </div>
+        </div>
+        
+
+    </div>
+
+    {% include 'partials/settings_modal.html' %}
+    {% include 'partials/app_settings_modal.html' %}
+
+    
+    <script type="text/javascript" src="/static/queue.js"></script>
+    <script type="text/javascript" src="/static/common.js"></script>
+    <script type="text/javascript" src="/static/settings.js"></script>
+    <script>
+function runSelectedTool() {
+    var tool = document.getElementById('toolSelector').value;
+    var toolIds = { beRoot: "beroot", linEnum: "linenum", linPeas: "linpeas" };
+    
+    switch(tool) {
+        case 'beRoot':
+        case 'linEnum':
+        case 'linPeas':
+            action3(true, toolIds[tool] || 'beroot');
+            break;
+        case 'import':
+            action4();  // Assuming 'action4' is the function for Import
+            break;
+        case 'export':
+            action5();  // Assuming 'action5' is the function for Export
+            break;
+        default:
+            alert('No tool selected!');
+            break;
+    }
+}
+        function sendEmptyCommand() {
+            const url = '/execute';
+            const data = { command: '' };
+
+            fetch(url, {
+                method: 'POST', // or 'PUT'
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Success:', data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        }
+
+        // Define the action3 function for starting or stopping
+        async function action3(start, toolId) {
+            const method = start ? "POST" : "DELETE";
+            const aiBox = document.getElementById("toolAiCheckbox");
+            const withAi = !(aiBox && !aiBox.checked);
+            const response = await fetch("/action3", {
+                method: method,
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ action: "start", ai: withAi, tool: toolId || "beroot" })
+            });
+
+            if (response.ok) {
+            } else {
+                console.error("Request failed with status: " + response.status);
+            }
+        }
+
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const button = document.getElementById("action1");
+            let isRunning = false;
+
+            button.addEventListener("click", async function () {
+                const method = isRunning ? "DELETE" : "POST";
+                const response = await fetch("/action1", {
+                    method: method,
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ action: isRunning ? "stop" : "start" })
+                });
+
+                if (response.ok) {
+                    isRunning = !isRunning;
+                    button.textContent = isRunning ? "Stop" : "Full AI";
+                } else {
+                    console.error("Request failed");
+                }
+            });
+        });
+
+
+        function action4() {
+            document.getElementById('file-input').click();
+        }
+
+        function importConfigFile(inputElement) {
+            const file = inputElement.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const config = JSON.parse(e.target.result);
+                        console.log('Config Imported:', config);
+
+                        // Function to add imported items to their respective queues with delete functionality and sending data to backend
+                        const addItemsToQueue = (items, queueId) => {
+                            const queueTable = document.querySelector(`#${queueId} .queue-table tbody`);
+                            queueTable.innerHTML = ''; // Clear existing entries
+                            const endpoints = {
+                                "queue1": "/fact",
+                                "queue2": "/hint",
+                                "queue3": "/avoid",
+                                "queue4": "/demo"
+                            };
+                            const endpoint = endpoints[queueId];
+
+                            items.forEach(item => {
+                                const row = document.createElement("tr");
+                                row.innerHTML = `<td>${item}</td>`;
+                                row.addEventListener("click", function () {
+                                    deleteFromQueue(queueId, row, item);
+                                });
+
+                                queueTable.appendChild(row);
+
+                                // Send POST request to the server for each imported item
+                                if (endpoint) {
+                                    sendRequest(endpoint, item, "POST");
+                                }
+                            });
+                        };
+
+                        // Populate the tables with the imported data
+                        if (config.facts) {
+                            addItemsToQueue(config.facts, 'queue1');
+                        }
+                        if (config.hints) {
+                            addItemsToQueue(config.hints, 'queue2');
+                        }
+                        if (config.avoids) {
+                            addItemsToQueue(config.avoids, 'queue3');
+                        }
+
+                    } catch (error) {
+                        console.error('Error parsing config:', error);
+                    }
+                };
+                reader.onerror = function() {
+                    console.error('Error reading file:', reader.error);
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function action5() {
+            const facts = Array.from(document.querySelectorAll('#queue1 .queue-table td')).map(td => td.innerText);
+            const hints = Array.from(document.querySelectorAll('#queue2 .queue-table td')).map(td => td.innerText);
+            const avoids = Array.from(document.querySelectorAll('#queue3 .queue-table td')).map(td => td.innerText);
+
+            const configData = {
+                facts: facts,
+                hints: hints,
+                avoids: avoids
+            };
+
+            const blob = new Blob([JSON.stringify(configData, null, 2)], {type : 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "config.json";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        
+        // Initialize the terminal
+        document.addEventListener('DOMContentLoaded', function() {
+            const terminal = document.getElementById('terminal');
+            const commandField = document.getElementById('command-field');
+            const currentDir = document.getElementById('current-dir');
+            const currentPrompt = document.getElementById('current-prompt');
+            const commandHistory = [];
+            let historyIndex = -1;
+            
+            updateTime();
+            setInterval(updateTime, 1000);
+            setupMatrixBackground();
+            
+            // Function to add a command to the terminal
+            function addCommand(command) {
+                const inputLine = document.createElement('div');
+                inputLine.className = 'input-line';
+                
+                const prompt = document.createElement('span');
+                prompt.className = 'prompt';
+                prompt.textContent = currentPrompt.textContent;
+                
+                const commandText = document.createElement('span');
+                commandText.className = 'command';
+                commandText.textContent = command;
+                
+                //inputLine.appendChild(prompt);
+                //inputLine.appendChild(commandText);
+                terminal.appendChild(inputLine);
+                
+                return inputLine;
+            }
+            
+            // Function to add output to the terminal
+            function addOutput(output) {
+                const outputDiv = document.createElement('div');
+                outputDiv.className = 'output';
+                outputDiv.textContent = output;
+                terminal.appendChild(outputDiv);
+                terminal.scrollTop = terminal.scrollHeight;
+            }
+            
+            // Function to execute a command
+            function executeCommand(command) {
+                if (!command) return;
+                
+                // Add to history and reset index
+                if (commandHistory[commandHistory.length - 1] !== command) {
+                    commandHistory.push(command);
+                }
+                historyIndex = -1;
+                
+                // Add the command to the terminal display
+                addCommand(command);
+                
+                // Handle client-side commands
+                if (command === 'clear') {
+                    // Remove all children except the welcome message
+                    while (terminal.childNodes.length > 1) {
+                        terminal.removeChild(terminal.lastChild);
+                    }
+                    return;
+                } else if (command === 'help') {
+                    addOutput(`Available commands:
+- help: Show this help message
+- clear: Clear the terminal
+- cd [dir]: Change directory
+- ls: List files
+- pwd: Show current directory
+- cat [file]: Display file contents
+- Other standard Unix commands supported by the server`);
+                    return;
+                }
+                
+                // Send the command to the server
+                fetch('/execute', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ command: command })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    addOutput(data.output);
+                    
+                    // // Update current directory if it was a cd command
+                    // if (command.startsWith('cd')) {
+                    //     const dirMatch = data.output.match(/Changed directory to (.+)/);
+                    //     if (dirMatch) {
+                    //         currentDir.textContent = dirMatch[1];
+                    //         currentPrompt.textContent = `root@system:${dirMatch[1]}$`;
+                    //     }
+                    // }
+                })
+                .catch(error => {
+                    addOutput(`Error: ${error.message}`);
+                });
+            }
+            
+            // Command field event listener
+            commandField.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const command = commandField.value.trim();
+                    commandField.value = '';
+                    executeCommand(command);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (commandHistory.length > 0) {
+                        historyIndex = Math.min(historyIndex + 1, commandHistory.length - 1);
+                        commandField.value = commandHistory[commandHistory.length - 1 - historyIndex];
+                    }
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (historyIndex > 0) {
+                        historyIndex--;
+                        commandField.value = commandHistory[commandHistory.length - 1 - historyIndex];
+                    } else if (historyIndex === 0) {
+                        historyIndex = -1;
+                        commandField.value = '';
+                    }
+                }
+            });
+            
+            // Focus the command field when clicking anywhere in the terminal
+            document.addEventListener('click', function() {
+                //commandField.focus();
+            });
+            
+            // Initial focus
+            //commandField.focus();
+        });
+    </script>
+    <script src="/static/socket.js"></script>
+</body>
+</html>

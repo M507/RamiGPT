@@ -1,0 +1,34 @@
+digraph RamiGPT_PromptFlow {
+    rankdir=LR;
+    node [shape=box, style=rounded, fontname="Arial", fontsize=12];
+    edge [fontname="Arial", fontsize=11, arrowsize=1.2];
+    
+    // Main flow nodes
+    Start [label="Prompt\n(generate_prompt)", fillcolor="#E3F2FD", style="filled,rounded"];
+    AI [label="AI Provider\n(Ollama / Open WebUI /\nOpenAI / Cursor API)", fillcolor="#F8BBD0", style="filled,rounded"];
+    Command [label="Command\n(filter_output)", fillcolor="#FFF9C4", style="filled,rounded"];
+    Shell [label="Shell\n(SSH Execution)", fillcolor="#FFCCBC", style="filled,rounded"];
+    Output [label="Output\n(shell response)", fillcolor="#C8E6C9", style="filled,rounded"];
+    History [label="Add to History\n(update context)", fillcolor="#E1BEE7", style="filled,rounded"];
+    End [label="New Prompt\n(loop back)", fillcolor="#E3F2FD", style="filled,rounded"];
+    
+    // Decision point
+    RootCheck [label="Root\nAchieved?", shape=diamond, fillcolor="#FFE0B2", style="filled"];
+    
+    // Main flow
+    Start -> AI [label="Send prompt\nwith context"];
+    AI -> Command [label="AI response\n(command)"];
+    Command -> Shell [label="Execute"];
+    Shell -> Output [label="Receive"];
+    Output -> History [label="Process"];
+    History -> RootCheck;
+    RootCheck -> End [label="No\n(continue)"];
+    RootCheck -> Success [label="Yes\n(success!)", style="bold"];
+    End -> Start [label="Generate\nnew prompt", style="dashed"];
+    
+    // Success node
+    Success [label="Root Access\nAchieved!", fillcolor="#4CAF50", style="filled,rounded", fontcolor="white"];
+    
+    // Styling for better layout
+    { rank=same; Start; End; }
+}

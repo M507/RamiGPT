@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RamiGPT — Connect</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/settings.css">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            justify-content: center;
+            align-items: center;
+            gap: 14px;
+        }
+        .login-form {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border: 1px solid #0f0;
+            box-shadow: 0 0 10px #0f0;
+            width: min(920px, 94vw);
+            box-sizing: border-box;
+        }
+        .login-fields {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .login-fields input[type="text"],
+        .login-fields input[type="password"] {
+            flex: 1 1 150px;
+            min-width: 120px;
+            max-width: 200px;
+            padding: 10px;
+            background-color: #000;
+            border: 1px solid #0f0;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            box-sizing: border-box;
+        }
+        .checkbox-container {
+            color: #0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 12px 0;
+            gap: 6px;
+        }
+        .checkbox-container input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        .login-button {
+            width: 100%;
+            padding: 10px;
+            background-color: #0f0;
+            color: #000;
+            cursor: pointer;
+            font-weight: bold;
+            border: none;
+            font-family: 'Courier New', monospace;
+        }
+        /* Secondary tools under Connect — room for future actions */
+        .login-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            width: min(920px, 94vw);
+        }
+        .login-tool-btn {
+            background: transparent;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 8px 18px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            cursor: pointer;
+            min-width: 120px;
+        }
+        .login-tool-btn:hover {
+            background: rgba(0, 255, 0, 0.12);
+        }
+        .login-tool-btn i {
+            margin-right: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <form class="login-form" id="login-form">
+            <div class="login-fields">
+                <input type="text" id="hostname" placeholder="Hostname" value="pehost" required>
+                <input type="text" id="server" placeholder="Server Address" value="10.10.1.109" required>
+                <input type="text" id="port" placeholder="Port" value="2224" required>
+                <input type="text" id="username" placeholder="Username" required>
+                <input type="password" id="password" placeholder="Password" required>
+            </div>
+            <div class="checkbox-container">
+                <input type="checkbox" id="remember-me">
+                <label for="remember-me">Remember Me</label>
+            </div>
+            <button type="submit" class="login-button">Connect</button>
+        </form>
+
+        <div class="login-toolbar" aria-label="App tools">
+            <button type="button" class="login-tool-btn" id="login-settings-btn" onclick="openSettings()">
+                <i class="fas fa-robot"></i>AI Settings
+            </button>
+            <button type="button" class="login-tool-btn" id="login-app-settings-btn" onclick="openAppSettings()">
+                <i class="fas fa-sliders-h"></i>App Settings
+            </button>
+            <!-- Future tool buttons go here -->
+        </div>
+    </div>
+
+    {% include 'partials/settings_modal.html' %}
+    {% include 'partials/app_settings_modal.html' %}
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/static/settings.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#login-form').on('submit', function(e) {
+                e.preventDefault();
+                const hostname = $('#hostname').val();
+                const server = $('#server').val();
+                const port = $('#port').val();
+                const username = $('#username').val();
+                const password = $('#password').val();
+                const rememberMe = $('#remember-me').is(':checked');
+
+                $.ajax({
+                    url: '/connect',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ hostname, server, port, username, password, rememberMe }),
+                    success: function(response) {
+                        if (response.success) {
+                            window.location.href = '/';
+                        } else {
+                            alert('Login failed. Please check your credentials.');
+                        }
+                    },
+                    error: function() {
+                        alert('Connection error. Please try again later.');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

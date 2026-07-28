@@ -1,0 +1,281 @@
+/* Settings modal (shared: login + terminal) — above workspace/benchmark modals (1100) */
+.settings-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-modal.open {
+    display: flex;
+}
+
+.settings-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+}
+
+.settings-panel {
+    position: relative;
+    z-index: 1;
+    width: min(480px, 92vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #000;
+    border: 1px solid #0f0;
+    box-shadow: 0 0 20px rgba(0, 255, 0, 0.35);
+    padding: 20px;
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #0f0;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+}
+
+.settings-header h2 {
+    margin: 0;
+    font-size: 18px;
+    text-shadow: 0 0 5px #0f0;
+}
+
+.settings-close {
+    background: transparent;
+    border: 1px solid #0f0;
+    color: #0f0;
+    font-size: 22px;
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.settings-help {
+    font-size: 12px;
+    opacity: 0.85;
+    margin: 0 0 16px;
+    line-height: 1.4;
+}
+
+.settings-help code,
+.settings-help strong {
+    color: #7fff7f;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.settings-field em {
+    font-style: normal;
+    opacity: 0.6;
+    font-size: 11px;
+}
+
+.settings-input {
+    background: #000;
+    border: 1px solid #0f0;
+    color: #0f0;
+    padding: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.settings-input:focus {
+    box-shadow: 0 0 6px rgba(0, 255, 0, 0.4);
+}
+
+.settings-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.settings-input-row .settings-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-icon-btn {
+    padding: 8px 12px;
+    min-width: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-hint {
+    font-size: 11px;
+    opacity: 0.75;
+    margin-top: 4px;
+}
+
+.settings-hint.error {
+    color: #ff5555;
+    opacity: 1;
+}
+
+.settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+.app-settings-subpanel[hidden] {
+    display: none !important;
+}
+
+.app-settings-subpanel-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.app-settings-subpanel-title {
+    margin: 0;
+    font-size: 15px;
+    color: #0f0;
+}
+
+.app-settings-tools-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.settings-btn {
+    background-color: #0f0;
+    color: #000;
+    border: none;
+    padding: 8px 16px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+}
+
+.settings-btn.secondary {
+    background: transparent;
+    color: #0f0;
+    border: 1px solid #0f0;
+}
+
+.settings-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
+.settings-status {
+    min-height: 1.2em;
+    font-size: 12px;
+    margin: 4px 0 8px;
+    white-space: pre-wrap;
+}
+
+.settings-status.success {
+    color: #7fff7f;
+}
+
+.settings-status.error {
+    color: #ff5555;
+}
+
+/* App settings toggle row */
+.settings-toggle-field {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    cursor: pointer;
+}
+
+.settings-toggle-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.settings-toggle-title {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.settings-toggle-hint {
+    font-size: 11px;
+    opacity: 0.75;
+    line-height: 1.35;
+}
+
+.settings-toggle-hint code {
+    color: #7fff7f;
+}
+
+.settings-toggle {
+    position: relative;
+    flex: 0 0 auto;
+    width: 46px;
+    height: 26px;
+    margin-top: 2px;
+}
+
+.settings-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.settings-toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #111;
+    border: 1px solid #0f0;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+    border-radius: 999px;
+}
+
+.settings-toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    top: 3px;
+    background: #0f0;
+    transition: transform 0.15s ease;
+    border-radius: 50%;
+}
+
+.settings-toggle input:checked + .settings-toggle-slider {
+    background: rgba(0, 255, 0, 0.22);
+    box-shadow: 0 0 8px rgba(0, 255, 0, 0.35);
+}
+
+.settings-toggle input:checked + .settings-toggle-slider::before {
+    transform: translateX(20px);
+}
+
+.settings-toggle input:focus-visible + .settings-toggle-slider {
+    box-shadow: 0 0 0 2px rgba(0, 255, 0, 0.45);
+}

@@ -1,0 +1,28 @@
+services:
+  flask-app:
+    image: python:3.9-slim
+    container_name: flask_app
+    ports:
+      - "127.0.0.1:8443:8443"
+    environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8443"
+      APP_RELOAD: "0"
+      DEBIAN_FRONTEND: "noninteractive"
+    volumes:
+      - ..:/app
+      - ../data/logs:/app/data/logs
+    working_dir: /app
+    env_file:
+      - ../.env
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        apt-get update
+        apt-get install -y --no-install-recommends openssl bash
+        chmod +x ./scripts/generate_certs.sh
+        ./scripts/generate_certs.sh
+        pip install --no-cache-dir -r requirements.txt
+        exec python app.py
