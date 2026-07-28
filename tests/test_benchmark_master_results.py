@@ -8,14 +8,24 @@ import unittest
 from pathlib import Path
 
 from ramigpt.benchmark.master_results import (
+    BENCHMARK_MD_END,
+    BENCHMARK_MD_HEADING,
+    BENCHMARK_MD_START,
+    BENCHMARK_SCENARIOS_END,
+    BENCHMARK_SCENARIOS_HEADING,
+    BENCHMARK_SCENARIOS_START,
     README_BENCHMARK_END,
     README_BENCHMARK_HEADING,
     README_BENCHMARK_START,
     build_master_document,
     discover_result_documents,
+    ensure_benchmark_md_markers,
+    ensure_benchmark_md_scenario_markers,
     ensure_readme_benchmark_markers,
     format_master_markdown,
     format_master_summary,
+    update_benchmark_md_section,
+    update_benchmark_md_scenarios_section,
     update_readme_benchmark_section,
     write_master_results,
 )
@@ -260,15 +270,21 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             md = format_master_markdown(master)
             self.assertIn("| Profile |", md)
             self.assertIn("12282 MiB", md)
-            self.assertIn("| Tools |", md)
-            self.assertIn("`beroot`", md)
             self.assertIn("#### Overall — ollama-qwen3-14b", md)
             self.assertIn("| Mean tokens to root |", md)
             self.assertNotIn("**Mean tokens to root**", md)
             self.assertNotIn("#### Recent runs", md)
+            self.assertNotIn("#### Scenarios (profile · role · target · tools)", md)
             self.assertIn("Runs merge when profile", md)
             self.assertIn("ollama-qwen3-14b", md)
             self.assertIn("master.json", md)
+
+            with_scenarios = format_master_markdown(master, include_scenarios=True)
+            self.assertIn("#### Scenarios (profile · role · target · tools)", with_scenarios)
+            self.assertIn("| Tools |", with_scenarios)
+            self.assertIn("`beroot`", with_scenarios)
+            self.assertIn("#### Overall — ollama-qwen3-14b", with_scenarios)
+            self.assertIn("#### Profiles", with_scenarios)
 
     def test_update_readme_benchmark_section(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -292,6 +308,58 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertNotIn("old", text)
             self.assertIn(README_BENCHMARK_START, text)
             self.assertIn(README_BENCHMARK_END, text)
+            self.assertNotIn("#### Scenarios (profile · role · target · tools)", text)
+
+    def test_update_benchmark_md_section(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            benchmark_md = root / "benchmark.md"
+            benchmark_md.write_text(
+                "# Demo\n\n"
+                f"{BENCHMARK_MD_START}\nold\n{BENCHMARK_MD_END}\n",
+                encoding="utf-8",
+            )
+            run_dir = root / "run1"
+            run_dir.mkdir()
+            (run_dir / "result.json").write_text(
+                json.dumps(_sample_run_doc(run_id="r1")), encoding="utf-8"
+            )
+            master = build_master_document(root)
+            ok = update_benchmark_md_section(master, benchmark_md_path=benchmark_md)
+            self.assertTrue(ok)
+            text = benchmark_md.read_text(encoding="utf-8")
+            self.assertIn("#### Overall — ollama-qwen3-14b", text)
+            self.assertIn("#### Profiles", text)
+            self.assertIn("`sudo-vim`", text)
+            self.assertIn("`beroot`", text)
+            self.assertNotIn("old", text)
+            self.assertIn(BENCHMARK_MD_START, text)
+            self.assertIn(BENCHMARK_MD_END, text)
+
+    def test_ensure_benchmark_md_markers_appends_section(self):
+        text = "# Demo\n\nCredentials for labs.\n"
+        updated, changed = ensure_benchmark_md_markers(text)
+        self.assertTrue(changed)
+        self.assertIn(BENCHMARK_MD_HEADING, updated)
+        self.assertIn(BENCHMARK_MD_START, updated)
+        self.assertIn(BENCHMARK_MD_END, updated)
+        unchanged, changed_again = ensure_benchmark_md_markers(updated)
+        self.assertFalse(changed_again)
+        self.assertEqual(unchanged, updated)
+
+    def test_legacy_scenario_heading_renamed(self):
+        text = (
+            "# Demo\n\n"
+            "## Collaborative scenario results\n\n"
+            "Per-scenario stats (profile · role · target · tools), rebuilt from the same "
+            "live master as the summary tables in [`README.md`](README.md). "
+            "Full JSON: [`data/benchmark/results/master.json`](data/benchmark/results/master.json).\n\n"
+            f"{BENCHMARK_SCENARIOS_START}\nold\n{BENCHMARK_SCENARIOS_END}\n"
+        )
+        updated, changed = ensure_benchmark_md_scenario_markers(text)
+        self.assertTrue(changed)
+        self.assertIn(BENCHMARK_MD_HEADING, updated)
+        self.assertNotIn("## Collaborative scenario results", updated)
 
     def test_ensure_readme_markers_under_collaborative_heading(self):
         readme = (
@@ -614,7 +682,7 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertEqual(len(scenario_keys), 2)
             self.assertTrue(any(key.endswith("|beroot") for key in scenario_keys))
             self.assertTrue(any(key.endswith("|none") for key in scenario_keys))
-            md = format_master_markdown(master)
+            md = format_master_markdown(master, include_scenarios=True)
             self.assertIn("| Tools |", md)
 
     def test_collaborative_merge_same_profile(self):

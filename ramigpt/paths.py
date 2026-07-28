@@ -31,6 +31,7 @@ SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 ENV_PATH = PROJECT_ROOT / ".env"
 AI_SETTINGS_PATH = DATA_DIR / "ai_settings.json"
 README_PATH = PROJECT_ROOT / "README.md"
+BENCHMARK_MD_PATH = PROJECT_ROOT / "benchmark.md"
 
 WEB_DIR = PACKAGE_DIR / "web"
 TEMPLATES_DIR = WEB_DIR / "templates"

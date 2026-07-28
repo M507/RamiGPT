@@ -18,7 +18,13 @@ from ramigpt.benchmark.profile import (
 )
 from ramigpt.benchmark.results import is_benchmark_attempt, normalize_target_status
 from ramigpt.benchmark.tools import enabled_tool_ids, normalize_tools
-from ramigpt.paths import BENCHMARK_RESULTS_DIR, PROJECT_ROOT, README_PATH, ensure_runtime_dirs
+from ramigpt.paths import (
+    BENCHMARK_MD_PATH,
+    BENCHMARK_RESULTS_DIR,
+    PROJECT_ROOT,
+    README_PATH,
+    ensure_runtime_dirs,
+)
 from ramigpt.utils import debug_logger
 
 MASTER_RESULT_SCHEMA_VERSION = 2
@@ -27,7 +33,8 @@ MASTER_SUMMARY_NAME = "master_summary.txt"
 
 # Live collaborative stats live in README.md immediately after the project intro
 # (first ``---`` under the title), under this heading. Merged run sheets update
-# only the region between the start/end markers.
+# only the region between the start/end markers. README omits the long scenarios
+# table; ``benchmark.md`` gets the full markdown (overall + profiles + scenarios).
 README_BENCHMARK_HEADING = "## Collaborative benchmark results"
 README_BENCHMARK_START = "<!-- benchmark-master:start -->"
 README_BENCHMARK_END = "<!-- benchmark-master:end -->"
@@ -35,8 +42,27 @@ README_BENCHMARK_SECTION_INTRO = (
     "**Live stats only** — the section below is rebuilt from real runs under "
     "[`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` "
     "sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated "
-    "sheets when you want to share results with the team (no automatic git actions).\n"
+    "sheets when you want to share results with the team (no automatic git actions).\n\n"
+    "Full stats including per-scenario breakdown also live in "
+    "[`benchmark.md`](benchmark.md).\n"
 )
+
+# Same collaborative master content as README, plus scenarios. Markers keep the
+# historical ``benchmark-scenarios`` name for splice stability.
+BENCHMARK_MD_HEADING = "## Collaborative benchmark results"
+BENCHMARK_MD_START = "<!-- benchmark-scenarios:start -->"
+BENCHMARK_MD_END = "<!-- benchmark-scenarios:end -->"
+# Backward-compatible aliases (older tests / callers).
+BENCHMARK_SCENARIOS_HEADING = BENCHMARK_MD_HEADING
+BENCHMARK_SCENARIOS_START = BENCHMARK_MD_START
+BENCHMARK_SCENARIOS_END = BENCHMARK_MD_END
+BENCHMARK_MD_SECTION_INTRO = (
+    "Live collaborative stats from the same master as [`README.md`](README.md) "
+    "(overall, profiles, and per-scenario tables). "
+    "Full JSON: [`data/benchmark/results/master.json`](data/benchmark/results/master.json).\n"
+)
+BENCHMARK_SCENARIOS_SECTION_INTRO = BENCHMARK_MD_SECTION_INTRO
+_LEGACY_BENCHMARK_MD_HEADING = "## Collaborative scenario results"
 
 _LOG_PREFIX = "[benchmark-master]"
 
@@ -1066,8 +1092,53 @@ def format_master_summary(master: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_master_markdown(master: Dict[str, Any]) -> str:
-    """GitHub-friendly markdown tables for README and docs."""
+def _format_scenarios_markdown_table(
+    master: Dict[str, Any],
+    *,
+    hardware_by_key: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Markdown lines for the scenarios ranking table (may be empty)."""
+    scenario_rows = (master.get("rankings") or {}).get("scenarios") or []
+    if not scenario_rows:
+        return []
+
+    if hardware_by_key is None:
+        hardware_by_key = _hardware_by_key_from_catalog(master.get("catalog") or {})
+
+    lines = [
+        "#### Scenarios (profile · role · target · tools)",
+        "",
+        "| Profile | Role | Target | Tools | n | Pass | Got root | Tokens→root | Elapsed→root (s) | AI req | Commands |",
+        "|---------|------|--------|-------|--:|-----:|---------:|------------:|-----------------:|-------:|---------:|",
+    ]
+    for row in scenario_rows:
+        scenario_profile = profile_display_label(
+            row.get("model") or "",
+            hardware_by_key.get(row.get("hardware_key") or "", {}),
+        )
+        lines.append(
+            f"| {scenario_profile} "
+            f"| {row.get('role')} "
+            f"| `{row.get('target_id')}` "
+            f"| {_format_tools(row.get('tools'))} "
+            f"| {row.get('observations', 0)} "
+            f"| {_format_rate(row.get('pass_rate'))} "
+            f"| {_format_rate(row.get('got_root_rate'))} "
+            f"| {_format_int(row.get('mean_tokens_to_root'))} "
+            f"| {_format_num(row.get('mean_elapsed_to_root'))} "
+            f"| {_format_num(row.get('mean_ai_requests_to_root'))} "
+            f"| {_format_num(row.get('mean_commands_to_root'))} |"
+        )
+    lines.append("")
+    return lines
+
+
+def format_master_markdown(
+    master: Dict[str, Any],
+    *,
+    include_scenarios: bool = False,
+) -> str:
+    """GitHub-friendly markdown tables (scenarios optional; off for README)."""
     runs = int(master.get("source_runs_deduped") or 0)
     lines: List[str] = [
         f"_Last updated: {master.get('updated_at') or '—'} · "
@@ -1165,35 +1236,10 @@ def format_master_markdown(master: Dict[str, Any]) -> str:
             )
         lines.append("")
 
-    scenario_rows = (master.get("rankings") or {}).get("scenarios") or []
-    if scenario_rows:
+    if include_scenarios:
         lines.extend(
-            [
-                "#### Scenarios (profile · role · target · tools)",
-                "",
-                "| Profile | Role | Target | Tools | n | Pass | Got root | Tokens→root | Elapsed→root (s) | AI req | Commands |",
-                "|---------|------|--------|-------|--:|-----:|---------:|------------:|-----------------:|-------:|---------:|",
-            ]
+            _format_scenarios_markdown_table(master, hardware_by_key=hardware_by_key)
         )
-        for row in scenario_rows:
-            scenario_profile = profile_display_label(
-                row.get("model") or "",
-                hardware_by_key.get(row.get("hardware_key") or "", {}),
-            )
-            lines.append(
-                f"| {scenario_profile} "
-                f"| {row.get('role')} "
-                f"| `{row.get('target_id')}` "
-                f"| {_format_tools(row.get('tools'))} "
-                f"| {row.get('observations', 0)} "
-                f"| {_format_rate(row.get('pass_rate'))} "
-                f"| {_format_rate(row.get('got_root_rate'))} "
-                f"| {_format_int(row.get('mean_tokens_to_root'))} "
-                f"| {_format_num(row.get('mean_elapsed_to_root'))} "
-                f"| {_format_num(row.get('mean_ai_requests_to_root'))} "
-                f"| {_format_num(row.get('mean_commands_to_root'))} |"
-            )
-        lines.append("")
 
     return "\n".join(lines)
 
@@ -1344,6 +1390,129 @@ def update_readme_benchmark_section(
     return True
 
 
+def _benchmark_md_has_markers(text: str) -> bool:
+    return BENCHMARK_MD_START in text and BENCHMARK_MD_END in text
+
+
+def _normalize_benchmark_md_heading(text: str) -> Tuple[str, bool]:
+    """Rename legacy ``Collaborative scenario results`` heading if present."""
+    if _LEGACY_BENCHMARK_MD_HEADING not in text:
+        return text, False
+    updated = re.sub(
+        rf"(?m)^{re.escape(_LEGACY_BENCHMARK_MD_HEADING)}\s*$",
+        BENCHMARK_MD_HEADING,
+        text,
+        count=1,
+    )
+    legacy_intro = (
+        "Per-scenario stats (profile · role · target · tools), rebuilt from the same "
+        "live master as the summary tables in [`README.md`](README.md). "
+        "Full JSON: [`data/benchmark/results/master.json`](data/benchmark/results/master.json)."
+    )
+    if legacy_intro in updated:
+        updated = updated.replace(legacy_intro, BENCHMARK_MD_SECTION_INTRO.rstrip("\n"), 1)
+    return updated, updated != text
+
+
+def ensure_benchmark_md_markers(text: str) -> Tuple[str, bool]:
+    """
+    Ensure ``benchmark.md`` has the collaborative results heading + markers.
+
+    Returns ``(text, changed)``.
+    """
+    text, heading_changed = _normalize_benchmark_md_heading(text)
+    if _benchmark_md_has_markers(text):
+        return text, heading_changed
+
+    heading_match = re.search(
+        rf"(?m)^{re.escape(BENCHMARK_MD_HEADING)}\s*$",
+        text,
+    )
+    if heading_match:
+        after_heading = text[heading_match.end() :]
+        end_match = re.search(r"(?m)^(?:##\s|---\s*$)", after_heading)
+        if end_match:
+            insert_at = heading_match.end() + end_match.start()
+            prefix = text[:insert_at].rstrip("\n")
+            suffix = text[insert_at:].lstrip("\n")
+            markers = f"{BENCHMARK_MD_START}\n{BENCHMARK_MD_END}"
+            return f"{prefix}\n\n{markers}\n\n{suffix}", True
+        prefix = text.rstrip("\n")
+        markers = f"{BENCHMARK_MD_START}\n{BENCHMARK_MD_END}"
+        return f"{prefix}\n\n{markers}\n", True
+
+    section = (
+        f"\n\n{BENCHMARK_MD_HEADING}\n\n"
+        f"{BENCHMARK_MD_SECTION_INTRO}\n"
+        f"{BENCHMARK_MD_START}\n"
+        f"{BENCHMARK_MD_END}\n"
+    )
+    _log_info(
+        f"appending {BENCHMARK_MD_HEADING!r} with "
+        f"{BENCHMARK_MD_START}/{BENCHMARK_MD_END} to benchmark.md"
+    )
+    return text.rstrip("\n") + section, True
+
+
+ensure_benchmark_md_scenario_markers = ensure_benchmark_md_markers
+
+
+def update_benchmark_md_section(
+    master: Dict[str, Any],
+    *,
+    benchmark_md_path: Optional[Path] = None,
+) -> bool:
+    """Splice full collaborative stats (incl. scenarios) into ``benchmark.md``."""
+    path = benchmark_md_path or BENCHMARK_MD_PATH
+    if not path.is_file():
+        _log_warning(f"benchmark.md not found — skipping collaborative update ({path})")
+        return False
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _log_warning(f"failed to read benchmark.md for collaborative update: {exc}")
+        return False
+
+    text, markers_added = ensure_benchmark_md_markers(text)
+    if not _benchmark_md_has_markers(text):
+        _log_warning(
+            "benchmark.md missing collaborative markers — add "
+            f"{BENCHMARK_MD_START} / {BENCHMARK_MD_END} under "
+            f"{BENCHMARK_MD_HEADING!r} to enable auto-update"
+        )
+        return False
+
+    block = (
+        f"{BENCHMARK_MD_START}\n"
+        f"{format_master_markdown(master, include_scenarios=True)}\n"
+        f"{BENCHMARK_MD_END}"
+    )
+    pattern = re.compile(
+        re.escape(BENCHMARK_MD_START) + r".*?" + re.escape(BENCHMARK_MD_END),
+        re.DOTALL,
+    )
+    updated = pattern.sub(block, text, count=1)
+    if updated == text and not markers_added:
+        _log_warning("benchmark.md collaborative section unchanged")
+        return False
+
+    try:
+        path.write_text(updated, encoding="utf-8")
+    except OSError as exc:
+        _log_warning(f"failed to write benchmark.md collaborative section: {exc}")
+        return False
+
+    _log_info(
+        f"benchmark.md collaborative section updated → {path}"
+        + (" (markers ensured)" if markers_added else "")
+    )
+    return True
+
+
+update_benchmark_md_scenarios_section = update_benchmark_md_section
+
+
 def write_master_results(
     master: Dict[str, Any],
     *,
@@ -1362,16 +1531,18 @@ def write_master_results(
     )
     summary_path = root / MASTER_SUMMARY_NAME
     summary_path.write_text(format_master_summary(master), encoding="utf-8")
-    should_update_readme = update_readme
-    if should_update_readme is None:
-        # Only auto-update the project README when writing the real live results
+    should_update_docs = update_readme
+    if should_update_docs is None:
+        # Only auto-update project docs when writing the real live results
         # dir (compare against paths.BENCHMARK_RESULTS_DIR so tests that patch
-        # this module's BENCHMARK_RESULTS_DIR cannot clobber README.md).
+        # this module's BENCHMARK_RESULTS_DIR cannot clobber README.md /
+        # benchmark.md).
         from ramigpt.paths import BENCHMARK_RESULTS_DIR as live_results_dir
 
-        should_update_readme = root.resolve() == live_results_dir.resolve()
-    if should_update_readme:
+        should_update_docs = root.resolve() == live_results_dir.resolve()
+    if should_update_docs:
         update_readme_benchmark_section(master)
+        update_benchmark_md_scenarios_section(master)
     _log_info(
         f"master updated → {json_path} "
         f"(runs={master.get('source_runs_deduped')}, "
