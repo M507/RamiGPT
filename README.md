@@ -26,7 +26,7 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-28T12:24:40.666837+00:00 · 31 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-28T14:09:06.162768+00:00 · 39 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Catalog:** 9 model key(s), 9 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 1 hardware profile(s)
 
@@ -36,19 +36,19 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 
 | Metric | Value |
 |--------|------:|
-| Observations | 44 |
-| Runs | 4 |
-| Pass rate (attempted) | 21.4% |
-| Got root rate | 21.9% |
-| Got root count | 9 |
-| Median elapsed (s) | 201.089 |
-| Mean elapsed (s) | 261.654 |
-| Mean tokens to root | 4,705 |
-| Median tokens to root | 4,953 |
-| Mean elapsed to root (s) | 488.119 |
-| Mean AI requests to root | 1.222 |
-| Mean commands to root | 1.111 |
-| Tokens/sec to root | 9.640 |
+| Observations | 56 |
+| Runs | 8 |
+| Pass rate (attempted) | 33.3% |
+| Got root rate | 34.0% |
+| Got root count | 18 |
+| Median elapsed (s) | 201.085 |
+| Mean elapsed (s) | 225.313 |
+| Mean tokens to root | 4,346 |
+| Median tokens to root | 4,283 |
+| Mean elapsed to root (s) | 279.279 |
+| Mean AI requests to root | 1.333 |
+| Mean commands to root | 1.278 |
+| Tokens/sec to root | 15.560 |
 
 #### Overall — openwebui-openai-gpt-3.5-turbo-latest · Online AI Service
 
@@ -180,19 +180,19 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 
 | Metric | Value |
 |--------|------:|
-| Observations | 38 |
-| Runs | 2 |
-| Pass rate (attempted) | 5.6% |
-| Got root rate | 6.1% |
-| Got root count | 2 |
-| Median elapsed (s) | 201.096 |
-| Mean elapsed (s) | 197.625 |
-| Mean tokens to root | 5,145 |
-| Median tokens to root | 5,145 |
-| Mean elapsed to root (s) | 138.554 |
+| Observations | 50 |
+| Runs | 6 |
+| Pass rate (attempted) | 6.5% |
+| Got root rate | 7.5% |
+| Got root count | 3 |
+| Median elapsed (s) | 201.092 |
+| Mean elapsed (s) | 192.912 |
+| Mean tokens to root | 5,289 |
+| Median tokens to root | 5,578 |
+| Mean elapsed to root (s) | 135.340 |
 | Mean AI requests to root | 1.000 |
 | Mean commands to root | 1.000 |
-| Tokens/sec to root | 37.134 |
+| Tokens/sec to root | 39.082 |
 
 #### Profiles
 
@@ -200,11 +200,11 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 |---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
 | openwebui-openai-gpt-4o-latest · Online AI Service | 19 | 100.0% | 100.0% | 6.762 | 0 | 25.125 | 4.667 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 134 | 51.6% | 52.4% | 72.045 | 0 | 65.793 | 7.061 |
+| openwebui-deepseek-r1-14b · Online AI Service | 56 | 33.3% | 34.0% | 201.085 | 4,346 | 279.279 | 1.333 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 326 | 24.9% | 25.0% | 181.209 | 0 | 68.189 | 6.317 |
-| openwebui-deepseek-r1-14b · Online AI Service | 44 | 21.4% | 21.9% | 201.089 | 4,705 | 488.119 | 1.222 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 39 | 20.0% | 20.7% | 61.037 | 0 | 59.564 | 1.167 |
-| openwebui-qwen3-14b · Online AI Service | 38 | 5.6% | 6.1% | 201.096 | 5,145 | 138.554 | 1.000 |
+| openwebui-qwen3-14b · Online AI Service | 50 | 6.5% | 7.5% | 201.092 | 5,289 | 135.340 | 1.000 |
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 19 | 0.0% | 0.0% | 181.084 | — | — | — |
 | openwebui-openai-gpt-4o-mini-latest · Online AI Service | 57 | — | — | — | — | — | — |
 
@@ -217,8 +217,8 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 | openwebui-openai-gpt-4o-latest · Online AI Service | 0 | 100.0% | 19 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 0 | 20.7% | 39 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 0 | 25.0% | 326 |
-| openwebui-deepseek-r1-14b · Online AI Service | 4,705 | 21.9% | 44 |
-| openwebui-qwen3-14b · Online AI Service | 5,145 | 6.1% | 38 |
+| openwebui-deepseek-r1-14b · Online AI Service | 4,346 | 34.0% | 56 |
+| openwebui-qwen3-14b · Online AI Service | 5,289 | 7.5% | 50 |
 
 <!-- benchmark-master:end -->
 
