@@ -26,7 +26,7 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T11:18:50.291522+00:00 · 39 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T11:46:08.979812+00:00 · 40 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Catalog:** 10 model key(s), 10 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 2 hardware profile(s)
 
@@ -36,19 +36,19 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 
 | Metric | Value |
 |--------|------:|
-| Observations | 3 |
-| Runs | 1 |
-| Pass rate (attempted) | 100.0% |
-| Got root rate | 100.0% |
-| Got root count | 3 |
-| Median elapsed (s) | 11.009 |
-| Mean elapsed (s) | 27.794 |
-| Mean tokens to root | 4,915 |
+| Observations | 22 |
+| Runs | 2 |
+| Pass rate (attempted) | 50.0% |
+| Got root rate | 70.0% |
+| Got root count | 7 |
+| Median elapsed (s) | 138.559 |
+| Mean elapsed (s) | 111.563 |
+| Mean tokens to root | 6,148 |
 | Median tokens to root | 3,027 |
-| Mean elapsed to root (s) | 27.794 |
-| Mean AI requests to root | 4.333 |
-| Mean commands to root | 2.000 |
-| Tokens/sec to root | 176.825 |
+| Mean elapsed to root (s) | 42.034 |
+| Mean AI requests to root | 5.429 |
+| Mean commands to root | 2.143 |
+| Tokens/sec to root | 146.273 |
 
 #### Overall — openwebui-deepseek-r1-14b · Online AI Service
 
@@ -216,9 +216,9 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 
 | Profile | n | Pass | Got root | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |
 |---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
-| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 3 | 100.0% | 100.0% | 11.009 | 4,915 | 27.794 | 4.333 |
 | openwebui-openai-gpt-4o-latest · Online AI Service | 38 | 100.0% | 100.0% | 5.009 | 0 | 27.955 | 4.182 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 153 | 54.5% | 55.3% | 80.691 | 0 | 65.773 | 7.095 |
+| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 22 | 50.0% | 70.0% | 138.559 | 6,148 | 42.034 | 5.429 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 58 | 25.0% | 25.8% | 61.037 | 0 | 64.496 | 1.375 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 326 | 24.9% | 25.0% | 181.209 | 0 | 68.189 | 6.317 |
@@ -236,9 +236,9 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 | openwebui-openai-gpt-4o-latest · Online AI Service | 0 | 100.0% | 38 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 0 | 25.8% | 58 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 0 | 25.0% | 326 |
-| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 4,915 | 100.0% | 3 |
 | openwebui-deepseek-r1-14b · Online AI Service | 4,921 | 15.8% | 82 |
 | openwebui-qwen3-14b · Online AI Service | 5,145 | 3.0% | 76 |
+| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 6,148 | 70.0% | 22 |
 
 <!-- benchmark-master:end -->
 
