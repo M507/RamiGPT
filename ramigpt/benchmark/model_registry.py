@@ -116,6 +116,8 @@ def build_provider_fingerprint(settings: Settings) -> Dict[str, Any]:
     }
     if provider == "openai":
         fp["base_url"] = settings.openai_base_url or ""
+    elif provider == "openrouter":
+        fp["base_url"] = settings.openrouter_base_url or ""
     elif provider == "cursor":
         fp["base_url"] = settings.cursor_base_url or ""
     return fp

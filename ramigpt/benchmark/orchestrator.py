@@ -421,6 +421,7 @@ def get_status() -> Dict[str, Any]:
                     "ollama": get_settings().ollama_model,
                     "openai": get_settings().openai_model,
                     "openwebui": get_settings().openwebui_model,
+                    "openrouter": get_settings().openrouter_model,
                     "cursor": get_settings().cursor_model,
                 },
             },
@@ -1268,6 +1269,8 @@ def _attach_run_model_identity(run: BenchmarkRun) -> None:
         _log(run, "Benchmark hardware profile not configured (.env BENCHMARK_GPU_*)")
     elif (run.provider or "").strip().lower() == "openwebui":
         _log(run, "Benchmark hardware profile: Online AI Service (Open WebUI proxy)")
+    elif (run.provider or "").strip().lower() == "openrouter":
+        _log(run, "Benchmark hardware profile: Online AI Service (OpenRouter)")
 
 
 def _worker(run: BenchmarkRun) -> None:

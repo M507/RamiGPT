@@ -15,6 +15,7 @@ MODEL_FIELD_BY_PROVIDER = {
     "ollama": "ollama_model",
     "openai": "openai_model",
     "openwebui": "openwebui_model",
+    "openrouter": "openrouter_model",
     "cursor": "cursor_model",
 }
 

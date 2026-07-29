@@ -7,6 +7,7 @@ from ramigpt.ai.request_queue import QueuedAIProvider
 from ramigpt.ai.providers.cursor_provider import CursorProvider
 from ramigpt.ai.providers.ollama_provider import OllamaProvider
 from ramigpt.ai.providers.openai_provider import OpenAIProvider
+from ramigpt.ai.providers.openrouter_provider import OpenRouterProvider
 from ramigpt.ai.providers.openwebui_provider import OpenWebUIProvider
 from ramigpt.config import Settings, get_settings
 
@@ -22,6 +23,8 @@ def create_provider(settings: Settings | None = None) -> AIProvider:
         inner = OpenWebUIProvider(cfg)
     elif provider == "openai":
         inner = OpenAIProvider(cfg)
+    elif provider == "openrouter":
+        inner = OpenRouterProvider(cfg)
     elif provider == "cursor":
         inner = CursorProvider(cfg)
     else:
