@@ -2,13 +2,14 @@
 
 **RamiGPT** is an AI-powered offensive security agent designed to pwn root accounts. Leveraging [PwnTools](http://github.com/Gallopsled/pwntools) and LLM capabilities, RamiGPT navigated the privilege escalation scenarios of several systems from [VulnHub](https://www.vulnhub.com/) and custom-built test causes, getting root access and documenting the results below.
 
+
 ---
 
 ## Collaborative benchmark results
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T17:11:53.390502+00:00 · 60 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T17:16:43.488043+00:00 · 60 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
@@ -105,6 +106,8 @@ saved in `data/ai_settings.json`.
 | Ollama | `ollama` (default) | Native Ollama OpenAI-compatible API |
 | Open WebUI | `openwebui` | Open WebUI OpenAI-compatible API |
 | OpenAI | `openai` | Official OpenAI Chat Completions API |
+| OpenRouter | `openrouter` | Official OpenRouter SDK (multi-model gateway) |
+| Cursor | `cursor` | Cursor Cloud Agents API |
 
 ### Quick setup
 
@@ -136,14 +139,21 @@ saved in `data/ai_settings.json`.
    OPENAI_MODEL=gpt-5-mini
    ```
 
-5. **Cursor API** — set your Cursor API key (and optionally the model):
+5. **OpenRouter** — set your OpenRouter key (and optionally the model):
+   ```
+   AI_PROVIDER=openrouter
+   OPENROUTER_API_KEY=your_openrouter_api_key
+   OPENROUTER_MODEL=openai/gpt-4o-mini
+   ```
+
+6. **Cursor API** — set your Cursor API key (and optionally the model):
    ```
    AI_PROVIDER=cursor
    CURSOR_API_KEY=your_cursor_api_key
    CURSOR_MODEL=composer-2.5
    ```
 
-6. In the running app, click **AI Settings** to change provider, model, keys, and
+7. In the running app, click **AI Settings** to change provider, model, keys, and
    max AI requests. Saving writes non-secret choices to
    `data/ai_settings.json` and API keys to `.env`. **Reload from disk** reloads
    both files. Use **Test connection** to verify the active provider before a benchmark or Full AI run.
@@ -181,6 +191,13 @@ saved in `data/ai_settings.json`.
 - Use the model ID exactly as it appears in Open WebUI (Ollama, OpenAI, or custom models).
 - Base URL should be the Open WebUI origin (e.g. `http://localhost:3000`); RamiGPT appends `/api` for the compatible completions endpoint.
 
+### OpenRouter notes
+
+- Create an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
+- Model IDs use the `provider/model` form (e.g. `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`).
+- Uses the official `openrouter` Python SDK; leave `OPENROUTER_BASE_URL` empty for `https://openrouter.ai/api/v1`.
+- Use the refresh icon in **AI Settings** to pull the live model catalog.
+
 
 ## Run with Docker
 
@@ -190,7 +207,7 @@ Before running the project, ensure you have installed:
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
-- An AI backend (OpenAI key, Ollama host, Open WebUI, or Cursor API key)
+- An AI backend (OpenAI key, Ollama host, Open WebUI, OpenRouter, or Cursor API key)
 
 ### Setup
 
@@ -214,7 +231,7 @@ Set `APP_RELOAD=0` in `.env` for Docker so the container does not watch source f
 Ensure the following are installed:
 
 - Python 3 and pip
-- An AI backend (Ollama, Open WebUI, OpenAI, or Cursor API)
+- An AI backend (Ollama, Open WebUI, OpenAI, OpenRouter, or Cursor API)
 - `ansible-core` 2.18–2.19 (via `requirements.txt`; supports Python 3.8 on remote lab hosts such as Ubuntu 20.04)
 - Ubuntu/Debian host packages (auto-installed on startup / first benchmark deploy): `openssh-client`, `sshpass`, `openssl`, `ca-certificates`
   - Or run once: `python3 scripts/ensure_ubuntu_requirements.py`
@@ -321,7 +338,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | Path | Role |
 |------|------|
 | `ramigpt/web/` | Flask/Socket.IO UI, routes, shell layer, Full AI hooks |
-| `ramigpt/ai/` | AI provider interface (Ollama, Open WebUI, OpenAI, Cursor) |
+| `ramigpt/ai/` | AI provider interface (Ollama, Open WebUI, OpenAI, OpenRouter, Cursor) |
 | `ramigpt/domain/` | Privilege-escalation prompt + root detection |
 | `ramigpt/config/` | Settings from `.env` secrets plus JSON user choices |
 | `ramigpt/benchmark/` | Benchmark orchestrator (remote Ansible deploy + Full AI runs) |
@@ -357,7 +374,7 @@ Session v2 (enabled in **App Settings**) improves command extraction and handles
 
 ### AI provider settings
 
-Switch between **Ollama**, **Open WebUI**, **OpenAI**, and **Cursor API** from
+Switch between **Ollama**, **Open WebUI**, **OpenAI**, **OpenRouter**, and **Cursor API** from
 the **AI Settings** button. The selection persists in `data/ai_settings.json`;
 `.env` remains the source for API keys and initial defaults.
 
