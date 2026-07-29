@@ -280,6 +280,13 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn("ollama-qwen3-14b", md)
             self.assertIn("master.json", md)
 
+            readme_md = format_master_markdown(master, include_overall=False)
+            self.assertIn("#### Profiles", readme_md)
+            self.assertNotIn("#### Overall —", readme_md)
+            self.assertNotIn("**Catalog:**", readme_md)
+            self.assertNotIn("Runs merge when profile", readme_md)
+            self.assertIn("ollama-qwen3-14b", readme_md)
+
             with_scenarios = format_master_markdown(master, include_scenarios=True)
             self.assertIn("#### Scenarios (profile · role · target · tools)", with_scenarios)
             self.assertIn("| Tools |", with_scenarios)
@@ -310,6 +317,9 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn(README_BENCHMARK_START, text)
             self.assertIn(README_BENCHMARK_END, text)
             self.assertNotIn("#### Scenarios (profile · role · target · tools)", text)
+            self.assertIn("#### Profiles", text)
+            self.assertNotIn("#### Overall —", text)
+            self.assertNotIn("**Catalog:**", text)
 
     def test_update_benchmark_md_section(self):
         with tempfile.TemporaryDirectory() as tmp:

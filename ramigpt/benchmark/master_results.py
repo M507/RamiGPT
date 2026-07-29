@@ -1138,8 +1138,13 @@ def format_master_markdown(
     master: Dict[str, Any],
     *,
     include_scenarios: bool = False,
+    include_overall: bool = True,
 ) -> str:
-    """GitHub-friendly markdown tables (scenarios optional; off for README)."""
+    """GitHub-friendly markdown tables (scenarios optional; off for README).
+
+    When ``include_overall`` is False (README), skip catalog/identity/Overall
+    metric blocks and start at the Profiles ranking tables.
+    """
     runs = int(master.get("source_runs_deduped") or 0)
     lines: List[str] = [
         f"_Last updated: {master.get('updated_at') or '—'} · "
@@ -1165,33 +1170,34 @@ def format_master_markdown(
     by_profile = (master.get("aggregate") or {}).get("by_profile") or {}
     hardware_by_key = _hardware_by_key_from_catalog(catalog)
 
-    lines.extend(
-        [
-            "**Catalog:** "
-            f"{len(catalog.get('model_key_names') or [])} model key(s), "
-            f"{len(by_profile)} profile(s) (model + hardware), "
-            f"{len(catalog.get('roles') or [])} role(s), "
-            f"{len(catalog.get('targets') or [])} target(s), "
-            f"{len(catalog.get('tools') or [])} tool(s), "
-            f"{len(catalog.get('hardware_profiles') or [])} hardware profile(s)",
-            "",
-            "_Identity: **model `key_name`** = weights + modelfile params (registry). "
-            "**Profile** = model `key_name` · GPU lab (`BENCHMARK_GPU_*`). "
-            "Runs merge when profile + role + target + tools all match._",
-            "",
-        ]
-    )
-
-    for profile_key in sorted(by_profile.keys()):
-        stats = by_profile[profile_key]
+    if include_overall:
         lines.extend(
             [
-                _profile_overall_heading(profile_key, hardware_by_key),
+                "**Catalog:** "
+                f"{len(catalog.get('model_key_names') or [])} model key(s), "
+                f"{len(by_profile)} profile(s) (model + hardware), "
+                f"{len(catalog.get('roles') or [])} role(s), "
+                f"{len(catalog.get('targets') or [])} target(s), "
+                f"{len(catalog.get('tools') or [])} tool(s), "
+                f"{len(catalog.get('hardware_profiles') or [])} hardware profile(s)",
                 "",
-                *_format_overall_metrics_table(stats),
+                "_Identity: **model `key_name`** = weights + modelfile params (registry). "
+                "**Profile** = model `key_name` · GPU lab (`BENCHMARK_GPU_*`). "
+                "Runs merge when profile + role + target + tools all match._",
                 "",
             ]
         )
+
+        for profile_key in sorted(by_profile.keys()):
+            stats = by_profile[profile_key]
+            lines.extend(
+                [
+                    _profile_overall_heading(profile_key, hardware_by_key),
+                    "",
+                    *_format_overall_metrics_table(stats),
+                    "",
+                ]
+            )
 
     profile_rows = (master.get("rankings") or {}).get("profiles", {}).get("by_pass_rate") or []
     if profile_rows:
@@ -1370,7 +1376,7 @@ def update_readme_benchmark_section(
 
     block = (
         f"{README_BENCHMARK_START}\n"
-        f"{format_master_markdown(master)}\n"
+        f"{format_master_markdown(master, include_overall=False)}\n"
         f"{README_BENCHMARK_END}"
     )
     pattern = re.compile(
