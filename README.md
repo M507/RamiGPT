@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T19:03:48.036300+00:00 · 46 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T19:08:55.634015+00:00 · 62 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
@@ -22,8 +22,8 @@ _Last updated: 2026-07-29T19:03:48.036300+00:00 · 46 run(s) · [full JSON](data
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 58 | 25.0% | 25.8% | 61.037 | 0 | 64.496 | 1.375 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 326 | 23.5% | 23.6% | 181.185 | 0 | 68.189 | 6.317 |
-| openwebui-deepseek-r1-14b · Online AI Service | 83 | 15.2% | 15.8% | 181.090 | 4,921 | 396.196 | 1.417 |
-| openwebui-qwen3-14b · Online AI Service | 76 | 2.8% | 3.0% | 181.197 | 5,145 | 138.554 | 1.000 |
+| openwebui-deepseek-r1-14b · Online AI Service | 171 | 17.3% | 17.7% | 181.137 | 4,391 | 212.419 | 1.536 |
+| openwebui-qwen3-14b · Online AI Service | 164 | 3.2% | 3.5% | 181.267 | 5,655 | 146.442 | 1.400 |
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 19 | 0.0% | 0.0% | 181.070 | — | — | — |
 | openrouter-openai-gpt-4o · Online AI Service | 1 | — | — | — | — | — | — |
 | openwebui-openai-gpt-4o-mini-latest · Online AI Service | 57 | — | — | — | — | — | — |
@@ -32,9 +32,9 @@ _Last updated: 2026-07-29T19:03:48.036300+00:00 · 46 run(s) · [full JSON](data
 
 | Profile | Tokens→root | Got root | n |
 |---------|------------:|---------:|--:|
-| openwebui-deepseek-r1-14b · Online AI Service | 4,921 | 15.8% | 83 |
-| openwebui-qwen3-14b · Online AI Service | 5,145 | 3.0% | 76 |
+| openwebui-deepseek-r1-14b · Online AI Service | 4,391 | 17.7% | 171 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 50.0% | 42 |
+| openwebui-qwen3-14b · Online AI Service | 5,655 | 3.5% | 164 |
 | openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 45.7% | 39 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 0 | 50.6% | 153 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 0 | 33.3% | 59 |
@@ -273,6 +273,8 @@ TLS certificates are generated under `certs/` by `scripts/generate_certs.sh` (se
 
 RamiGPT deploys intentionally misconfigured SSH targets to a **remote lab host** (Ansible) and runs **Full AI** against each until root (or timeout).
 
+**Getting started (screenshots):** [`docs/how-to-start-benchmarking.md`](docs/how-to-start-benchmarking.md) · suite details: [`benchmark.md`](benchmark.md) · integration: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md)
+
 ![Benchmark modal — remote deploy, model/role plans, and target selection](docs/screenshots/benchmark_modal.png)
 
 ### Targets (Docker Compose on remote)
@@ -347,7 +349,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `ramigpt/utils/` | Shared helpers and logging |
 | `tools/` | Bundled priv-esc tooling (BeRoot, LinPEAS) |
 | `scripts/` | Ops helpers (TLS cert generation, benchmark verify) |
-| `docs/` | Screenshots and documentation assets |
+| `docs/` | Screenshots and guides (e.g. [`how-to-start-benchmarking.md`](docs/how-to-start-benchmarking.md)) |
 | `tests/` | Automated tests |
 | `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2170–2454). Guide: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
