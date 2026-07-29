@@ -26,9 +26,9 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T13:40:03.169593+00:00 · 42 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T13:52:11.897024+00:00 · 43 run(s) · [full JSON](data/benchmark/results/master.json)_
 
-**Catalog:** 10 model key(s), 10 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 2 hardware profile(s)
+**Catalog:** 11 model key(s), 11 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 2 hardware profile(s)
 
 _Identity: **model `key_name`** = weights + modelfile params (registry). **Profile** = model `key_name` · GPU lab (`BENCHMARK_GPU_*`). Runs merge when profile + role + target + tools all match._
 
@@ -49,6 +49,24 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 | Mean AI requests to root | 5.429 |
 | Mean commands to root | 2.143 |
 | Tokens/sec to root | 146.273 |
+
+#### Overall — openrouter-openai-gpt-4o · Online AI Service
+
+| Metric | Value |
+|--------|------:|
+| Observations | 1 |
+| Runs | 1 |
+| Pass rate (attempted) | — |
+| Got root rate | — |
+| Got root count | 0 |
+| Median elapsed (s) | — |
+| Mean elapsed (s) | — |
+| Mean tokens to root | — |
+| Median tokens to root | — |
+| Mean elapsed to root (s) | — |
+| Mean AI requests to root | — |
+| Mean commands to root | — |
+| Tokens/sec to root | — |
 
 #### Overall — openwebui-deepseek-r1-14b · Online AI Service
 
@@ -225,6 +243,7 @@ _Identity: **model `key_name`** = weights + modelfile params (registry). **Profi
 | openwebui-deepseek-r1-14b · Online AI Service | 83 | 15.2% | 15.8% | 181.090 | 4,921 | 396.196 | 1.417 |
 | openwebui-qwen3-14b · Online AI Service | 76 | 2.8% | 3.0% | 181.197 | 5,145 | 138.554 | 1.000 |
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 19 | 0.0% | 0.0% | 181.084 | — | — | — |
+| openrouter-openai-gpt-4o · Online AI Service | 1 | — | — | — | — | — | — |
 | openwebui-openai-gpt-4o-mini-latest · Online AI Service | 57 | — | — | — | — | — | — |
 
 #### Most token-efficient profiles (lowest mean tokens to root)
