@@ -17,6 +17,7 @@ from ramigpt.benchmark.master_results import (
     README_BENCHMARK_END,
     README_BENCHMARK_HEADING,
     README_BENCHMARK_START,
+    build_leaderboard_payload,
     build_master_document,
     discover_result_documents,
     ensure_benchmark_md_markers,
@@ -279,6 +280,13 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn("ollama-qwen3-14b", md)
             self.assertIn("master.json", md)
 
+            readme_md = format_master_markdown(master, include_overall=False)
+            self.assertIn("#### Profiles", readme_md)
+            self.assertNotIn("#### Overall —", readme_md)
+            self.assertNotIn("**Catalog:**", readme_md)
+            self.assertNotIn("Runs merge when profile", readme_md)
+            self.assertIn("ollama-qwen3-14b", readme_md)
+
             with_scenarios = format_master_markdown(master, include_scenarios=True)
             self.assertIn("#### Scenarios (profile · role · target · tools)", with_scenarios)
             self.assertIn("| Tools |", with_scenarios)
@@ -309,6 +317,9 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn(README_BENCHMARK_START, text)
             self.assertIn(README_BENCHMARK_END, text)
             self.assertNotIn("#### Scenarios (profile · role · target · tools)", text)
+            self.assertIn("#### Profiles", text)
+            self.assertNotIn("#### Overall —", text)
+            self.assertNotIn("**Catalog:**", text)
 
     def test_update_benchmark_md_section(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -489,7 +500,9 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             refreshed = refresh_result_document_summary(doc)
             self.assertEqual(refreshed["summary"]["pass_rate"], 0.5)
 
-    def test_ai_provider_error_excluded_from_pass_rate(self):
+    def test_ai_provider_error_excluded_but_max_requests_counts(self):
+        """Provider aborts stay out of the pass rate; request-budget exhaustion
+        (max_requests) is a genuine miss and counts as a failed attempt."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = root / "run_provider"
@@ -538,19 +551,51 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             master = build_master_document(root)
             overall = master["aggregate"]["overall"]
             self.assertEqual(overall["observations"], 4)
-            self.assertEqual(overall["attempted"], 2)
+            # passed + timeout + max_requests count; ai_provider_error excluded.
+            self.assertEqual(overall["attempted"], 3)
             self.assertEqual(overall["passed"], 1)
             self.assertEqual(overall["failed"], 3)
-            self.assertEqual(overall["pass_rate"], 0.5)
-            self.assertEqual(overall["got_root_rate"], 0.5)
-            self.assertEqual(overall["elapsed_seconds"]["mean"], 120.0)
+            self.assertEqual(overall["pass_rate"], 0.3333)
+            self.assertEqual(overall["got_root_rate"], 0.3333)
+            self.assertEqual(overall["elapsed_seconds"]["mean"], 93.333)
 
             from ramigpt.benchmark.results import build_run_summary
 
             summary = build_run_summary(doc["targets"])
-            self.assertEqual(summary["attempted"], 2)
-            self.assertEqual(summary["pass_rate"], 0.5)
-            self.assertEqual(summary["elapsed_seconds_total"], 240.0)
+            self.assertEqual(summary["attempted"], 3)
+            self.assertEqual(summary["pass_rate"], 0.3333)
+            self.assertEqual(summary["elapsed_seconds_total"], 280.0)
+
+    def test_max_requests_error_status_counts_as_miss(self):
+        """Real orchestrator shape: a budget-exhausted target persisted with
+        status='error' and message='max_requests' must count as a failed miss,
+        not be silently excluded from the pass rate."""
+        from ramigpt.benchmark.results import build_run_summary, is_benchmark_attempt
+
+        base = _sample_run_doc(run_id="x")["targets"][0]
+        targets = [
+            {
+                **base,
+                "target_id": "sudo-vim",
+                "status": "passed",
+                "elapsed_seconds": 5.0,
+                "got_root": True,
+                "message": "Root achieved",
+            },
+            {
+                **base,
+                "target_id": "suid-find",
+                "status": "error",
+                "elapsed_seconds": 150.0,
+                "got_root": False,
+                "message": "max_requests",
+            },
+        ]
+        self.assertTrue(is_benchmark_attempt(targets[1]))
+
+        summary = build_run_summary(targets)
+        self.assertEqual(summary["attempted"], 2)
+        self.assertEqual(summary["pass_rate"], 0.5)
 
     def test_got_root_token_metrics(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -728,6 +773,107 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
         )
         self.assertEqual(doc["tools"], ["beroot"])
         self.assertTrue(doc["tools_configured"]["beroot"])
+
+    def test_ranking_fields_include_prompt_tokens_and_got_root_known(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run1"
+            run_dir.mkdir()
+            (run_dir / "result.json").write_text(
+                json.dumps(_sample_run_doc(run_id="r1")), encoding="utf-8"
+            )
+            master = build_master_document(root)
+            overall = master["aggregate"]["overall"]
+            self.assertEqual(overall["got_root_known"], 1)
+            self.assertEqual(overall["got_root_count"], 1)
+            rows = master["rankings"]["profiles"]["by_got_root_count"]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["got_root_count"], 1)
+            self.assertEqual(row["got_root_known"], 1)
+            self.assertEqual(row["mean_prompt_tokens"], 450.0)
+            self.assertEqual(row["usable_mean_prompt_tokens"], 450.0)
+            self.assertEqual(row["usable_mean_tokens_to_root"], 500.0)
+
+    def test_leaderboard_payload_top6_ordering_and_charts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # More roots first
+            for idx in range(3):
+                run_dir = root / f"win-{idx}"
+                run_dir.mkdir()
+                doc = _sample_run_doc(
+                    run_id=f"win-{idx}",
+                    model_key_name="model-strong",
+                    target_id=f"sudo-vim",
+                    elapsed=40.0 + idx,
+                )
+                doc["targets"][0]["tokens_total"] = 400 + idx
+                doc["targets"][0]["prompt_tokens"] = 350 + idx
+                (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+
+            # Weaker model with one root
+            weak_dir = root / "weak"
+            weak_dir.mkdir()
+            weak = _sample_run_doc(
+                run_id="weak-1",
+                model="other:7b",
+                model_key_name="model-weak",
+                target_id="sudo-awk",
+            )
+            weak["hardware"] = {
+                "gpu_name": "NVIDIA GeForce RTX 4070",
+                "gpu_vram": 12282,
+                "gpu_power_limit": 200,
+                "cuda_version": "13.1",
+            }
+            (weak_dir / "result.json").write_text(json.dumps(weak), encoding="utf-8")
+
+            # Zero-token success should not win token-efficiency ranking
+            zero_dir = root / "zero-tok"
+            zero_dir.mkdir()
+            zero = _sample_run_doc(
+                run_id="zero-1",
+                model="zero:1b",
+                model_key_name="model-zero-tokens",
+                target_id="sudo-find",
+            )
+            zero["targets"][0]["tokens_total"] = 0
+            zero["targets"][0]["prompt_tokens"] = 0
+            zero["targets"][0]["completion_tokens"] = 0
+            (zero_dir / "result.json").write_text(json.dumps(zero), encoding="utf-8")
+
+            master = build_master_document(root)
+            payload = build_leaderboard_payload(master, limit=6, metric="got_root_count")
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["limit"], 6)
+            self.assertNotIn("by_scenario", payload)
+            self.assertNotIn("aggregate", payload)
+            top = payload["top"]
+            self.assertGreaterEqual(len(top), 2)
+            self.assertEqual(top[0]["model_key_name"], "model-strong")
+            self.assertEqual(top[0]["got_root_count"], 3)
+            self.assertEqual(top[0]["rank"], 1)
+            self.assertIn("mean_prompt_tokens", top[0])
+            self.assertIn("family_heatmap", payload["charts"])
+            self.assertIn("trend", payload["charts"])
+            self.assertIn("radar", payload["charts"])
+            self.assertIn("coverage", payload["charts"])
+
+            by_tokens = build_leaderboard_payload(master, limit=6, metric="tokens_to_root")
+            # Zero-token model should sort after models with usable token metrics
+            labels = [r["model_key_name"] for r in by_tokens["top"]]
+            if "model-zero-tokens" in labels and "model-strong" in labels:
+                self.assertLess(
+                    labels.index("model-strong"),
+                    labels.index("model-zero-tokens"),
+                )
+
+    def test_leaderboard_payload_empty_master(self):
+        payload = build_leaderboard_payload(None, limit=6)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["top"], [])
+        self.assertIn("error", payload)
 
 
 if __name__ == "__main__":
