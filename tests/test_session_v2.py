@@ -41,6 +41,34 @@ class SessionV2ExtractionTests(unittest.TestCase):
             "sudo awk 'BEGIN {system(\"id\")}'",
         )
 
+    def test_accepts_enumeration_binaries_not_in_legacy_allowlist(self):
+        # These were silently dropped before (empty filtered_command → wasted
+        # turn/tokens) because the head allowlist was too narrow.
+        for cmd in [
+            "getcap -r /usr/bin /usr/sbin /opt 2>/dev/null",
+            "redis-cli -h 127.0.0.1 -p 6379 CONFIG GET dir",
+            "ss -tulnp",
+            "netstat -tulnp 2>/dev/null",
+            "ps auxf",
+            "capsh --print",
+            "doas id",
+            "crontab -l",
+            "getent passwd",
+        ]:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(extract_command_from_response(cmd), cmd)
+
+    def test_still_rejects_prose_without_shell_signal(self):
+        for prose in [
+            "The next command should target the vulnerability with sudo.",
+            "Now we will try to read the flag file.",
+            "I will run getcap to enumerate the capabilities.",
+            "Based on the findings the next step is enumeration.",
+            "First let us check the sudo permissions.",
+        ]:
+            with self.subTest(prose=prose):
+                self.assertIsNone(extract_command_from_response(prose))
+
 
 class SessionV2NormalizeTests(unittest.TestCase):
     def test_rewrites_interactive_sudo_shells(self):
@@ -103,6 +131,89 @@ class SessionV2SettingsTests(unittest.TestCase):
         with mock.patch("ramigpt.session_v2.runner.get_settings") as get_settings:
             get_settings.return_value = Settings(upgraded_session_v2=0)
             self.assertFalse(is_enabled())
+
+
+class SessionV2BenchmarkTargetRegressionTests(unittest.TestCase):
+    """
+    Replays real model replies from the benchmark targets that previously had
+    ~75% of their AI turns silently discarded, and asserts the full pipeline
+    (extraction → normalize) now yields a runnable command for each.
+    """
+
+    def _resolve(self, raw):
+        return prepare_command(extract_command_from_response(raw))
+
+    def test_suid_find_commands_resolve(self):
+        for raw in [
+            "getcap -r /usr/bin /usr/sbin /opt 2>/dev/null",
+            "find / -type f -perm -4000 2>/dev/null",
+            r"/usr/bin/find /root -name flag.txt -exec cat {} \;",
+            r"find . -exec /bin/sh -p \; -quit",
+        ]:
+            with self.subTest(raw=raw):
+                self.assertTrue((self._resolve(raw) or "").strip(), raw)
+
+    def test_suid_python_commands_resolve_and_deinteractivize(self):
+        # Enumeration + the SUID-python primitive both resolve …
+        canonical = (
+            '/usr/bin/python3 -c "import os; os.setuid(0); '
+            "print(open('/root/flag.txt').read())\""
+        )
+        self.assertEqual(self._resolve(canonical), canonical)
+        self.assertTrue(self._resolve("ss -tulnp"))
+        # … and an interactive shell drop is rewritten to a non-interactive
+        # uid=0 proof rather than hanging the PTY.
+        rewritten = self._resolve(
+            "python3.14 -c 'import os; os.setuid(0); os.system(\"/bin/sh\")'"
+        )
+        self.assertIn('os.system("id")', rewritten)
+        self.assertNotIn("/bin/sh", rewritten)
+
+    def test_writable_crontab_commands_resolve(self):
+        for raw in [
+            "redis-cli -h 127.0.0.1 -p 6379 CONFIG GET dir",
+            "redis-cli -h 127.0.0.1 -p 6379 CONFIG SET dir /var/spool/cron",
+            "echo '#!/bin/sh' > /opt/bench/job.sh",
+            "ls -la /opt/bench/job.sh",
+        ]:
+            with self.subTest(raw=raw):
+                self.assertTrue((self._resolve(raw) or "").strip(), raw)
+
+
+class RejectedReplyFeedbackTests(unittest.TestCase):
+    def _prompt(self):
+        from ramigpt.domain.prompt import PrivEscPrompt
+
+        return PrivEscPrompt("lowpriv", "pw", "Linux", "root")
+
+    def test_add_rejected_dedupes_and_caps(self):
+        p = self._prompt()
+        for _ in range(3):
+            p.add_rejected("some unparsable prose reply")
+        self.assertEqual(len(p.rejected), 1)
+        for n in range(10):
+            p.add_rejected(f"reply number {n}")
+        self.assertLessEqual(len(p.rejected), 6)
+
+    def test_add_rejected_ignores_blank(self):
+        p = self._prompt()
+        p.add_rejected("")
+        p.add_rejected("   \n ")
+        self.assertEqual(p.rejected, [])
+
+    def test_rejected_replies_surface_in_prompt(self):
+        p = self._prompt()
+        p.add_rejected("I think we should enumerate capabilities next")
+        prompt = p.generate_prompt()
+        self.assertIn("could NOT be parsed", prompt)
+        self.assertIn("enumerate capabilities next", prompt)
+
+    def test_clear_rejected(self):
+        p = self._prompt()
+        p.add_rejected("junk")
+        p.clear_rejected()
+        self.assertEqual(p.rejected, [])
+        self.assertNotIn("could NOT be parsed", p.generate_prompt())
 
 
 class SessionV2InteractiveDriverTests(unittest.TestCase):
