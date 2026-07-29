@@ -5,27 +5,8 @@
 
 ---
 
-![Collaborative benchmark leaderboard](docs/screenshots/benchmark_leaderboard.png)
-
 ## Collaborative benchmark results
 
-**Live stats only** — the section below is rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
-
-Per-scenario breakdown (profile · role · target · tools) and the same overall/profile tables also live in [`benchmark.md`](benchmark.md).
-
-**How collaborative merge works:** each run is a sheet under `data/benchmark/results/`. When the master is rebuilt, runs **merge into the same stats** when they share:
-
-- **Model `key_name`** — weights + modelfile params (registry under [`data/benchmark/models/`](data/benchmark/models/))
-- **Hardware lab profile** — `BENCHMARK_GPU_*` in `.env` (GPU name, VRAM MiB, driver, CUDA)
-- **Scenario** — role, target, and tools
-
-`BENCHMARK_GPU_POWER_LIMIT` is recorded on each run sheet but does **not** affect merge keys (same GPU lab profile merges even if watt cap differs).
-
-**What counts toward pass rate:** **root achieved**, **wall-clock timeouts**, and **request-budget exhaustion** (`max_requests`). Infra/provider aborts like `ai_provider_error`, tool upload failures, reconnect exhaustion, and other setup errors are recorded but excluded from pass rate and timing averages.
-
-The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile + scenario → merged stats. Different model config or GPU lab → separate profile row.
-
-Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
 _Last updated: 2026-07-29T14:32:36.167343+00:00 · 43 run(s) · [full JSON](data/benchmark/results/master.json)_
@@ -59,6 +40,24 @@ _Last updated: 2026-07-29T14:32:36.167343+00:00 · 43 run(s) · [full JSON](data
 | openwebui-openai-gpt-5-latest · Online AI Service | 0 | 25.8% | 58 |
 
 <!-- benchmark-master:end -->
+
+**Live stats only** — the tables above are rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
+
+Per-scenario breakdown (profile · role · target · tools) and the same overall/profile tables also live in [`benchmark.md`](benchmark.md).
+
+**How collaborative merge works:** each run is a sheet under `data/benchmark/results/`. When the master is rebuilt, runs **merge into the same stats** when they share:
+
+- **Model `key_name`** — weights + modelfile params (registry under [`data/benchmark/models/`](data/benchmark/models/))
+- **Hardware lab profile** — `BENCHMARK_GPU_*` in `.env` (GPU name, VRAM MiB, driver, CUDA)
+- **Scenario** — role, target, and tools
+
+`BENCHMARK_GPU_POWER_LIMIT` is recorded on each run sheet but does **not** affect merge keys (same GPU lab profile merges even if watt cap differs).
+
+**What counts toward pass rate:** **root achieved**, **wall-clock timeouts**, and **request-budget exhaustion** (`max_requests`). Infra/provider aborts like `ai_provider_error`, tool upload failures, reconnect exhaustion, and other setup errors are recorded but excluded from pass rate and timing averages.
+
+The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile + scenario → merged stats. Different model config or GPU lab → separate profile row.
+
+Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 ---
 
@@ -329,6 +328,8 @@ RamiGPT integrates several tools for privilege escalation enumeration:
 Run them from the Terminal tool dropdown. With the **AI** checkbox enabled, RamiGPT uploads the tool, captures output, and chains into **Full AI** using the findings.
 
 ![BeRoot + Full AI — enumeration output feeding the autonomous loop](docs/screenshots/beroot_full_ai.png)
+
+![Collaborative benchmark leaderboard](docs/screenshots/benchmark_leaderboard.png)
 
 ## Project layout
 

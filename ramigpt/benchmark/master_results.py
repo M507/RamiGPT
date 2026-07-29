@@ -38,14 +38,45 @@ MASTER_SUMMARY_NAME = "master_summary.txt"
 README_BENCHMARK_HEADING = "## Collaborative benchmark results"
 README_BENCHMARK_START = "<!-- benchmark-master:start -->"
 README_BENCHMARK_END = "<!-- benchmark-master:end -->"
-README_BENCHMARK_SECTION_INTRO = (
-    "**Live stats only** — the section below is rebuilt from real runs under "
+# Prose after the auto-spliced stats (end of the collaborative section).
+README_BENCHMARK_SECTION_OUTRO = (
+    "**Live stats only** — the tables above are rebuilt from real runs under "
     "[`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` "
     "sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated "
-    "sheets when you want to share results with the team (no automatic git actions).\n\n"
-    "Full stats including per-scenario breakdown also live in "
-    "[`benchmark.md`](benchmark.md).\n"
+    "sheets when you want to share results with the team (no automatic git actions).\n"
+    "\n"
+    "Per-scenario breakdown (profile · role · target · tools) and the same overall/"
+    "profile tables also live in [`benchmark.md`](benchmark.md).\n"
+    "\n"
+    "**How collaborative merge works:** each run is a sheet under "
+    "`data/benchmark/results/`. When the master is rebuilt, runs **merge into the "
+    "same stats** when they share:\n"
+    "\n"
+    "- **Model `key_name`** — weights + modelfile params (registry under "
+    "[`data/benchmark/models/`](data/benchmark/models/))\n"
+    "- **Hardware lab profile** — `BENCHMARK_GPU_*` in `.env` (GPU name, VRAM MiB, "
+    "driver, CUDA)\n"
+    "- **Scenario** — role, target, and tools\n"
+    "\n"
+    "`BENCHMARK_GPU_POWER_LIMIT` is recorded on each run sheet but does **not** "
+    "affect merge keys (same GPU lab profile merges even if watt cap differs).\n"
+    "\n"
+    "**What counts toward pass rate:** **root achieved**, **wall-clock timeouts**, "
+    "and **request-budget exhaustion** (`max_requests`). Infra/provider aborts like "
+    "`ai_provider_error`, tool upload failures, reconnect exhaustion, and other setup "
+    "errors are recorded but excluded from pass rate and timing averages.\n"
+    "\n"
+    "The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile + "
+    "scenario → merged stats. Different model config or GPU lab → separate profile "
+    "row.\n"
+    "\n"
+    "Sample file formats (not merged into the live master): "
+    "[`data/benchmark/examples/`](data/benchmark/examples/).\n"
 )
+# Backward-compatible alias (older marker-creation call sites).
+README_BENCHMARK_SECTION_INTRO = README_BENCHMARK_SECTION_OUTRO
+
+README_PROJECT_LAYOUT_HEADING = "## Project layout"
 
 # Same collaborative master content as README, plus scenarios. Markers keep the
 # historical ``benchmark-scenarios`` name for splice stability.
@@ -1295,7 +1326,7 @@ def ensure_readme_benchmark_markers(readme: str) -> Tuple[str, bool]:
     Ensure README contains the collaborative stats heading + splice markers.
 
     Expected layout (project README): intro → ``---`` →
-    ``## Collaborative benchmark results`` → prose → markers → rest of docs.
+    ``## Collaborative benchmark results`` → markers → outro prose → rest of docs.
 
     Returns ``(readme, changed)``.
     """
@@ -1312,9 +1343,9 @@ def ensure_readme_benchmark_markers(readme: str) -> Tuple[str, bool]:
 
     section = (
         f"{README_BENCHMARK_HEADING}\n\n"
-        f"{README_BENCHMARK_SECTION_INTRO}\n"
         f"{README_BENCHMARK_START}\n"
-        f"{README_BENCHMARK_END}\n"
+        f"{README_BENCHMARK_END}\n\n"
+        f"{README_BENCHMARK_SECTION_OUTRO}"
     )
     inserted = _insert_after_first_intro_rule(readme, section)
     if inserted is not None:
@@ -1331,11 +1362,68 @@ def ensure_readme_benchmark_markers(readme: str) -> Tuple[str, bool]:
     )
     suffix = (
         f"\n\n{README_BENCHMARK_HEADING}\n\n"
-        f"{README_BENCHMARK_SECTION_INTRO}\n"
         f"{README_BENCHMARK_START}\n"
-        f"{README_BENCHMARK_END}\n"
+        f"{README_BENCHMARK_END}\n\n"
+        f"{README_BENCHMARK_SECTION_OUTRO}"
     )
     return readme.rstrip("\n") + suffix, True
+
+
+def ensure_readme_benchmark_outro(readme: str) -> Tuple[str, bool]:
+    """Place collaborative outro prose after the master end marker (not before it)."""
+    if README_BENCHMARK_END not in readme:
+        return readme, False
+
+    # Drop leftover prose between the heading and the start marker.
+    heading_pat = re.compile(
+        rf"(?ms)^({re.escape(README_BENCHMARK_HEADING)}\s*\n)"
+        rf"(.*?)"
+        rf"({re.escape(README_BENCHMARK_START)})"
+    )
+
+    def _trim_between(match: re.Match[str]) -> str:
+        between = match.group(2)
+        # Keep only blank lines; drop explanatory prose that used to live here.
+        if between.strip():
+            return f"{match.group(1)}\n{match.group(3)}"
+        return match.group(0)
+
+    trimmed = heading_pat.sub(_trim_between, readme, count=1)
+
+    end_idx = trimmed.find(README_BENCHMARK_END)
+    if end_idx < 0:
+        return trimmed, trimmed != readme
+    after_end = end_idx + len(README_BENCHMARK_END)
+    prefix = trimmed[:after_end]
+    suffix = trimmed[after_end:]
+
+    # Remove an existing copy of the outro if present immediately after the marker.
+    # Match until the next top-level heading or horizontal rule.
+    suffix_lstrip = suffix.lstrip("\n")
+    next_break = re.search(r"(?m)^(?:##\s|---\s*$)", suffix_lstrip)
+    head = suffix_lstrip[: next_break.start()] if next_break else suffix_lstrip
+    rest = suffix_lstrip[next_break.start() :] if next_break else ""
+
+    # If head already looks like our outro (starts with Live stats), replace it.
+    # Otherwise, if head is empty/whitespace-only, just insert. If head has other
+    # content that isn't the outro, insert outro before that content only when
+    # head is blank — keep unknown content.
+    outro = README_BENCHMARK_SECTION_OUTRO.rstrip() + "\n"
+    if head.strip().startswith("**Live stats only**"):
+        new_suffix = f"\n\n{outro}\n{rest.lstrip()}" if rest else f"\n\n{outro}"
+    elif not head.strip():
+        new_suffix = f"\n\n{outro}\n{rest.lstrip()}" if rest else f"\n\n{outro}"
+    else:
+        # Unknown content after marker — still ensure outro is present once.
+        if "**Live stats only**" in head:
+            new_suffix = suffix
+        else:
+            new_suffix = f"\n\n{outro}\n{suffix_lstrip}"
+
+    updated = prefix + new_suffix
+    if not updated.endswith("\n"):
+        updated += "\n"
+    return updated, updated != readme
 
 
 def update_readme_benchmark_section(
@@ -1348,7 +1436,7 @@ def update_readme_benchmark_section(
 
     Targets the top-of-file ``## Collaborative benchmark results`` section
     (after the project intro). If markers are missing, they are created there
-    before merging.
+    before merging. Leaderboard image is kept above ``## Project layout``.
     """
     path = readme_path or README_PATH
     if not path.is_file():
@@ -1373,6 +1461,7 @@ def update_readme_benchmark_section(
     from ramigpt.benchmark.leaderboard_export import ensure_readme_leaderboard_image
 
     readme, image_added = ensure_readme_leaderboard_image(readme)
+    readme, outro_added = ensure_readme_benchmark_outro(readme)
 
     block = (
         f"{README_BENCHMARK_START}\n"
@@ -1384,7 +1473,7 @@ def update_readme_benchmark_section(
         re.DOTALL,
     )
     updated = pattern.sub(block, readme, count=1)
-    if updated == readme and not markers_added and not image_added:
+    if updated == readme and not markers_added and not image_added and not outro_added:
         _log_warning("README benchmark section unchanged")
         return False
 

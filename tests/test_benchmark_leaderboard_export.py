@@ -67,22 +67,26 @@ class LeaderboardExportTests(unittest.TestCase):
                 self.assertGreater(im.height, im.width)
                 self.assertGreaterEqual(im.width, 900)
 
-    def test_readme_image_inserted_before_collaborative_heading(self):
+    def test_readme_image_inserted_before_project_layout(self):
         readme = (
             "# RamiGPT\n\n"
             "Intro text.\n\n"
             "---\n\n"
             f"{README_BENCHMARK_HEADING}\n\n"
-            "Prose here.\n\n"
             f"{README_BENCHMARK_START}\nstats\n{README_BENCHMARK_END}\n\n"
-            "## Later section\n"
+            "## Web workspace\n\n"
+            "stuff\n\n"
+            "## Project layout\n\n"
+            "layout here\n"
         )
         updated, changed = ensure_readme_leaderboard_image(readme)
         self.assertTrue(changed)
         self.assertIn(README_LEADERBOARD_IMAGE_MD, updated)
-        heading_at = updated.index(README_BENCHMARK_HEADING)
+        layout_at = updated.index("## Project layout")
         image_at = updated.index(README_LEADERBOARD_IMAGE_MD)
-        self.assertLess(image_at, heading_at)
+        collab_at = updated.index(README_BENCHMARK_HEADING)
+        self.assertLess(collab_at, image_at)
+        self.assertLess(image_at, layout_at)
         # Idempotent
         again, changed2 = ensure_readme_leaderboard_image(updated)
         self.assertFalse(changed2)

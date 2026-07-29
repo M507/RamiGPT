@@ -1571,8 +1571,8 @@ def write_leaderboard_exports(
 
 
 def ensure_readme_leaderboard_image(readme: str) -> Tuple[str, bool]:
-    """Ensure the leaderboard PNG markdown sits above the collaborative heading."""
-    from ramigpt.benchmark.master_results import README_BENCHMARK_HEADING
+    """Ensure the leaderboard PNG markdown sits above ``## Project layout``."""
+    from ramigpt.benchmark.master_results import README_PROJECT_LAYOUT_HEADING
 
     image_line = README_LEADERBOARD_IMAGE_MD
     # Drop any existing occurrences of this image markdown.
@@ -1591,7 +1591,7 @@ def ensure_readme_leaderboard_image(readme: str) -> Tuple[str, bool]:
         filtered.append(line)
     text = "".join(filtered)
 
-    heading = README_BENCHMARK_HEADING
+    heading = README_PROJECT_LAYOUT_HEADING
     pattern_idx = text.find(f"\n{heading}\n")
     if pattern_idx < 0:
         if text.startswith(f"{heading}\n"):
@@ -1599,6 +1599,7 @@ def ensure_readme_leaderboard_image(readme: str) -> Tuple[str, bool]:
             prefix = ""
             suffix = text
         else:
+            # No Project layout heading — leave image omitted rather than guess.
             return text, text != readme
     else:
         insert_at = pattern_idx + 1  # point at heading start
