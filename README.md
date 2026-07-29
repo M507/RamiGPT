@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T17:16:43.488043+00:00 · 60 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T17:19:03.251289+00:00 · 60 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
@@ -271,6 +271,8 @@ TLS certificates are generated under `certs/` by `scripts/generate_certs.sh` (se
 
 RamiGPT deploys intentionally misconfigured SSH targets to a **remote lab host** (Ansible) and runs **Full AI** against each until root (or timeout).
 
+**Getting started (screenshots):** [`docs/how-to-start-benchmarking.md`](docs/how-to-start-benchmarking.md) · suite details: [`benchmark.md`](benchmark.md) · integration: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md)
+
 ![Benchmark modal — remote deploy, model/role plans, and target selection](docs/screenshots/benchmark_modal.png)
 
 ### Targets (Docker Compose on remote)
@@ -345,7 +347,7 @@ Application code lives under `ramigpt/`. The repo root stays thin: `app.py` (ent
 | `ramigpt/utils/` | Shared helpers and logging |
 | `tools/` | Bundled priv-esc tooling (BeRoot, LinPEAS) |
 | `scripts/` | Ops helpers (TLS cert generation, benchmark verify) |
-| `docs/` | Screenshots and documentation assets |
+| `docs/` | Screenshots and guides (e.g. [`how-to-start-benchmarking.md`](docs/how-to-start-benchmarking.md)) |
 | `tests/` | Automated tests |
 | `docker/benchmark/` | One-image LPE labs (`MISCONFIG` profiles; ports 2170–2454). Guide: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md) |
 | `ansible/benchmark/` | Ansible playbook to deploy targets on a remote host |
