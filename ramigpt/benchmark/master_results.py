@@ -232,7 +232,8 @@ def _rate(numerator: int, denominator: int) -> Optional[float]:
 
 
 def _benchmark_attempted_observations(obs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Scoreable targets only — passes + wall-clock timeouts (not provider/tool aborts)."""
+    """Scoreable targets only — passes + real misses (wall-clock timeouts and
+    request-budget exhaustion); provider/tool/infra aborts are excluded."""
     return [o for o in obs if is_benchmark_attempt(o)]
 
 

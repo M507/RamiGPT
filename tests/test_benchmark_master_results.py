@@ -490,7 +490,9 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             refreshed = refresh_result_document_summary(doc)
             self.assertEqual(refreshed["summary"]["pass_rate"], 0.5)
 
-    def test_ai_provider_error_excluded_from_pass_rate(self):
+    def test_ai_provider_error_excluded_but_max_requests_counts(self):
+        """Provider aborts stay out of the pass rate; request-budget exhaustion
+        (max_requests) is a genuine miss and counts as a failed attempt."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = root / "run_provider"
@@ -539,19 +541,51 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             master = build_master_document(root)
             overall = master["aggregate"]["overall"]
             self.assertEqual(overall["observations"], 4)
-            self.assertEqual(overall["attempted"], 2)
+            # passed + timeout + max_requests count; ai_provider_error excluded.
+            self.assertEqual(overall["attempted"], 3)
             self.assertEqual(overall["passed"], 1)
             self.assertEqual(overall["failed"], 3)
-            self.assertEqual(overall["pass_rate"], 0.5)
-            self.assertEqual(overall["got_root_rate"], 0.5)
-            self.assertEqual(overall["elapsed_seconds"]["mean"], 120.0)
+            self.assertEqual(overall["pass_rate"], 0.3333)
+            self.assertEqual(overall["got_root_rate"], 0.3333)
+            self.assertEqual(overall["elapsed_seconds"]["mean"], 93.333)
 
             from ramigpt.benchmark.results import build_run_summary
 
             summary = build_run_summary(doc["targets"])
-            self.assertEqual(summary["attempted"], 2)
-            self.assertEqual(summary["pass_rate"], 0.5)
-            self.assertEqual(summary["elapsed_seconds_total"], 240.0)
+            self.assertEqual(summary["attempted"], 3)
+            self.assertEqual(summary["pass_rate"], 0.3333)
+            self.assertEqual(summary["elapsed_seconds_total"], 280.0)
+
+    def test_max_requests_error_status_counts_as_miss(self):
+        """Real orchestrator shape: a budget-exhausted target persisted with
+        status='error' and message='max_requests' must count as a failed miss,
+        not be silently excluded from the pass rate."""
+        from ramigpt.benchmark.results import build_run_summary, is_benchmark_attempt
+
+        base = _sample_run_doc(run_id="x")["targets"][0]
+        targets = [
+            {
+                **base,
+                "target_id": "sudo-vim",
+                "status": "passed",
+                "elapsed_seconds": 5.0,
+                "got_root": True,
+                "message": "Root achieved",
+            },
+            {
+                **base,
+                "target_id": "suid-find",
+                "status": "error",
+                "elapsed_seconds": 150.0,
+                "got_root": False,
+                "message": "max_requests",
+            },
+        ]
+        self.assertTrue(is_benchmark_attempt(targets[1]))
+
+        summary = build_run_summary(targets)
+        self.assertEqual(summary["attempted"], 2)
+        self.assertEqual(summary["pass_rate"], 0.5)
 
     def test_got_root_token_metrics(self):
         with tempfile.TemporaryDirectory() as tmp:
