@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from ramigpt.paths import ENV_PATH
 
-_REMOTE_AI_PROVIDERS = frozenset({"openwebui"})
+_REMOTE_AI_PROVIDERS = frozenset({"openwebui", "openrouter"})
 # Exported alias for registry / results normalization.
 REMOTE_AI_PROVIDERS = _REMOTE_AI_PROVIDERS
 
@@ -106,6 +106,11 @@ OPENWEBUI_HARDWARE_PROFILE: Dict[str, str] = {
     "gpu_driver": "Open WebUI proxy",
 }
 
+OPENROUTER_HARDWARE_PROFILE: Dict[str, str] = {
+    "gpu_name": "Online AI Service",
+    "gpu_driver": "OpenRouter",
+}
+
 
 def openwebui_hardware_profile() -> Dict[str, Any]:
     """
@@ -118,6 +123,11 @@ def openwebui_hardware_profile() -> Dict[str, Any]:
     return dict(OPENWEBUI_HARDWARE_PROFILE)
 
 
+def openrouter_hardware_profile() -> Dict[str, Any]:
+    """Synthetic lab profile for OpenRouter runs (remote multi-model gateway)."""
+    return dict(OPENROUTER_HARDWARE_PROFILE)
+
+
 def normalize_stored_hardware(
     provider: str,
     hardware: Optional[Dict[str, Any]] = None,
@@ -125,13 +135,14 @@ def normalize_stored_hardware(
     """
     Normalize hardware on ingested benchmark sheets.
 
-    Open WebUI runs always use the collaborative proxy profile, including
-    legacy sheets that still carry local ``BENCHMARK_GPU_*`` values.
+    Remote proxy providers always use a collaborative online-service profile,
+    including legacy sheets that still carry local ``BENCHMARK_GPU_*`` values.
     """
     name = (provider or "").strip().lower()
-    if name in _REMOTE_AI_PROVIDERS:
-        if name == "openwebui":
-            return openwebui_hardware_profile()
+    if name == "openwebui":
+        return openwebui_hardware_profile()
+    if name == "openrouter":
+        return openrouter_hardware_profile()
     return dict(hardware) if isinstance(hardware, dict) else {}
 
 
@@ -147,9 +158,10 @@ def resolve_benchmark_hardware(
     Remote proxy providers substitute a stable online-service profile instead.
     """
     name = (provider or "").strip().lower()
-    if name in _REMOTE_AI_PROVIDERS:
-        if name == "openwebui":
-            return openwebui_hardware_profile()
+    if name == "openwebui":
+        return openwebui_hardware_profile()
+    if name == "openrouter":
+        return openrouter_hardware_profile()
     return load_benchmark_hardware(reload_env=reload_env)
 
 
