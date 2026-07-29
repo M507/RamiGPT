@@ -9,13 +9,14 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T15:49:00.474394+00:00 · 44 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T19:03:48.036300+00:00 · 46 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
 | Profile | n | Pass | Got root | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |
 |---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 153 | 50.0% | 50.6% | 84.042 | 0 | 65.773 | 7.095 |
+| openrouter-deepseek-deepseek-v4-flash · Online AI Service | 39 | 43.2% | 45.7% | 181.061 | 6,728 | 55.688 | 4.000 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 42 | 39.4% | 50.0% | 119.552 | 5,149 | 40.721 | 4.923 |
 | openwebui-openai-gpt-4o-latest · Online AI Service | 38 | 31.4% | 31.4% | 44.519 | 0 | 27.955 | 4.182 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
@@ -34,6 +35,7 @@ _Last updated: 2026-07-29T15:49:00.474394+00:00 · 44 run(s) · [full JSON](data
 | openwebui-deepseek-r1-14b · Online AI Service | 4,921 | 15.8% | 83 |
 | openwebui-qwen3-14b · Online AI Service | 5,145 | 3.0% | 76 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 50.0% | 42 |
+| openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 45.7% | 39 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 0 | 50.6% | 153 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 0 | 33.3% | 59 |
 | openwebui-openai-gpt-4o-latest · Online AI Service | 0 | 31.4% | 38 |
