@@ -15,6 +15,11 @@ def register_page_routes(app: Flask) -> None:
     def workspace():
         return render_template("workspace.html")
 
+    @app.route("/leaderboard")
+    def leaderboard():
+        """Collaborative privilege-escalation benchmark leaderboard."""
+        return render_template("leaderboard.html")
+
     @app.route("/terminal")
     def terminal_legacy():
         """Legacy full-page terminal kept for compatibility."""

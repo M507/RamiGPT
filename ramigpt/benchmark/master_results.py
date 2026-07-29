@@ -416,6 +416,7 @@ class _StatsAccumulator:
             "other": counts["other"],
             "pass_rate": _rate(counts["passed"], attempted),
             "got_root_count": got_root_true,
+            "got_root_known": got_root_known,
             "got_root_rate": _rate(got_root_true, got_root_known),
             "elapsed_seconds": _numeric_stats(o.get("elapsed_seconds") for o in attempted_obs),
             "beroot_seconds": _numeric_stats(o.get("beroot_seconds") for o in attempted_obs),
@@ -565,7 +566,23 @@ def _extract_observations(
         ).add(**kwargs)
 
 
+def _positive_or_none(value: Any) -> Optional[float]:
+    """Return float when value is a usable positive metric; else None."""
+    try:
+        if value is None:
+            return None
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num <= 0:
+        return None
+    return num
+
+
 def _stats_ranking_fields(stats: Dict[str, Any]) -> Dict[str, Any]:
+    mean_prompt = (stats.get("prompt_tokens") or {}).get("mean")
+    mean_prompt_to_root = stats.get("mean_prompt_tokens_to_root")
+    mean_tokens_to_root = stats.get("mean_tokens_to_root")
     return {
         "observations": stats.get("observations", 0),
         "attempted": stats.get("attempted", 0),
@@ -573,16 +590,26 @@ def _stats_ranking_fields(stats: Dict[str, Any]) -> Dict[str, Any]:
         "pass_rate": stats.get("pass_rate"),
         "got_root_rate": stats.get("got_root_rate"),
         "got_root_count": stats.get("got_root_count", 0),
+        "got_root_known": stats.get("got_root_known", 0),
         "median_elapsed_seconds": (stats.get("elapsed_seconds") or {}).get("median"),
         "mean_elapsed_seconds": (stats.get("elapsed_seconds") or {}).get("mean"),
         "mean_tokens_total": (stats.get("tokens_total") or {}).get("mean"),
-        "mean_tokens_to_root": stats.get("mean_tokens_to_root"),
+        "mean_prompt_tokens": mean_prompt,
+        "mean_prompt_tokens_to_root": mean_prompt_to_root,
+        # Zero token telemetry is treated as missing for efficiency rankings.
+        "usable_mean_prompt_tokens": _positive_or_none(mean_prompt),
+        "usable_mean_prompt_tokens_to_root": _positive_or_none(mean_prompt_to_root),
+        "usable_mean_tokens_to_root": _positive_or_none(mean_tokens_to_root),
+        "mean_tokens_to_root": mean_tokens_to_root,
         "median_tokens_to_root": stats.get("median_tokens_to_root"),
         "mean_elapsed_to_root": stats.get("mean_elapsed_to_root"),
         "median_elapsed_to_root": stats.get("median_elapsed_to_root"),
         "mean_ai_requests_to_root": stats.get("mean_ai_requests_to_root"),
         "mean_commands_to_root": stats.get("mean_commands_to_root"),
         "tokens_per_second_to_root": stats.get("tokens_per_second_to_root"),
+        "usable_tokens_per_second_to_root": _positive_or_none(
+            stats.get("tokens_per_second_to_root")
+        ),
     }
 
 
@@ -633,40 +660,7 @@ def _rank_profiles(
         )
         for profile_key, stats in by_profile.items()
     ]
-
-    def _sort_key(field: str, reverse: bool = True):
-        def key(row: Dict[str, Any]) -> tuple:
-            val = row.get(field)
-            if val is None:
-                return (1, 0)
-            return (0, val if reverse else -val)
-
-        return key
-
-    return {
-        "by_pass_rate": sorted(
-            rows,
-            key=lambda r: (r.get("pass_rate") is None, -(r.get("pass_rate") or 0)),
-        ),
-        "by_got_root_rate": sorted(
-            rows,
-            key=lambda r: (r.get("got_root_rate") is None, -(r.get("got_root_rate") or 0)),
-        ),
-        "by_median_elapsed": sorted(
-            rows,
-            key=lambda r: (
-                r.get("median_elapsed_seconds") is None,
-                r.get("median_elapsed_seconds") if r.get("median_elapsed_seconds") is not None else 0,
-            ),
-        ),
-        "by_tokens_to_root": sorted(
-            rows,
-            key=lambda r: (
-                r.get("mean_tokens_to_root") is None,
-                r.get("mean_tokens_to_root") if r.get("mean_tokens_to_root") is not None else 0,
-            ),
-        ),
-    }
+    return _sorted_ranking_views(rows)
 
 
 def _rank_models(by_model: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -674,17 +668,21 @@ def _rank_models(by_model: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict[str
     rows: List[Dict[str, Any]] = [
         _model_ranking_row(model_key, stats) for model_key, stats in by_model.items()
     ]
+    return _sorted_ranking_views(rows)
 
-    def _sort_key(field: str, reverse: bool = True):
-        def key(row: Dict[str, Any]) -> tuple:
-            val = row.get(field)
-            if val is None:
-                return (1, 0)
-            return (0, val if reverse else -val)
 
-        return key
-
+def _sorted_ranking_views(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     return {
+        "by_got_root_count": sorted(
+            rows,
+            key=lambda r: (
+                -(r.get("got_root_count") or 0),
+                r.get("got_root_rate") is None,
+                -(r.get("got_root_rate") or 0),
+                -(r.get("attempted") or 0),
+                str(r.get("profile_label") or r.get("model_key_name") or ""),
+            ),
+        ),
         "by_pass_rate": sorted(
             rows,
             key=lambda r: (r.get("pass_rate") is None, -(r.get("pass_rate") or 0)),
@@ -703,8 +701,10 @@ def _rank_models(by_model: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict[str
         "by_tokens_to_root": sorted(
             rows,
             key=lambda r: (
-                r.get("mean_tokens_to_root") is None,
-                r.get("mean_tokens_to_root") if r.get("mean_tokens_to_root") is not None else 0,
+                r.get("usable_mean_tokens_to_root") is None,
+                r.get("usable_mean_tokens_to_root")
+                if r.get("usable_mean_tokens_to_root") is not None
+                else 0,
             ),
         ),
     }
@@ -1570,6 +1570,488 @@ def reset_benchmark_results(*, results_dir: Optional[Path] = None) -> Dict[str, 
         "master_path": str(path),
         "runs": master.get("source_runs_deduped", 0),
     }
+
+
+LEADERBOARD_DEFAULT_LIMIT = 6
+LEADERBOARD_METRIC_VIEWS = (
+    "got_root_count",
+    "got_root_rate",
+    "tokens_to_root",
+)
+
+
+def _target_family_lookup() -> Dict[str, str]:
+    from ramigpt.benchmark.targets import TARGETS
+
+    return {t.id: t.family for t in TARGETS}
+
+
+def _catalog_target_count() -> int:
+    from ramigpt.benchmark.targets import TARGETS
+
+    return len(TARGETS)
+
+
+def _profile_scenario_key(row: Dict[str, Any]) -> str:
+    return f"{row.get('model') or ''}|{row.get('hardware_key') or ''}"
+
+
+def _norm_scores_higher_better(values: List[Optional[float]]) -> List[Optional[float]]:
+    present = [v for v in values if v is not None]
+    if not present:
+        return [None for _ in values]
+    lo, hi = min(present), max(present)
+    if hi == lo:
+        return [100.0 if v is not None else None for v in values]
+    return [None if v is None else round(100.0 * (v - lo) / (hi - lo), 1) for v in values]
+
+
+def _norm_scores_lower_better(values: List[Optional[float]]) -> List[Optional[float]]:
+    present = [v for v in values if v is not None and v > 0]
+    if not present:
+        return [None for _ in values]
+    lo, hi = min(present), max(present)
+    if hi == lo:
+        return [100.0 if (v is not None and v > 0) else None for v in values]
+    out: List[Optional[float]] = []
+    for v in values:
+        if v is None or v <= 0:
+            out.append(None)
+        else:
+            out.append(round(100.0 * (hi - v) / (hi - lo), 1))
+    return out
+
+
+def _leaderboard_sort_rows(
+    rows: List[Dict[str, Any]],
+    *,
+    metric: str = "got_root_count",
+) -> List[Dict[str, Any]]:
+    metric = (metric or "got_root_count").strip()
+    if metric == "got_root_rate":
+        return sorted(
+            rows,
+            key=lambda r: (
+                r.get("got_root_rate") is None,
+                -(r.get("got_root_rate") or 0),
+                -(r.get("got_root_count") or 0),
+                -(r.get("attempted") or 0),
+                str(r.get("profile_label") or ""),
+            ),
+        )
+    if metric == "tokens_to_root":
+        return sorted(
+            rows,
+            key=lambda r: (
+                r.get("usable_mean_tokens_to_root") is None,
+                r.get("usable_mean_tokens_to_root")
+                if r.get("usable_mean_tokens_to_root") is not None
+                else 0,
+                -(r.get("got_root_count") or 0),
+                str(r.get("profile_label") or ""),
+            ),
+        )
+    # Default: most resolved
+    return sorted(
+        rows,
+        key=lambda r: (
+            -(r.get("got_root_count") or 0),
+            r.get("got_root_rate") is None,
+            -(r.get("got_root_rate") or 0),
+            -(r.get("attempted") or 0),
+            str(r.get("profile_label") or ""),
+        ),
+    )
+
+
+def _enrich_leaderboard_row(row: Dict[str, Any], *, rank: int) -> Dict[str, Any]:
+    attempted = int(row.get("attempted") or 0)
+    got_root = int(row.get("got_root_count") or 0)
+    known = int(row.get("got_root_known") or 0)
+    if known <= 0 and row.get("got_root_rate") is not None and attempted:
+        # Older master.json may lack got_root_known; infer from rate when possible.
+        known = attempted
+    unresolved = max(known - got_root, 0) if known else max(attempted - got_root, 0)
+    return {
+        **row,
+        "rank": rank,
+        "unresolved_count": unresolved,
+        "score": row.get("got_root_rate"),
+        "score_percent": (
+            None
+            if row.get("got_root_rate") is None
+            else round(float(row["got_root_rate"]) * 100.0, 1)
+        ),
+    }
+
+
+def _family_heatmap_for_top(
+    scenarios: List[Dict[str, Any]],
+    top_rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    families = _target_family_lookup()
+    top_keys = {
+        f"{r.get('model_key_name')}|{r.get('hardware_key')}": r.get("profile_label")
+        for r in top_rows
+    }
+    # family -> profile_key -> {got_root, known}
+    buckets: Dict[str, Dict[str, Dict[str, int]]] = {}
+    family_order: List[str] = []
+    for sc in scenarios:
+        pk = _profile_scenario_key(sc)
+        if pk not in top_keys:
+            continue
+        family = families.get(str(sc.get("target_id") or ""), "unknown")
+        if family not in family_order:
+            family_order.append(family)
+        cell = buckets.setdefault(family, {}).setdefault(pk, {"got_root": 0, "known": 0})
+        cell["got_root"] += int(sc.get("got_root_count") or 0)
+        # Approximate known outcomes from observations with a rate when available.
+        rate = sc.get("got_root_rate")
+        count = int(sc.get("got_root_count") or 0)
+        if rate and rate > 0:
+            cell["known"] += max(int(round(count / rate)), count)
+        else:
+            cell["known"] += max(int(sc.get("attempted") or sc.get("observations") or 0), count)
+
+    family_order = sorted(family_order)
+    profiles = [
+        {
+            "profile_key": f"{r.get('model_key_name')}|{r.get('hardware_key')}",
+            "profile_label": r.get("profile_label"),
+            "rank": r.get("rank"),
+        }
+        for r in top_rows
+    ]
+    cells: List[Dict[str, Any]] = []
+    for family in family_order:
+        for p in profiles:
+            pk = p["profile_key"]
+            data = (buckets.get(family) or {}).get(pk) or {"got_root": 0, "known": 0}
+            known = data["known"]
+            got = data["got_root"]
+            cells.append(
+                {
+                    "family": family,
+                    "profile_key": pk,
+                    "profile_label": p["profile_label"],
+                    "got_root_count": got,
+                    "got_root_known": known,
+                    "got_root_rate": _rate(got, known) if known else None,
+                }
+            )
+    return {"families": family_order, "profiles": profiles, "cells": cells}
+
+
+def _trend_from_runs(runs_index: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Daily then cumulative pass/attempt trend from run summaries."""
+    by_day: Dict[str, Dict[str, int]] = {}
+    for run in runs_index:
+        finished = _parse_ts(run.get("finished_at")) or _parse_ts(run.get("started_at"))
+        if finished is None:
+            continue
+        day = finished.date().isoformat()
+        summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+        bucket = by_day.setdefault(day, {"runs": 0, "attempted": 0, "passed": 0})
+        bucket["runs"] += 1
+        bucket["attempted"] += int(summary.get("attempted") or 0)
+        bucket["passed"] += int(summary.get("passed") or 0)
+
+    points: List[Dict[str, Any]] = []
+    cum_attempted = 0
+    cum_passed = 0
+    cum_runs = 0
+    for day in sorted(by_day.keys()):
+        bucket = by_day[day]
+        cum_attempted += bucket["attempted"]
+        cum_passed += bucket["passed"]
+        cum_runs += bucket["runs"]
+        points.append(
+            {
+                "date": day,
+                "runs": bucket["runs"],
+                "attempted": bucket["attempted"],
+                "passed": bucket["passed"],
+                "pass_rate": _rate(bucket["passed"], bucket["attempted"]),
+                "cumulative_runs": cum_runs,
+                "cumulative_attempted": cum_attempted,
+                "cumulative_passed": cum_passed,
+                "cumulative_pass_rate": _rate(cum_passed, cum_attempted),
+            }
+        )
+    return points
+
+
+def _tools_impact_from_scenarios(scenarios: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for sc in scenarios:
+        tools = list(sc.get("tools") or [])
+        label = ", ".join(tools) if tools else "none"
+        key = label
+        bucket = buckets.setdefault(
+            key,
+            {"tools": tools, "tools_label": label, "got_root": 0, "known": 0, "scenarios": 0},
+        )
+        bucket["scenarios"] += 1
+        got = int(sc.get("got_root_count") or 0)
+        bucket["got_root"] += got
+        rate = sc.get("got_root_rate")
+        if rate and rate > 0:
+            bucket["known"] += max(int(round(got / rate)), got)
+        else:
+            bucket["known"] += max(int(sc.get("observations") or 0), got)
+    rows = []
+    for bucket in buckets.values():
+        rows.append(
+            {
+                "tools": bucket["tools"],
+                "tools_label": bucket["tools_label"],
+                "scenarios": bucket["scenarios"],
+                "got_root_count": bucket["got_root"],
+                "got_root_known": bucket["known"],
+                "got_root_rate": _rate(bucket["got_root"], bucket["known"]),
+            }
+        )
+    rows.sort(
+        key=lambda r: (
+            r.get("got_root_rate") is None,
+            -(r.get("got_root_rate") or 0),
+            -(r.get("got_root_count") or 0),
+        )
+    )
+    return rows
+
+
+def _hardware_comparison(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_model: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        by_model.setdefault(str(row.get("model_key_name") or ""), []).append(row)
+    out: List[Dict[str, Any]] = []
+    for model_key, group in sorted(by_model.items()):
+        if len(group) < 2:
+            continue
+        for row in group:
+            out.append(
+                {
+                    "model_key_name": model_key,
+                    "profile_label": row.get("profile_label"),
+                    "hardware_key": row.get("hardware_key"),
+                    "hardware_label": row.get("hardware_label"),
+                    "got_root_count": row.get("got_root_count", 0),
+                    "got_root_rate": row.get("got_root_rate"),
+                    "mean_elapsed_to_root": row.get("mean_elapsed_to_root"),
+                    "usable_mean_tokens_to_root": row.get("usable_mean_tokens_to_root"),
+                    "runs": row.get("runs", 0),
+                }
+            )
+    return out
+
+
+def _coverage_for_top(
+    scenarios: List[Dict[str, Any]],
+    top_rows: List[Dict[str, Any]],
+    catalog_size: int,
+) -> List[Dict[str, Any]]:
+    targets_by_profile: Dict[str, set] = {}
+    for sc in scenarios:
+        pk = _profile_scenario_key(sc)
+        targets_by_profile.setdefault(pk, set()).add(str(sc.get("target_id") or ""))
+    out = []
+    for row in top_rows:
+        pk = f"{row.get('model_key_name')}|{row.get('hardware_key')}"
+        attempted_targets = len(targets_by_profile.get(pk) or set())
+        out.append(
+            {
+                "profile_key": row.get("profile_key"),
+                "profile_label": row.get("profile_label"),
+                "rank": row.get("rank"),
+                "targets_attempted": attempted_targets,
+                "catalog_size": catalog_size,
+                "coverage_rate": _rate(attempted_targets, catalog_size),
+            }
+        )
+    return out
+
+
+def _radar_for_top(top_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    success = [r.get("got_root_rate") for r in top_rows]
+    speed = [r.get("mean_elapsed_to_root") for r in top_rows]
+    tokens = [r.get("usable_mean_tokens_to_root") for r in top_rows]
+    requests = [r.get("mean_ai_requests_to_root") for r in top_rows]
+    success_n = _norm_scores_higher_better(success)
+    speed_n = _norm_scores_lower_better(speed)
+    tokens_n = _norm_scores_lower_better(tokens)
+    requests_n = _norm_scores_lower_better(requests)
+    out = []
+    for idx, row in enumerate(top_rows):
+        out.append(
+            {
+                "profile_key": row.get("profile_key"),
+                "profile_label": row.get("profile_label"),
+                "rank": row.get("rank"),
+                "axes": {
+                    "success": success_n[idx],
+                    "speed": speed_n[idx],
+                    "token_efficiency": tokens_n[idx],
+                    "request_efficiency": requests_n[idx],
+                },
+            }
+        )
+    return out
+
+
+def build_leaderboard_payload(
+    master: Optional[Dict[str, Any]],
+    *,
+    limit: int = LEADERBOARD_DEFAULT_LIMIT,
+    metric: str = "got_root_count",
+) -> Dict[str, Any]:
+    """Compact leaderboard document for the UI (never includes by_scenario aggregates)."""
+    try:
+        limit_i = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit_i = LEADERBOARD_DEFAULT_LIMIT
+    metric = (metric or "got_root_count").strip()
+    if metric not in LEADERBOARD_METRIC_VIEWS:
+        metric = "got_root_count"
+
+    if not master:
+        return {
+            "ok": False,
+            "error": "No master results yet — run a benchmark or rebuild master results",
+            "limit": limit_i,
+            "metric": metric,
+            "updated_at": None,
+            "summary": {},
+            "top": [],
+            "models": [],
+            "charts": {},
+            "methodology": {
+                "score": "got_root_rate = got_root_count / outcomes where got_root is known "
+                "(scoreable attempts only: pass + timeout)",
+                "resolved": "got_root_count among scoreable attempts",
+                "tokens": "Zero/missing token telemetry is excluded from efficiency rankings",
+            },
+        }
+
+    rankings = (master.get("rankings") or {}).get("profiles") or {}
+    # Prefer fresh sort from by_got_root_count when present; else re-sort any view.
+    all_rows = list(
+        rankings.get("by_got_root_count")
+        or rankings.get("by_got_root_rate")
+        or rankings.get("by_pass_rate")
+        or []
+    )
+    # Deduplicate by profile_key (views share the same row objects conceptually).
+    seen: set[str] = set()
+    unique_rows: List[Dict[str, Any]] = []
+    for row in all_rows:
+        pk = str(row.get("profile_key") or "")
+        if pk in seen:
+            continue
+        seen.add(pk)
+        unique_rows.append(row)
+
+    # If master was built before ranking field extensions, enrich from aggregate.
+    by_profile = ((master.get("aggregate") or {}).get("by_profile")) or {}
+    enriched_all: List[Dict[str, Any]] = []
+    for row in unique_rows:
+        stats = by_profile.get(str(row.get("profile_key") or "")) or {}
+        merged = dict(row)
+        if "got_root_known" not in merged and stats:
+            merged["got_root_known"] = stats.get("got_root_known", 0)
+        if "mean_prompt_tokens" not in merged and stats:
+            merged.update(
+                {
+                    k: v
+                    for k, v in _stats_ranking_fields(stats).items()
+                    if k not in merged or merged.get(k) is None
+                }
+            )
+        # Ensure usable_* even when loading older ranking rows.
+        if "usable_mean_tokens_to_root" not in merged:
+            merged["usable_mean_tokens_to_root"] = _positive_or_none(
+                merged.get("mean_tokens_to_root")
+            )
+        if "usable_mean_prompt_tokens" not in merged:
+            merged["usable_mean_prompt_tokens"] = _positive_or_none(
+                merged.get("mean_prompt_tokens")
+            )
+        if "usable_mean_prompt_tokens_to_root" not in merged:
+            merged["usable_mean_prompt_tokens_to_root"] = _positive_or_none(
+                merged.get("mean_prompt_tokens_to_root")
+            )
+        if "usable_tokens_per_second_to_root" not in merged:
+            merged["usable_tokens_per_second_to_root"] = _positive_or_none(
+                merged.get("tokens_per_second_to_root")
+            )
+        enriched_all.append(merged)
+
+    sorted_rows = _leaderboard_sort_rows(enriched_all, metric=metric)
+    top_raw = sorted_rows[:limit_i]
+    top = [_enrich_leaderboard_row(row, rank=i + 1) for i, row in enumerate(top_raw)]
+    models = [
+        _enrich_leaderboard_row(row, rank=i + 1) for i, row in enumerate(sorted_rows)
+    ]
+
+    overall = (master.get("aggregate") or {}).get("overall") or {}
+    catalog = master.get("catalog") or {}
+    catalog_size = _catalog_target_count()
+    scenarios = list((master.get("rankings") or {}).get("scenarios") or [])
+    runs_index = list(master.get("runs_index") or [])
+
+    summary = {
+        "models": len(catalog.get("model_key_names") or []),
+        "profiles": len(enriched_all),
+        "runs": master.get("source_runs_deduped") or overall.get("runs") or 0,
+        "observations": overall.get("observations", 0),
+        "attempted": overall.get("attempted", 0),
+        "got_root_count": overall.get("got_root_count", 0),
+        "got_root_rate": overall.get("got_root_rate"),
+        "catalog_targets": catalog_size,
+        "roles": len(catalog.get("roles") or []),
+        "tools": list(catalog.get("tools") or []),
+    }
+
+    return {
+        "ok": True,
+        "limit": limit_i,
+        "metric": metric,
+        "metric_views": list(LEADERBOARD_METRIC_VIEWS),
+        "updated_at": master.get("updated_at"),
+        "summary": summary,
+        "top": top,
+        "models": models,
+        "charts": {
+            "family_heatmap": _family_heatmap_for_top(scenarios, top),
+            "trend": _trend_from_runs(runs_index),
+            "tools_impact": _tools_impact_from_scenarios(scenarios),
+            "hardware_comparison": _hardware_comparison(enriched_all),
+            "coverage": _coverage_for_top(scenarios, top, catalog_size),
+            "radar": _radar_for_top(top),
+        },
+        "methodology": {
+            "score": "got_root_rate = got_root_count / outcomes where got_root is known "
+            "(scoreable attempts only: pass + timeout)",
+            "resolved": "got_root_count among scoreable attempts",
+            "tokens": "Zero/missing token telemetry is excluded from efficiency rankings",
+            "trend": "Daily run summaries; cumulative passed/attempted from collab sheets",
+        },
+    }
+
+
+def load_leaderboard_payload(
+    *,
+    results_dir: Optional[Path] = None,
+    limit: int = LEADERBOARD_DEFAULT_LIMIT,
+    metric: str = "got_root_count",
+) -> Dict[str, Any]:
+    """Load master.json and return a compact leaderboard payload."""
+    return build_leaderboard_payload(
+        load_master_results(results_dir=results_dir),
+        limit=limit,
+        metric=metric,
+    )
 
 
 def load_master_results(*, results_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:

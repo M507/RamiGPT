@@ -232,6 +232,17 @@ def register_benchmark_routes(app: Flask) -> None:
             ), 404
         return jsonify(ok=True, master=master), 200
 
+    @app.route("/api/benchmark/results/leaderboard", methods=["GET"])
+    def api_benchmark_results_leaderboard():
+        """Compact Top-N rankings for the leaderboard page (not the full master.json)."""
+        from ramigpt.benchmark.master_results import load_leaderboard_payload
+
+        limit = request.args.get("limit", 6)
+        metric = request.args.get("by", request.args.get("metric", "got_root_count"))
+        payload = load_leaderboard_payload(limit=limit, metric=str(metric or "got_root_count"))
+        code = 200 if payload.get("ok") else 404
+        return jsonify(payload), code
+
     @app.route("/api/benchmark/results/rebuild", methods=["POST"])
     def api_benchmark_results_rebuild():
         """Rebuild master.json from all result.json files (e.g. after pulling collaborators' runs)."""
