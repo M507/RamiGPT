@@ -1364,6 +1364,10 @@ def update_readme_benchmark_section(
         )
         return False
 
+    from ramigpt.benchmark.leaderboard_export import ensure_readme_leaderboard_image
+
+    readme, image_added = ensure_readme_leaderboard_image(readme)
+
     block = (
         f"{README_BENCHMARK_START}\n"
         f"{format_master_markdown(master)}\n"
@@ -1374,7 +1378,7 @@ def update_readme_benchmark_section(
         re.DOTALL,
     )
     updated = pattern.sub(block, readme, count=1)
-    if updated == readme and not markers_added:
+    if updated == readme and not markers_added and not image_added:
         _log_warning("README benchmark section unchanged")
         return False
 
@@ -1542,6 +1546,12 @@ def write_master_results(
 
         should_update_docs = root.resolve() == live_results_dir.resolve()
     if should_update_docs:
+        try:
+            from ramigpt.benchmark.results import write_leaderboard_exports
+
+            write_leaderboard_exports(master, results_dir=root)
+        except Exception as exc:  # noqa: BLE001
+            _log_warning(f"failed to write leaderboard HTML/PNG exports: {exc}")
         update_readme_benchmark_section(master)
         update_benchmark_md_scenarios_section(master)
     _log_info(
@@ -1929,7 +1939,7 @@ def build_leaderboard_payload(
             "charts": {},
             "methodology": {
                 "score": "got_root_rate = got_root_count / outcomes where got_root is known "
-                "(scoreable attempts only: pass + timeout)",
+                "(scoreable attempts: pass + wall-clock timeout + max_requests)",
                 "resolved": "got_root_count among scoreable attempts",
                 "tokens": "Zero/missing token telemetry is excluded from efficiency rankings",
             },
@@ -2033,7 +2043,7 @@ def build_leaderboard_payload(
         },
         "methodology": {
             "score": "got_root_rate = got_root_count / outcomes where got_root is known "
-            "(scoreable attempts only: pass + timeout)",
+            "(scoreable attempts: pass + wall-clock timeout + max_requests)",
             "resolved": "got_root_count among scoreable attempts",
             "tokens": "Zero/missing token telemetry is excluded from efficiency rankings",
             "trend": "Daily run summaries; cumulative passed/attempted from collab sheets",

@@ -1379,3 +1379,32 @@ def write_batch_summary(
     except Exception as exc:  # noqa: BLE001
         _log_error("failed to update master results after batch summary", exc=exc)
     return path
+
+
+# --- Leaderboard static export (HTML + tall PNG for README) -----------------
+
+
+def format_leaderboard_export_html(master: Optional[Dict[str, Any]]) -> str:
+    """Self-contained vertical leaderboard HTML (no /static dependencies)."""
+    from ramigpt.benchmark.leaderboard_export import format_leaderboard_export_html as _fmt
+
+    return _fmt(master)
+
+
+def render_leaderboard_export_png(master: Optional[Dict[str, Any]], path: Path) -> Path:
+    """Draw a tall vertical PNG matching the export HTML card stack."""
+    from ramigpt.benchmark.leaderboard_export import render_leaderboard_export_png as _png
+
+    return _png(master, path)
+
+
+def write_leaderboard_exports(
+    master: Optional[Dict[str, Any]],
+    *,
+    results_dir: Optional[Path] = None,
+    image_path: Optional[Path] = None,
+) -> Dict[str, Path]:
+    """Write ``leaderboard.html`` + ``docs/screenshots/benchmark_leaderboard.png``."""
+    from ramigpt.benchmark.leaderboard_export import write_leaderboard_exports as _write
+
+    return _write(master, results_dir=results_dir, image_path=image_path)

@@ -5,6 +5,8 @@
 
 ---
 
+![Collaborative benchmark leaderboard](docs/screenshots/benchmark_leaderboard.png)
+
 ## Collaborative benchmark results
 
 **Live stats only** — the section below is rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
@@ -26,7 +28,7 @@ The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-29T14:19:21.994139+00:00 · 43 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T14:32:36.167343+00:00 · 43 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Catalog:** 11 model key(s), 11 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 2 hardware profile(s)
 
