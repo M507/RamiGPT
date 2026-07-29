@@ -65,7 +65,7 @@ UI: Benchmark modal → **Test targets (get root)** against the configured remot
 Live collaborative stats from the same master as [`README.md`](README.md) (overall, profiles, and per-scenario tables). Full JSON: [`data/benchmark/results/master.json`](data/benchmark/results/master.json).
 
 <!-- benchmark-scenarios:start -->
-_Last updated: 2026-07-29T02:03:15.233289+00:00 · 47 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-29T17:07:00.001057+00:00 · 47 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Catalog:** 9 model key(s), 9 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 1 hardware profile(s)
 
