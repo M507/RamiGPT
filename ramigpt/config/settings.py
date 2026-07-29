@@ -69,6 +69,7 @@ SECRET_FIELDS = (
     "openai_api_key",
     "ollama_api_key",
     "openwebui_api_key",
+    "openrouter_api_key",
     "cursor_api_key",
 )
 JSON_SETTING_FIELDS = (
@@ -79,6 +80,8 @@ JSON_SETTING_FIELDS = (
     "ollama_model",
     "openwebui_base_url",
     "openwebui_model",
+    "openrouter_model",
+    "openrouter_base_url",
     "cursor_model",
     "cursor_base_url",
     "openai_max_num_of_reqs",
@@ -94,7 +97,7 @@ JSON_SETTING_FIELDS = (
     "ai_request_queue",
 )
 
-VALID_PROVIDERS = ("openai", "ollama", "openwebui", "cursor")
+VALID_PROVIDERS = ("openai", "ollama", "openwebui", "openrouter", "cursor")
 
 
 @dataclass
@@ -111,6 +114,9 @@ class Settings:
     openwebui_base_url: str = "http://localhost:3000"
     openwebui_api_key: str = ""
     openwebui_model: str = "llama3.1"
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o-mini"
+    openrouter_base_url: str = ""  # empty → https://openrouter.ai/api/v1
     cursor_api_key: str = ""
     cursor_model: str = "composer-2.5"
     cursor_base_url: str = ""  # empty → https://api.cursor.com
@@ -131,6 +137,8 @@ class Settings:
             return self.ollama_api_key or "ollama"
         if self.ai_provider == "openwebui":
             return self.openwebui_api_key or self.openai_api_key
+        if self.ai_provider == "openrouter":
+            return self.openrouter_api_key
         if self.ai_provider == "cursor":
             return self.cursor_api_key
         return self.openai_api_key
@@ -140,6 +148,8 @@ class Settings:
             return self.ollama_model
         if self.ai_provider == "openwebui":
             return self.openwebui_model
+        if self.ai_provider == "openrouter":
+            return self.openrouter_model
         if self.ai_provider == "cursor":
             return self.cursor_model
         return self.openai_model
@@ -171,6 +181,10 @@ class Settings:
             "openwebui_api_key": _mask_secret(self.openwebui_api_key),
             "openwebui_api_key_set": bool(self.openwebui_api_key),
             "openwebui_model": self.openwebui_model,
+            "openrouter_api_key": _mask_secret(self.openrouter_api_key),
+            "openrouter_api_key_set": bool(self.openrouter_api_key),
+            "openrouter_model": self.openrouter_model,
+            "openrouter_base_url": self.openrouter_base_url,
             "cursor_api_key": _mask_secret(self.cursor_api_key),
             "cursor_api_key_set": bool(self.cursor_api_key),
             "cursor_model": self.cursor_model,
@@ -248,6 +262,9 @@ def _load_settings_from_env() -> Settings:
         openwebui_base_url=owu_base or "http://localhost:3000",
         openwebui_api_key=(os.getenv("OPENWEBUI_API_KEY") or "").strip().strip('"'),
         openwebui_model=(os.getenv("OPENWEBUI_MODEL") or "llama3.1").strip(),
+        openrouter_api_key=(os.getenv("OPENROUTER_API_KEY") or "").strip().strip('"'),
+        openrouter_model=(os.getenv("OPENROUTER_MODEL") or "openai/gpt-4o-mini").strip(),
+        openrouter_base_url=(os.getenv("OPENROUTER_BASE_URL") or "").strip().rstrip("/"),
         cursor_api_key=(os.getenv("CURSOR_API_KEY") or "").strip().strip('"'),
         cursor_model=(os.getenv("CURSOR_MODEL") or "composer-2.5").strip(),
         cursor_base_url=(os.getenv("CURSOR_BASE_URL") or "").strip().rstrip("/"),
@@ -314,6 +331,7 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
         if key in (
             "ollama_base_url",
             "openwebui_base_url",
+            "openrouter_base_url",
             "cursor_base_url",
         ) and isinstance(value, str):
             value = value.strip().rstrip("/")
@@ -399,6 +417,7 @@ class SettingsManager:
             "OPENAI_API_KEY": settings.openai_api_key,
             "OLLAMA_API_KEY": settings.ollama_api_key,
             "OPENWEBUI_API_KEY": settings.openwebui_api_key,
+            "OPENROUTER_API_KEY": settings.openrouter_api_key,
             "CURSOR_API_KEY": settings.cursor_api_key,
         }
 

@@ -113,6 +113,7 @@ class PrivEscPrompt:
         self._linpeas_persist = False
         self.capabilities = []  # This will now be a list of dictionaries
         self.history = []
+        self.rejected = []  # Model replies that could not be parsed into a command
         self.facts = []  # List to store multiple facts
         self.hints = []   # List to store multiple hints
         self.avoids = []   # List to store multiple avoids
@@ -187,6 +188,28 @@ class PrivEscPrompt:
             self.history.append({"command": cmd, "output": clipped})
         if len(self.history) > _MAX_HISTORY_ENTRIES:
             self.history = self.history[-_MAX_HISTORY_ENTRIES:]
+
+    def add_rejected(self, raw_response, *, max_entries=6, max_chars=200):
+        """
+        Record a model reply that could not be parsed into a runnable command.
+
+        Surfaced back in the next prompt so the model stops re-sending the same
+        unparsable reply (which otherwise burns a full AI turn and its tokens
+        with no shell execution — the cause of the suid-find timeout loops).
+        """
+        text = " ".join(str(raw_response or "").split()).strip()
+        if not text:
+            return
+        snippet = text[:max_chars]
+        if snippet in self.rejected:
+            return
+        self.rejected.append(snippet)
+        if len(self.rejected) > max_entries:
+            self.rejected = self.rejected[-max_entries:]
+
+    def clear_rejected(self):
+        """Drop the rejected-reply feedback (e.g. after a command executes)."""
+        self.rejected = []
 
     def merge_history_entries(self, entries):
         """
@@ -452,6 +475,16 @@ class PrivEscPrompt:
             for avoid in self.avoids:
                 report += f"- {avoid}\n"
             report += f"\n"
+
+        if self.rejected:
+            report += (
+                "Your previous replies below could NOT be parsed into a single "
+                "runnable command and were discarded (each wasted a turn). Do NOT "
+                "repeat them — reply with exactly ONE bare shell command line:\n\n"
+            )
+            for item in self.rejected:
+                report += f"- {item}\n"
+            report += "\n"
 
         report += (
             "State your next command only. Focus on enumeration and privilege escalation. "

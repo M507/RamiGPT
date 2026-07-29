@@ -13,6 +13,7 @@
     { id: "ollama", label: "Ollama" },
     { id: "openai", label: "OpenAI" },
     { id: "openwebui", label: "Open WebUI" },
+    { id: "openrouter", label: "OpenRouter" },
     { id: "cursor", label: "Cursor" },
   ];
   const MAX_PLAN_ENTRIES = 10;

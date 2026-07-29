@@ -1,0 +1,398 @@
+/* Benchmark leaderboard — matches workspace green-on-black shell */
+
+/* workspace.css locks html/body to overflow:hidden for the app shell;
+   unlock document scroll on this page so charts below the fold are reachable. */
+html:has(body.leaderboard-page) {
+  overflow: auto !important;
+  height: auto !important;
+  min-height: 100%;
+}
+
+body.leaderboard-page {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  height: auto !important;
+  min-height: 100vh;
+}
+
+.leaderboard-page .lb-shell.app-shell,
+.leaderboard-page .app-shell.lb-shell {
+  height: auto !important;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.lb-topbar-meta {
+  flex: 1;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.lb-topbar-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar .brand {
+  text-decoration: none;
+  color: inherit;
+}
+
+.lb-main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 18px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.lb-hero {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-end;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-elevated);
+  padding: 18px 16px;
+  box-shadow: var(--glow);
+}
+
+.lb-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.lb-hero h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(0, 255, 0, 0.45);
+}
+
+.lb-hero .muted {
+  margin: 0;
+  max-width: 52ch;
+}
+
+.lb-metric-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border: 1px solid var(--border);
+}
+
+.lb-metric-tab {
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border-dim);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.lb-metric-tab:last-child {
+  border-right: 0;
+}
+
+.lb-metric-tab:hover {
+  color: var(--text);
+  background: rgba(0, 255, 0, 0.08);
+}
+
+.lb-metric-tab.is-active {
+  color: #000;
+  background: var(--accent);
+  text-shadow: none;
+  box-shadow: inset 0 0 0 1px #0f0;
+}
+
+.lb-status {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-dim);
+  background: #000;
+}
+
+.lb-status.is-error {
+  color: var(--danger);
+  border-color: rgba(255, 34, 34, 0.55);
+}
+
+.lb-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lb-stat {
+  border: 1px solid var(--border-dim);
+  background: #000;
+  padding: 12px 14px;
+}
+
+.lb-stat .label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.lb-stat .value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: 0 0 6px rgba(0, 255, 0, 0.35);
+}
+
+.lb-section-head {
+  margin-bottom: 10px;
+}
+
+.lb-section-head h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.lb-section-head p {
+  margin: 0;
+}
+
+.lb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lb-grid-rankings {
+  grid-template-columns: 1.4fr 1fr;
+}
+
+.lb-card {
+  border: 1px solid var(--border-dim);
+  background: var(--bg-elevated);
+  padding: 12px;
+  min-width: 0;
+}
+
+.lb-card-wide {
+  grid-column: 1 / -1;
+}
+
+.lb-card h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.lb-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--border-dim);
+}
+
+.lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.lb-table th,
+.lb-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-dim);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.lb-table th {
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10px;
+  background: #000;
+  position: sticky;
+  top: 0;
+}
+
+.lb-table td.lb-name {
+  white-space: normal;
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.lb-table tbody tr:hover {
+  background: rgba(0, 255, 0, 0.06);
+}
+
+.lb-rank {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.lb-chart {
+  min-height: 180px;
+  width: 100%;
+}
+
+.lb-chart-tall {
+  min-height: 260px;
+}
+
+.lb-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.lb-chart .lb-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 24px 8px;
+  text-align: center;
+  border: 1px dashed var(--border-dim);
+}
+
+.lb-chart text {
+  fill: var(--muted);
+  font-family: var(--font);
+  font-size: 10px;
+}
+
+.lb-chart .lb-axis-label {
+  fill: var(--text);
+}
+
+.lb-method-list {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.55;
+}
+
+.lb-methodology {
+  border-top: 1px solid var(--border-dim);
+  padding-top: 8px;
+}
+
+@media (max-width: 960px) {
+  .lb-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lb-grid,
+  .lb-grid-rankings {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .lb-main {
+    padding: 14px 10px 36px;
+  }
+
+  .lb-hero h1 {
+    font-size: 22px;
+  }
+
+  .lb-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-actions .btn {
+    padding: 8px 10px;
+  }
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html, body.leaderboard-page {
+    background: #fff !important;
+    color: #000 !important;
+    text-shadow: none !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .topbar,
+  #lb-refresh,
+  #lb-print,
+  .topbar-actions {
+    display: none !important;
+  }
+
+  .lb-shell,
+  .lb-main {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .lb-hero,
+  .lb-card,
+  .lb-stat,
+  .lb-status,
+  .lb-table-wrap {
+    border-color: #222 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  .lb-hero h1,
+  .lb-section-head h2,
+  .lb-card h3,
+  .lb-eyebrow,
+  .lb-rank,
+  .lb-stat .value,
+  .lb-metric-tab.is-active {
+    color: #000 !important;
+    text-shadow: none !important;
+    background: transparent !important;
+  }
+
+  .lb-metric-tabs {
+    border-color: #222;
+  }
+
+  .lb-metric-tab {
+    color: #333;
+  }
+
+  .lb-chart text {
+    fill: #333 !important;
+  }
+
+  .lb-grid,
+  .lb-grid-rankings,
+  .lb-summary {
+    break-inside: avoid;
+  }
+
+  .lb-card,
+  .lb-section {
+    break-inside: avoid-page;
+  }
+}

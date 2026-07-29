@@ -421,6 +421,7 @@ def get_status() -> Dict[str, Any]:
                     "ollama": get_settings().ollama_model,
                     "openai": get_settings().openai_model,
                     "openwebui": get_settings().openwebui_model,
+                    "openrouter": get_settings().openrouter_model,
                     "cursor": get_settings().cursor_model,
                 },
             },
@@ -1149,10 +1150,17 @@ def _run_target(run: BenchmarkRun, item: TargetRunResult, target: BenchmarkTarge
                 _stop_full_ai(session_id)
                 break
             if full_ai_finished_by_session.get(session_id) and not root_won_by_session.get(session_id):
-                # Provider/tool aborts (ai_provider_error, max_requests, etc.) are not
-                # countable misses — only wall-clock timeouts below count as failed.
-                item.status = "error"
-                item.message = item.message or "Full AI finished without root"
+                reason = (item.message or "").strip().lower()
+                if reason == "max_requests" or reason.startswith("max_requests"):
+                    # Model spent its whole request budget without rooting — a real
+                    # miss, scored like a wall-clock timeout (see is_scoreable_miss).
+                    item.status = "failed"
+                    item.message = item.message or "max_requests"
+                else:
+                    # Provider/tool aborts (ai_provider_error, tool upload failure,
+                    # reconnect exhaustion, …) are infra issues, not countable misses.
+                    item.status = "error"
+                    item.message = item.message or "Full AI finished without root"
                 break
             time.sleep(0.5)
         else:
@@ -1268,6 +1276,8 @@ def _attach_run_model_identity(run: BenchmarkRun) -> None:
         _log(run, "Benchmark hardware profile not configured (.env BENCHMARK_GPU_*)")
     elif (run.provider or "").strip().lower() == "openwebui":
         _log(run, "Benchmark hardware profile: Online AI Service (Open WebUI proxy)")
+    elif (run.provider or "").strip().lower() == "openrouter":
+        _log(run, "Benchmark hardware profile: Online AI Service (OpenRouter)")
 
 
 def _worker(run: BenchmarkRun) -> None:

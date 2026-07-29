@@ -68,7 +68,10 @@ def autonomous(session_data):
         stop_flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         reconnect_budget = 3
         consecutive_empty_ai = 0
-        max_consecutive_empty_ai = 3
+        # Counts consecutive turns that produced no runnable command (blank OR
+        # unparsable). The rejected-reply feedback gets a few turns to steer the
+        # model back before we stop and stop wasting tokens.
+        max_consecutive_empty_ai = 5
         # Safely fetching session-specific data with default values and debugging
         prompt_delimiter = prompt_delimiters.get(session_id, "$")  # Default to "#" if not set
         shell = ssh_shells.get(session_id)
@@ -138,26 +141,36 @@ def autonomous(session_data):
                     duration_seconds=ai_duration,
                 )
                 if not command:
-                    if not (response or "").strip():
-                        consecutive_empty_ai += 1
+                    # Count every non-executed turn (blank OR unparsable) toward the
+                    # stall guard: a model that keeps replying with text we cannot turn
+                    # into a command makes zero progress and just burns tokens.
+                    consecutive_empty_ai += 1
+                    had_text = bool((response or "").strip())
+                    if had_text and priv_esc is not None:
+                        # Echo the unparsable reply back next turn so the model stops
+                        # re-sending it (root cause of the suid-find timeout loop).
+                        priv_esc.add_rejected(response)
+                    reason_txt = "unparsable reply" if had_text else "empty/null reply"
                     slog.warning(
-                        f"AI returned empty/unusable command on request#{i}; skipping "
+                        f"AI returned {reason_txt} on request#{i}; skipping "
                         f"(consecutive_empty={consecutive_empty_ai})"
                     )
                     if consecutive_empty_ai >= max_consecutive_empty_ai:
                         stop_reason = "ai_empty_response"
                         settings = get_settings()
                         msg = (
-                            f"AI returned no usable output {consecutive_empty_ai} times in a row "
+                            f"AI returned no usable command {consecutive_empty_ai} times in a row "
                             f"({settings.ai_provider}/{settings.active_model()}). "
-                            "Some Open WebUI models respond with null on security prompts — "
-                            "switch models in Settings or check Open WebUI logs."
+                            "The model is replying with prose/null instead of a single command — "
+                            "switch models in Settings or check the provider logs."
                         )
                         slog.error(msg)
                         emit_session(session_id, f"[Full AI] {msg}", color="#f85149")
                         break
                     continue
                 consecutive_empty_ai = 0
+                if priv_esc is not None:
+                    priv_esc.clear_rejected()
                 shell = ssh_shells.get(session_id) or shell
                 if shell is None:
                     slog.error("No shell available before sendline — attempting reconnect")

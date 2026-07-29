@@ -21,7 +21,10 @@ BENCHMARK_RESULT_SCHEMA_VERSION = 2
 INFRA_EXCLUDED_TARGET_STATUSES = frozenset({"error", "skipped"})
 
 # Full-AI stop reasons that abort a run without a countable pass/fail outcome.
-# Only wall-clock timeouts count as negative scoreable outcomes alongside passes.
+# These are infra/provider problems (network, tool upload, provider errors), not
+# the model's fault, so they stay out of the pass rate. Genuine misses —
+# wall-clock timeouts and request-budget exhaustion (``max_requests``) — are
+# scored as failures instead (see ``is_scoreable_miss``).
 NON_SCOREABLE_STOP_REASONS = frozenset(
     {
         "ai_provider_error",
@@ -29,10 +32,13 @@ NON_SCOREABLE_STOP_REASONS = frozenset(
         "reconnect_failed",
         "reconnect_exhausted",
         "error",
-        "max_requests",
         "stopped",
     }
 )
+
+# Stop reasons meaning the model tried but failed to root the box on its own
+# budget — a real, countable miss (scored like a wall-clock timeout).
+SCOREABLE_MISS_STOP_REASONS = frozenset({"max_requests"})
 
 _LOG_PREFIX = "[benchmark-results]"
 
@@ -68,27 +74,59 @@ def is_timeout_failure(record: Any) -> bool:
     return stop in {"timeout", "timed_out"}
 
 
+def is_request_budget_exhausted(record: Any) -> bool:
+    """True when Full AI used its entire request budget without rooting.
+
+    ``max_requests`` means the model kept trying and ran out of allowed AI
+    requests — a genuine capability miss, not an infra/provider abort.
+    """
+    if not isinstance(record, dict):
+        return False
+    message = str(record.get("message") or "").strip().lower()
+    if message == "max_requests" or message.startswith("max_requests"):
+        return True
+    return _stop_reason_from_record(record) in SCOREABLE_MISS_STOP_REASONS
+
+
+def is_scoreable_miss(record: Any) -> bool:
+    """True for a non-passing target that still counts as a failure.
+
+    Countable misses are the model's own failures to root the box:
+      - wall-clock timeout
+      - request-budget exhaustion (``max_requests``)
+
+    Infra/provider aborts (network, tool upload failures, ai_provider_error,
+    reconnect exhaustion, user stop, …) are NOT scoreable misses and stay out
+    of the pass rate entirely.
+    """
+    if not isinstance(record, dict):
+        return False
+    if normalize_target_status(record.get("status")) == "passed":
+        return False
+    return is_timeout_failure(record) or is_request_budget_exhausted(record)
+
+
 def is_benchmark_attempt(record: Any) -> bool:
     """True when the target counts toward collab pass rate / timing averages.
 
     Scoreable outcomes:
       - passed (got root)
       - failed due to wall-clock timeout
+      - failed due to request-budget exhaustion (``max_requests``)
 
     Excluded (do not affect pass rate or averages):
       - infra error / skipped
-      - non-timeout aborts (ai_provider_error, max_requests, tool upload failures, etc.)
+      - provider/tool aborts (ai_provider_error, tool upload failures,
+        reconnect exhaustion, user stop, …)
     """
     if isinstance(record, dict):
-        status = normalize_target_status(record.get("status"))
-        if status == "passed":
+        if normalize_target_status(record.get("status")) == "passed":
             return True
-        if status == "failed":
-            return is_timeout_failure(record)
-        return False
+        return is_scoreable_miss(record)
 
     # Legacy callers sometimes pass a bare status string. Without a message we
-    # cannot tell timeout from provider abort — treat failed as non-scoreable.
+    # cannot tell a real miss from a provider abort — treat non-passed as
+    # non-scoreable.
     status = normalize_target_status(record)
     return status == "passed"
 
@@ -1073,10 +1111,29 @@ def build_result_document(
     return doc
 
 
+def normalize_scoreable_miss_statuses(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite historical ``max_requests`` rows from ``error`` → ``failed``.
+
+    Older runs recorded request-budget exhaustion as ``status=error``. Scoring
+    already counts those as misses via the message/stop_reason; this keeps the
+    persisted status counts aligned with that semantics.
+    """
+    out: List[Dict[str, Any]] = []
+    for raw in targets:
+        target = dict(raw) if isinstance(raw, dict) else raw
+        if isinstance(target, dict) and is_request_budget_exhausted(target):
+            if normalize_target_status(target.get("status")) == "error":
+                target["status"] = "failed"
+        out.append(target)
+    return out
+
+
 def refresh_result_document_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Recompute summary fields from targets (e.g. after changing aggregation rules)."""
     updated = dict(doc)
-    updated["summary"] = build_run_summary(list(doc.get("targets") or []))
+    targets = normalize_scoreable_miss_statuses(list(doc.get("targets") or []))
+    updated["targets"] = targets
+    updated["summary"] = build_run_summary(targets)
     return updated
 
 
@@ -1322,3 +1379,32 @@ def write_batch_summary(
     except Exception as exc:  # noqa: BLE001
         _log_error("failed to update master results after batch summary", exc=exc)
     return path
+
+
+# --- Leaderboard static export (HTML + tall PNG for README) -----------------
+
+
+def format_leaderboard_export_html(master: Optional[Dict[str, Any]]) -> str:
+    """Self-contained vertical leaderboard HTML (no /static dependencies)."""
+    from ramigpt.benchmark.leaderboard_export import format_leaderboard_export_html as _fmt
+
+    return _fmt(master)
+
+
+def render_leaderboard_export_png(master: Optional[Dict[str, Any]], path: Path) -> Path:
+    """Draw a tall vertical PNG matching the export HTML card stack."""
+    from ramigpt.benchmark.leaderboard_export import render_leaderboard_export_png as _png
+
+    return _png(master, path)
+
+
+def write_leaderboard_exports(
+    master: Optional[Dict[str, Any]],
+    *,
+    results_dir: Optional[Path] = None,
+    image_path: Optional[Path] = None,
+) -> Dict[str, Path]:
+    """Write ``leaderboard.html`` + ``docs/screenshots/benchmark_leaderboard.png``."""
+    from ramigpt.benchmark.leaderboard_export import write_leaderboard_exports as _write
+
+    return _write(master, results_dir=results_dir, image_path=image_path)

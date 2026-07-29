@@ -3,13 +3,16 @@
  */
 (function () {
     const MASK_HINT = "...";
-    const PROVIDER_GROUPS = ["openai", "ollama", "openwebui", "cursor"];
+    const PROVIDER_GROUPS = ["openai", "ollama", "openwebui", "openrouter", "cursor"];
 
     let preferredOllamaModel = "";
     let ollamaModelsFetchSeq = 0;
     let preferredOpenWebUIModel = "";
     let openWebUIModelsFetchSeq = 0;
     let openWebUIApiKeySet = false;
+    let preferredOpenRouterModel = "";
+    let openRouterModelsFetchSeq = 0;
+    let openRouterApiKeySet = false;
     let preferredCursorModel = "";
     let cursorModelsFetchSeq = 0;
     let cursorApiKeySet = false;
@@ -46,6 +49,13 @@
         el.className = "settings-hint" + (isError ? " error" : "");
     }
 
+    function setOpenRouterHint(message, isError) {
+        const el = $("settings-openrouter-models-hint");
+        if (!el) return;
+        el.textContent = message || "";
+        el.className = "settings-hint" + (isError ? " error" : "");
+    }
+
     function toggleProviderFields(provider) {
         PROVIDER_GROUPS.forEach((name) => {
             document.querySelectorAll("[data-provider-group='" + name + "']").forEach((el) => {
@@ -57,6 +67,9 @@
         }
         if (provider === "openwebui") {
             refreshOpenWebUIModels();
+        }
+        if (provider === "openrouter") {
+            refreshOpenRouterModels();
         }
         if (provider === "cursor") {
             refreshCursorModels();
@@ -135,6 +148,43 @@
         select.disabled = false;
         select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
         preferredOpenWebUIModel = select.value;
+    }
+
+    function populateOpenRouterModelSelect(models, selectedModel) {
+        const select = $("settings-openrouter-model");
+        if (!select) return;
+
+        const preferred = (selectedModel || preferredOpenRouterModel || "").trim();
+        const list = Array.isArray(models) ? models.slice() : [];
+        select.innerHTML = "";
+
+        if (!list.length) {
+            const opt = document.createElement("option");
+            opt.value = preferred;
+            opt.textContent = preferred
+                ? preferred + " (unavailable — keeping saved model)"
+                : "No models available";
+            select.appendChild(opt);
+            select.value = preferred;
+            select.disabled = !preferred;
+            return;
+        }
+
+        if (preferred && list.indexOf(preferred) === -1) {
+            list.unshift(preferred);
+        }
+
+        list.forEach((name) => {
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name === preferred && models.indexOf(name) === -1
+                ? name + " (not listed)"
+                : name;
+            select.appendChild(opt);
+        });
+        select.disabled = false;
+        select.value = preferred && list.indexOf(preferred) !== -1 ? preferred : list[0];
+        preferredOpenRouterModel = select.value;
     }
 
     function populateCursorModelSelect(models, selectedModel, details) {
@@ -314,6 +364,69 @@
         }
     }
 
+    async function refreshOpenRouterModels() {
+        const select = $("settings-openrouter-model");
+        const refreshBtn = $("settings-openrouter-refresh-models");
+        const apiKeyInput = $("settings-openrouter-api-key");
+        const baseUrlInput = $("settings-openrouter-base-url");
+        if (!select) return;
+
+        const apiKey = apiKeyInput ? apiKeyInput.value.trim() : "";
+        const baseUrl = baseUrlInput ? baseUrlInput.value.trim() : "";
+        const seq = ++openRouterModelsFetchSeq;
+        const keep = (select.value || preferredOpenRouterModel || "").trim();
+        preferredOpenRouterModel = keep;
+
+        if ((!apiKey || apiKey.includes(MASK_HINT)) && !openRouterApiKeySet) {
+            populateOpenRouterModelSelect([], keep);
+            setOpenRouterHint("Enter an API key (or Save one) to load models from OpenRouter.", false);
+            return;
+        }
+
+        select.disabled = true;
+        if (refreshBtn) refreshBtn.disabled = true;
+        setOpenRouterHint("Loading models from OpenRouter…", false);
+
+        try {
+            const response = await fetch("/api/settings/openrouter/models", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    openrouter_api_key: apiKey,
+                    openrouter_base_url: baseUrl,
+                }),
+            });
+            const data = await response.json();
+            if (seq !== openRouterModelsFetchSeq) return;
+
+            if (!response.ok || !data.success) {
+                populateOpenRouterModelSelect([], keep);
+                setOpenRouterHint(
+                    data.error || "Could not list models — keeping the saved model.",
+                    true
+                );
+                return;
+            }
+
+            populateOpenRouterModelSelect(data.models || [], keep);
+            const count = (data.models || []).length;
+            setOpenRouterHint(
+                count
+                    ? "Loaded " + count + " model" + (count === 1 ? "" : "s") + " from OpenRouter."
+                    : "OpenRouter responded but reported no models.",
+                false
+            );
+        } catch (err) {
+            if (seq !== openRouterModelsFetchSeq) return;
+            populateOpenRouterModelSelect([], keep);
+            setOpenRouterHint(err.message || "Failed to load OpenRouter models.", true);
+        } finally {
+            if (seq === openRouterModelsFetchSeq && refreshBtn) {
+                refreshBtn.disabled = false;
+            }
+        }
+    }
+
     async function refreshOllamaModels() {
         const select = $("settings-ollama-model");
         const refreshBtn = $("settings-ollama-refresh-models");
@@ -398,6 +511,18 @@
             ? "•••••••• (leave blank to keep)"
             : "API key / JWT";
 
+        openRouterApiKeySet = !!settings.openrouter_api_key_set;
+        preferredOpenRouterModel = settings.openrouter_model || "";
+        populateOpenRouterModelSelect(
+            preferredOpenRouterModel ? [preferredOpenRouterModel] : [],
+            preferredOpenRouterModel
+        );
+        $("settings-openrouter-base-url").value = settings.openrouter_base_url || "";
+        $("settings-openrouter-api-key").value = "";
+        $("settings-openrouter-api-key").placeholder = settings.openrouter_api_key_set
+            ? "•••••••• (leave blank to keep)"
+            : "sk-or-...";
+
         $("settings-cursor-base-url").value = settings.cursor_base_url || "";
         cursorApiKeySet = !!settings.cursor_api_key_set;
         preferredCursorModel = settings.cursor_model || "";
@@ -418,6 +543,7 @@
     function collectFormPayload(persist) {
         const modelSelect = $("settings-ollama-model");
         const openWebUIModelSelect = $("settings-openwebui-model");
+        const openRouterModelSelect = $("settings-openrouter-model");
         const cursorModelSelect = $("settings-cursor-model");
         const payload = {
             ai_provider: $("settings-provider").value,
@@ -427,6 +553,8 @@
             ollama_model: (modelSelect && modelSelect.value || preferredOllamaModel || "").trim(),
             openwebui_base_url: $("settings-openwebui-base-url").value.trim(),
             openwebui_model: (openWebUIModelSelect && openWebUIModelSelect.value || preferredOpenWebUIModel || "").trim(),
+            openrouter_base_url: $("settings-openrouter-base-url").value.trim(),
+            openrouter_model: (openRouterModelSelect && openRouterModelSelect.value || preferredOpenRouterModel || "").trim(),
             cursor_base_url: $("settings-cursor-base-url").value.trim(),
             cursor_model: (cursorModelSelect && cursorModelSelect.value || preferredCursorModel || "").trim(),
             openai_max_num_of_reqs: parseInt($("settings-max-reqs").value, 10) || 10,
@@ -446,6 +574,11 @@
         const openwebuiKey = $("settings-openwebui-api-key").value.trim();
         if (openwebuiKey && !openwebuiKey.includes(MASK_HINT)) {
             payload.openwebui_api_key = openwebuiKey;
+        }
+
+        const openrouterKey = $("settings-openrouter-api-key").value.trim();
+        if (openrouterKey && !openrouterKey.includes(MASK_HINT)) {
+            payload.openrouter_api_key = openrouterKey;
         }
 
         const cursorKey = $("settings-cursor-api-key").value.trim();
@@ -911,6 +1044,50 @@
         if (openWebUIModelSelect) {
             openWebUIModelSelect.addEventListener("change", function () {
                 preferredOpenWebUIModel = openWebUIModelSelect.value;
+            });
+        }
+
+        const openRouterApiKey = $("settings-openrouter-api-key");
+        if (openRouterApiKey) {
+            openRouterApiKey.addEventListener("change", function () {
+                if (($("settings-provider") || {}).value === "openrouter") {
+                    refreshOpenRouterModels();
+                }
+            });
+            openRouterApiKey.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    refreshOpenRouterModels();
+                }
+            });
+        }
+
+        const openRouterBase = $("settings-openrouter-base-url");
+        if (openRouterBase) {
+            openRouterBase.addEventListener("change", function () {
+                if (($("settings-provider") || {}).value === "openrouter") {
+                    refreshOpenRouterModels();
+                }
+            });
+            openRouterBase.addEventListener("keydown", function (e) {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    refreshOpenRouterModels();
+                }
+            });
+        }
+
+        const openRouterRefreshBtn = $("settings-openrouter-refresh-models");
+        if (openRouterRefreshBtn) {
+            openRouterRefreshBtn.addEventListener("click", function () {
+                refreshOpenRouterModels().catch((err) => showStatus(err.message, true));
+            });
+        }
+
+        const openRouterModelSelect = $("settings-openrouter-model");
+        if (openRouterModelSelect) {
+            openRouterModelSelect.addEventListener("change", function () {
+                preferredOpenRouterModel = openRouterModelSelect.value;
             });
         }
 

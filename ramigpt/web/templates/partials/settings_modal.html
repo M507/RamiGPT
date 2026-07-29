@@ -12,6 +12,7 @@
             Use <strong>Test connection</strong> to verify the selected provider.
             <strong>Ollama</strong> uses the native OpenAI-compatible API (<code>/v1</code>);
             <strong>Open WebUI</strong> uses its own <code>/api</code> surface.
+            <strong>OpenRouter</strong> routes to many hosted models through one API key.
             <strong>Cursor API</strong> runs each turn as a Cursor Cloud Agent, so it is
             slower per request than the other providers.
         </p>
@@ -22,6 +23,7 @@
                 <option value="ollama">Ollama</option>
                 <option value="openwebui">Open WebUI</option>
                 <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="cursor">Cursor API</option>
             </select>
         </label>
@@ -84,6 +86,29 @@
                     </button>
                 </div>
                 <span id="settings-openwebui-models-hint" class="settings-hint">Models are loaded from Open WebUI when available.</span>
+            </label>
+        </div>
+
+        <div data-provider-group="openrouter" style="display:none;">
+            <label class="settings-field">
+                <span>OpenRouter API Key</span>
+                <input type="password" id="settings-openrouter-api-key" class="settings-input" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>OpenRouter Model</span>
+                <div class="settings-input-row">
+                    <select id="settings-openrouter-model" class="settings-input" disabled>
+                        <option value="">Loading models…</option>
+                    </select>
+                    <button type="button" id="settings-openrouter-refresh-models" class="settings-btn secondary settings-icon-btn" title="Refresh models from OpenRouter">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <span id="settings-openrouter-models-hint" class="settings-hint">Models are loaded from OpenRouter when available (e.g. openai/gpt-4o-mini).</span>
+            </label>
+            <label class="settings-field">
+                <span>OpenRouter Base URL <em>(optional)</em></span>
+                <input type="text" id="settings-openrouter-base-url" class="settings-input" placeholder="https://openrouter.ai/api/v1">
             </label>
         </div>
 

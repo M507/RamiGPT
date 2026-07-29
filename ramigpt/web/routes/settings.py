@@ -20,6 +20,9 @@ _SETTINGS_ALLOWED = {
     "openwebui_base_url",
     "openwebui_api_key",
     "openwebui_model",
+    "openrouter_api_key",
+    "openrouter_model",
+    "openrouter_base_url",
     "cursor_api_key",
     "cursor_model",
     "cursor_base_url",
@@ -161,6 +164,9 @@ def register_settings_routes(app: Flask) -> None:
             ollama_base_url=cfg.ollama_base_url,
             ollama_api_key=cfg.ollama_api_key,
             ollama_model=cfg.ollama_model,
+            openrouter_api_key=cfg.openrouter_api_key,
+            openrouter_model=cfg.openrouter_model,
+            openrouter_base_url=cfg.openrouter_base_url,
             cursor_api_key=cfg.cursor_api_key,
             cursor_model=cfg.cursor_model,
             cursor_base_url=cfg.cursor_base_url,
@@ -179,6 +185,45 @@ def register_settings_routes(app: Flask) -> None:
                 success=False,
                 error=str(exc),
                 base_url=base_url.rstrip("/") if base_url else "",
+                models=[],
+                count=0,
+            ), 400
+
+    @app.route("/api/settings/openrouter/models", methods=["GET", "POST"])
+    def list_openrouter_models_endpoint():
+        """Return models from OpenRouter (official SDK ``models.list``)."""
+        from ramigpt.ai.providers.openrouter_provider import (
+            DEFAULT_BASE_URL,
+            list_openrouter_models,
+            openrouter_base_url,
+        )
+
+        payload = request.get_json(silent=True) or {}
+        cfg = get_settings()
+        api_key = (
+            (payload.get("openrouter_api_key") or request.args.get("api_key") or "").strip()
+        )
+        if not api_key or "..." in api_key or api_key.startswith("*"):
+            api_key = cfg.openrouter_api_key
+        base_url = (
+            (payload.get("openrouter_base_url") or request.args.get("base_url") or "").strip()
+            or cfg.openrouter_base_url
+        )
+        try:
+            models = list_openrouter_models(api_key, base_url=base_url, timeout=8.0)
+            resolved = openrouter_base_url(base_url) if base_url else DEFAULT_BASE_URL
+            return jsonify(
+                success=True,
+                base_url=resolved,
+                models=models,
+                count=len(models),
+            ), 200
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.warning(f"openrouter.list_models failed: {exc}")
+            return jsonify(
+                success=False,
+                error=str(exc),
+                base_url=(base_url or DEFAULT_BASE_URL).rstrip("/"),
                 models=[],
                 count=0,
             ), 400

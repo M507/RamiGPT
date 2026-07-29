@@ -27,8 +27,10 @@ def test_saved_model_for_provider():
         ollama_model="qwen3:14b",
         openai_model="gpt-test",
         openwebui_model="llama3.1",
+        openrouter_model="openai/gpt-4o-mini",
         cursor_model="composer-2.5",
     )
     assert saved_model_for_provider(settings, "ollama") == "qwen3:14b"
     assert saved_model_for_provider(settings, "openai") == "gpt-test"
+    assert saved_model_for_provider(settings, "openrouter") == "openai/gpt-4o-mini"
     assert saved_model_for_provider(settings, "unknown") == ""

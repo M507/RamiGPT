@@ -7,7 +7,41 @@
 
 ## Collaborative benchmark results
 
-**Live stats only** — the section below is rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
+
+<!-- benchmark-master:start -->
+_Last updated: 2026-07-29T17:11:53.390502+00:00 · 60 run(s) · [full JSON](data/benchmark/results/master.json)_
+
+#### Profiles
+
+| Profile | n | Pass | Got root | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |
+|---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
+| openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 153 | 50.0% | 50.6% | 84.042 | 0 | 65.773 | 7.095 |
+| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 42 | 39.4% | 50.0% | 119.552 | 5,149 | 40.721 | 4.923 |
+| openwebui-openai-gpt-4o-latest · Online AI Service | 38 | 31.4% | 31.4% | 44.519 | 0 | 27.955 | 4.182 |
+| openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
+| openwebui-openai-gpt-5-latest · Online AI Service | 58 | 25.0% | 25.8% | 61.037 | 0 | 64.496 | 1.375 |
+| openwebui-openai-gpt-5.2-latest · Online AI Service | 326 | 23.5% | 23.6% | 181.185 | 0 | 68.189 | 6.317 |
+| openwebui-deepseek-r1-14b · Online AI Service | 171 | 17.3% | 17.7% | 181.137 | 4,391 | 212.419 | 1.536 |
+| openwebui-qwen3-14b · Online AI Service | 164 | 3.2% | 3.5% | 181.267 | 5,655 | 146.442 | 1.400 |
+| openwebui-openai-gpt-5-mini-latest · Online AI Service | 19 | 0.0% | 0.0% | 181.070 | — | — | — |
+| openrouter-openai-gpt-4o · Online AI Service | 1 | — | — | — | — | — | — |
+| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 57 | — | — | — | — | — | — |
+
+#### Most token-efficient profiles (lowest mean tokens to root)
+
+| Profile | Tokens→root | Got root | n |
+|---------|------------:|---------:|--:|
+| openwebui-deepseek-r1-14b · Online AI Service | 4,391 | 17.7% | 171 |
+| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 50.0% | 42 |
+| openwebui-qwen3-14b · Online AI Service | 5,655 | 3.5% | 164 |
+| openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 0 | 50.6% | 153 |
+| openwebui-openai-gpt-4-turbo-latest · Online AI Service | 0 | 33.3% | 59 |
+| openwebui-openai-gpt-4o-latest · Online AI Service | 0 | 31.4% | 38 |
+| openwebui-openai-gpt-5-latest · Online AI Service | 0 | 25.8% | 58 |
+
+<!-- benchmark-master:end -->
+
+**Live stats only** — the tables above are rebuilt from real runs under [`data/benchmark/results/`](data/benchmark/results/) (per-run `result.json` sheets + [`master.json`](data/benchmark/results/master.json)). Commit updated sheets when you want to share results with the team (no automatic git actions).
 
 Per-scenario breakdown (profile · role · target · tools) and the same overall/profile tables also live in [`benchmark.md`](benchmark.md).
 
@@ -19,208 +53,11 @@ Per-scenario breakdown (profile · role · target · tools) and the same overall
 
 `BENCHMARK_GPU_POWER_LIMIT` is recorded on each run sheet but does **not** affect merge keys (same GPU lab profile merges even if watt cap differs).
 
-**What counts toward pass rate:** only **root achieved** and **wall-clock timeouts**. Aborts like `ai_provider_error`, `max_requests`, tool upload failures, and other infra/setup errors are recorded but excluded from pass rate and timing averages.
+**What counts toward pass rate:** **root achieved**, **wall-clock timeouts**, and **request-budget exhaustion** (`max_requests`). Infra/provider aborts like `ai_provider_error`, tool upload failures, reconnect exhaustion, and other setup errors are recorded but excluded from pass rate and timing averages.
 
 The visible **profile** label is `key_name · GPU · VRAM · …`. Same profile + scenario → merged stats. Different model config or GPU lab → separate profile row.
 
 Sample file formats (not merged into the live master): [`data/benchmark/examples/`](data/benchmark/examples/).
-
-<!-- benchmark-master:start -->
-_Last updated: 2026-07-29T17:07:00.001057+00:00 · 47 run(s) · [full JSON](data/benchmark/results/master.json)_
-
-**Catalog:** 9 model key(s), 9 profile(s) (model + hardware), 1 role(s), 285 target(s), 1 tool(s), 1 hardware profile(s)
-
-_Identity: **model `key_name`** = weights + modelfile params (registry). **Profile** = model `key_name` · GPU lab (`BENCHMARK_GPU_*`). Runs merge when profile + role + target + tools all match._
-
-#### Overall — openwebui-deepseek-r1-14b · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 132 |
-| Runs | 12 |
-| Pass rate (attempted) | 20.0% |
-| Got root rate | 20.3% |
-| Got root count | 25 |
-| Median elapsed (s) | 181.184 |
-| Mean elapsed (s) | 194.578 |
-| Mean tokens to root | 4,249 |
-| Median tokens to root | 4,216 |
-| Mean elapsed to root (s) | 223.458 |
-| Mean AI requests to root | 1.480 |
-| Mean commands to root | 1.280 |
-| Tokens/sec to root | 19.016 |
-
-#### Overall — openwebui-openai-gpt-3.5-turbo-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 134 |
-| Runs | 11 |
-| Pass rate (attempted) | 51.6% |
-| Got root rate | 52.4% |
-| Got root count | 33 |
-| Median elapsed (s) | 72.045 |
-| Mean elapsed (s) | 95.824 |
-| Mean tokens to root | 0 |
-| Median tokens to root | 0 |
-| Mean elapsed to root (s) | 65.793 |
-| Mean AI requests to root | 7.061 |
-| Mean commands to root | 5.758 |
-| Tokens/sec to root | 0.000 |
-
-#### Overall — openwebui-openai-gpt-4-turbo-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 59 |
-| Runs | 3 |
-| Pass rate (attempted) | 31.2% |
-| Got root rate | 33.3% |
-| Got root count | 5 |
-| Median elapsed (s) | 181.183 |
-| Mean elapsed (s) | 134.288 |
-| Mean tokens to root | 0 |
-| Median tokens to root | 0 |
-| Mean elapsed to root (s) | 31.030 |
-| Mean AI requests to root | 5.400 |
-| Mean commands to root | 4.400 |
-| Tokens/sec to root | 0.000 |
-
-#### Overall — openwebui-openai-gpt-4o-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 19 |
-| Runs | 1 |
-| Pass rate (attempted) | 100.0% |
-| Got root rate | 100.0% |
-| Got root count | 6 |
-| Median elapsed (s) | 6.762 |
-| Mean elapsed (s) | 25.125 |
-| Mean tokens to root | 0 |
-| Median tokens to root | 0 |
-| Mean elapsed to root (s) | 25.125 |
-| Mean AI requests to root | 4.667 |
-| Mean commands to root | 1.667 |
-| Tokens/sec to root | 0.000 |
-
-#### Overall — openwebui-openai-gpt-4o-mini-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 57 |
-| Runs | 3 |
-| Pass rate (attempted) | — |
-| Got root rate | — |
-| Got root count | 0 |
-| Median elapsed (s) | — |
-| Mean elapsed (s) | — |
-| Mean tokens to root | — |
-| Median tokens to root | — |
-| Mean elapsed to root (s) | — |
-| Mean AI requests to root | — |
-| Mean commands to root | — |
-| Tokens/sec to root | — |
-
-#### Overall — openwebui-openai-gpt-5-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 39 |
-| Runs | 2 |
-| Pass rate (attempted) | 20.0% |
-| Got root rate | 20.7% |
-| Got root count | 6 |
-| Median elapsed (s) | 61.037 |
-| Mean elapsed (s) | 97.858 |
-| Mean tokens to root | 0 |
-| Median tokens to root | 0 |
-| Mean elapsed to root (s) | 59.564 |
-| Mean AI requests to root | 1.167 |
-| Mean commands to root | 1.000 |
-| Tokens/sec to root | 0.000 |
-
-#### Overall — openwebui-openai-gpt-5-mini-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 19 |
-| Runs | 1 |
-| Pass rate (attempted) | 0.0% |
-| Got root rate | 0.0% |
-| Got root count | 0 |
-| Median elapsed (s) | 181.084 |
-| Mean elapsed (s) | 181.105 |
-| Mean tokens to root | — |
-| Median tokens to root | — |
-| Mean elapsed to root (s) | — |
-| Mean AI requests to root | — |
-| Mean commands to root | — |
-| Tokens/sec to root | — |
-
-#### Overall — openwebui-openai-gpt-5.2-latest · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 326 |
-| Runs | 4 |
-| Pass rate (attempted) | 24.9% |
-| Got root rate | 25.0% |
-| Got root count | 60 |
-| Median elapsed (s) | 181.209 |
-| Mean elapsed (s) | 153.241 |
-| Mean tokens to root | 0 |
-| Median tokens to root | 0 |
-| Mean elapsed to root (s) | 68.189 |
-| Mean AI requests to root | 6.317 |
-| Mean commands to root | 2.983 |
-| Tokens/sec to root | 0.000 |
-
-#### Overall — openwebui-qwen3-14b · Online AI Service
-
-| Metric | Value |
-|--------|------:|
-| Observations | 126 |
-| Runs | 10 |
-| Pass rate (attempted) | 4.2% |
-| Got root rate | 4.5% |
-| Got root count | 5 |
-| Median elapsed (s) | 181.380 |
-| Mean elapsed (s) | 185.516 |
-| Mean tokens to root | 5,655 |
-| Median tokens to root | 5,685 |
-| Mean elapsed to root (s) | 146.442 |
-| Mean AI requests to root | 1.400 |
-| Mean commands to root | 1.000 |
-| Tokens/sec to root | 38.615 |
-
-#### Profiles
-
-| Profile | n | Pass | Got root | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |
-|---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
-| openwebui-openai-gpt-4o-latest · Online AI Service | 19 | 100.0% | 100.0% | 6.762 | 0 | 25.125 | 4.667 |
-| openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 134 | 51.6% | 52.4% | 72.045 | 0 | 65.793 | 7.061 |
-| openwebui-openai-gpt-4-turbo-latest · Online AI Service | 59 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
-| openwebui-openai-gpt-5.2-latest · Online AI Service | 326 | 24.9% | 25.0% | 181.209 | 0 | 68.189 | 6.317 |
-| openwebui-deepseek-r1-14b · Online AI Service | 132 | 20.0% | 20.3% | 181.184 | 4,249 | 223.458 | 1.480 |
-| openwebui-openai-gpt-5-latest · Online AI Service | 39 | 20.0% | 20.7% | 61.037 | 0 | 59.564 | 1.167 |
-| openwebui-qwen3-14b · Online AI Service | 126 | 4.2% | 4.5% | 181.380 | 5,655 | 146.442 | 1.400 |
-| openwebui-openai-gpt-5-mini-latest · Online AI Service | 19 | 0.0% | 0.0% | 181.084 | — | — | — |
-| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 57 | — | — | — | — | — | — |
-
-#### Most token-efficient profiles (lowest mean tokens to root)
-
-| Profile | Tokens→root | Got root | n |
-|---------|------------:|---------:|--:|
-| openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 0 | 52.4% | 134 |
-| openwebui-openai-gpt-4-turbo-latest · Online AI Service | 0 | 33.3% | 59 |
-| openwebui-openai-gpt-4o-latest · Online AI Service | 0 | 100.0% | 19 |
-| openwebui-openai-gpt-5-latest · Online AI Service | 0 | 20.7% | 39 |
-| openwebui-openai-gpt-5.2-latest · Online AI Service | 0 | 25.0% | 326 |
-| openwebui-deepseek-r1-14b · Online AI Service | 4,249 | 20.3% | 132 |
-| openwebui-qwen3-14b · Online AI Service | 5,655 | 4.5% | 126 |
-
-<!-- benchmark-master:end -->
 
 ---
 
@@ -475,6 +312,8 @@ RamiGPT integrates several tools for privilege escalation enumeration:
 Run them from the Terminal tool dropdown. With the **AI** checkbox enabled, RamiGPT uploads the tool, captures output, and chains into **Full AI** using the findings.
 
 ![BeRoot + Full AI — enumeration output feeding the autonomous loop](docs/screenshots/beroot_full_ai.png)
+
+![Collaborative benchmark leaderboard](docs/screenshots/benchmark_leaderboard.png)
 
 ## Project layout
 

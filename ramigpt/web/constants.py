@@ -6,6 +6,7 @@ from __future__ import annotations
 PUBLIC_ENDPOINTS = frozenset({
     "index",
     "workspace",
+    "leaderboard",
     "login",
     "connect",
     "static",
@@ -13,6 +14,9 @@ PUBLIC_ENDPOINTS = frozenset({
     "update_ai_settings",
     "reload_ai_settings",
     "list_ollama_models_endpoint",
+    "list_openwebui_models_endpoint",
+    "list_openrouter_models_endpoint",
+    "list_cursor_models_endpoint",
     "test_ai_settings",
     "api_inventory",
     "api_create_session",
@@ -33,6 +37,7 @@ PUBLIC_ENDPOINTS = frozenset({
     "api_benchmark_verify_start",
     "api_benchmark_verify_status",
     "api_benchmark_verify_stop",
+    "api_benchmark_results_leaderboard",
 })
 
 ENTRY_TYPES = {

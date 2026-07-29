@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RamiGPT · Benchmark Leaderboard</title>
+  <link rel="stylesheet" href="/static/workspace.css">
+  <link rel="stylesheet" href="/static/leaderboard.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body class="leaderboard-page">
+  <div class="app-shell lb-shell">
+    <header class="topbar">
+      <a class="brand" href="/workspace" title="Back to workspace">
+        <span class="brand-mark">RG</span>
+        <span class="brand-name">RamiGPT</span>
+      </a>
+      <div class="topbar-search lb-topbar-meta">
+        <i class="fas fa-trophy"></i>
+        <span id="lb-updated">Loading collaborative rankings…</span>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="btn btn-secondary" id="lb-refresh" title="Reload rankings">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+        <button type="button" class="btn btn-secondary" id="lb-print" title="Print leaderboard">
+          <i class="fas fa-print"></i> Print
+        </button>
+        <a class="btn btn-secondary" href="/workspace" title="Open workspace">
+          <i class="fas fa-terminal"></i> Workspace
+        </a>
+      </div>
+    </header>
+
+    <main class="lb-main" id="lb-print-root">
+      <section class="lb-hero">
+        <div>
+          <p class="lb-eyebrow">Privilege Escalation Benchmark</p>
+          <h1>Model Leaderboard</h1>
+          <p class="muted small" id="lb-subtitle">
+            Top configurations by resolved labs, success rate, and token efficiency — live from collaborative master results.
+          </p>
+        </div>
+        <div class="lb-metric-tabs" id="lb-metric-tabs" role="tablist" aria-label="Ranking metric">
+          <button type="button" class="lb-metric-tab is-active" data-metric="got_root_count">Most resolved</button>
+          <button type="button" class="lb-metric-tab" data-metric="got_root_rate">Success rate</button>
+          <button type="button" class="lb-metric-tab" data-metric="tokens_to_root">Token efficiency</button>
+        </div>
+      </section>
+
+      <p class="lb-status muted small" id="lb-status" hidden></p>
+
+      <section class="lb-summary" id="lb-summary" aria-label="Summary metrics"></section>
+
+      <section class="lb-section" id="lb-rankings-section">
+        <div class="lb-section-head">
+          <h2>Rankings</h2>
+          <p class="muted small">Top 6 model · hardware profiles. Score = got-root rate on scoreable attempts.</p>
+        </div>
+        <div class="lb-grid lb-grid-rankings">
+          <article class="lb-card lb-card-wide">
+            <h3>Top 6 table</h3>
+            <div class="lb-table-wrap">
+              <table class="lb-table" id="lb-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Configuration</th>
+                    <th>Resolved</th>
+                    <th>Score</th>
+                    <th>Attempted</th>
+                    <th>Runs</th>
+                    <th>Avg input tok</th>
+                    <th>Tok → root</th>
+                    <th>Time → root</th>
+                  </tr>
+                </thead>
+                <tbody id="lb-table-body">
+                  <tr><td colspan="9" class="muted">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article class="lb-card">
+            <h3>Resolved (got root)</h3>
+            <div class="lb-chart" id="lb-chart-resolved" role="img" aria-label="Resolved count bar chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Success rate</h3>
+            <div class="lb-chart" id="lb-chart-success" role="img" aria-label="Success rate bar chart"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lb-section">
+        <div class="lb-section-head">
+          <h2>Efficiency</h2>
+          <p class="muted small">Tokens, speed, and request cost on successful root escalations.</p>
+        </div>
+        <div class="lb-grid">
+          <article class="lb-card">
+            <h3>Input vs tokens to root</h3>
+            <div class="lb-chart" id="lb-chart-tokens" role="img" aria-label="Token comparison chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Time to root</h3>
+            <div class="lb-chart" id="lb-chart-time" role="img" aria-label="Time to root chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>AI requests to root</h3>
+            <div class="lb-chart" id="lb-chart-requests" role="img" aria-label="AI requests chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Commands to root</h3>
+            <div class="lb-chart" id="lb-chart-commands" role="img" aria-label="Commands to root chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Tokens / sec to root</h3>
+            <div class="lb-chart" id="lb-chart-tps" role="img" aria-label="Tokens per second chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Multi-axis score</h3>
+            <div class="lb-chart" id="lb-chart-radar" role="img" aria-label="Radar efficiency chart"></div>
+          </article>
+          <article class="lb-card lb-card-wide">
+            <h3>Success vs token efficiency</h3>
+            <div class="lb-chart lb-chart-tall" id="lb-chart-scatter" role="img" aria-label="Success versus token scatter"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lb-section">
+        <div class="lb-section-head">
+          <h2>Coverage</h2>
+          <p class="muted small">Sample size, lab families, and how much of the catalog each Top 6 has tried.</p>
+        </div>
+        <div class="lb-grid">
+          <article class="lb-card">
+            <h3>Resolved vs unresolved</h3>
+            <div class="lb-chart" id="lb-chart-outcomes" role="img" aria-label="Outcomes stacked chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Catalog attempt coverage</h3>
+            <div class="lb-chart" id="lb-chart-coverage" role="img" aria-label="Catalog coverage chart"></div>
+          </article>
+          <article class="lb-card lb-card-wide">
+            <h3>Success by lab family</h3>
+            <div class="lb-chart lb-chart-tall" id="lb-chart-heatmap" role="img" aria-label="Family success heatmap"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lb-section">
+        <div class="lb-section-head">
+          <h2>Context</h2>
+          <p class="muted small">Trends, hardware, and tool-profile impact across collaborative runs.</p>
+        </div>
+        <div class="lb-grid">
+          <article class="lb-card lb-card-wide">
+            <h3>Benchmark trend</h3>
+            <div class="lb-chart lb-chart-tall" id="lb-chart-trend" role="img" aria-label="Benchmark trend chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Hardware comparison</h3>
+            <div class="lb-chart" id="lb-chart-hardware" role="img" aria-label="Hardware comparison chart"></div>
+          </article>
+          <article class="lb-card">
+            <h3>Tools impact</h3>
+            <div class="lb-chart" id="lb-chart-tools" role="img" aria-label="Tools impact chart"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="lb-section lb-methodology">
+        <div class="lb-section-head">
+          <h2>Methodology</h2>
+        </div>
+        <ul class="lb-method-list muted small" id="lb-methodology">
+          <li>Score uses got-root rate on scoreable attempts (pass + timeout + max_requests), not infra errors.</li>
+          <li>Resolved count is got_root among those scoreable attempts.</li>
+          <li>Zero or missing token telemetry is excluded from efficiency rankings.</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+  <script src="/static/leaderboard.js"></script>
+</body>
+</html>

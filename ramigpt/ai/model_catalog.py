@@ -9,9 +9,10 @@ from openai import OpenAI
 from ramigpt.ai.providers.compat import ensure_suffix, openwebui_openai_base_url
 from ramigpt.ai.providers.cursor_provider import DEFAULT_BASE_URL, list_cursor_model_details
 from ramigpt.ai.providers.ollama_provider import list_ollama_models
+from ramigpt.ai.providers.openrouter_provider import list_openrouter_models
 from ramigpt.config import Settings, get_settings
 
-_SUPPORTED = frozenset({"ollama", "openai", "openwebui", "cursor"})
+_SUPPORTED = frozenset({"ollama", "openai", "openwebui", "openrouter", "cursor"})
 
 
 def list_openai_compat_models(
@@ -43,6 +44,8 @@ def saved_model_for_provider(settings: Settings, provider: str) -> str:
         return settings.openai_model or ""
     if provider == "openwebui":
         return settings.openwebui_model or ""
+    if provider == "openrouter":
+        return settings.openrouter_model or ""
     if provider == "cursor":
         return settings.cursor_model or ""
     return ""
@@ -74,6 +77,15 @@ def list_models_for_provider(provider: str, settings: Settings | None = None) ->
         if not base_url.endswith("/v1"):
             base_url = ensure_suffix(base_url, "/v1")
         return list_openai_compat_models(api_key=cfg.openai_api_key, base_url=base_url)
+
+    if name == "openrouter":
+        if not cfg.openrouter_api_key:
+            raise ValueError("OpenRouter API key is not configured")
+        return list_openrouter_models(
+            cfg.openrouter_api_key,
+            base_url=cfg.openrouter_base_url,
+            timeout=8.0,
+        )
 
     # openwebui
     if not cfg.openwebui_base_url:
