@@ -25,11 +25,42 @@
       .replace(/"/g, "&quot;");
   }
 
-  function shortLabel(label, max) {
+  function labelLines(label, maxChars) {
     const text = String(label || "unknown");
-    const lim = max || 28;
-    if (text.length <= lim) return text;
-    return text.slice(0, lim - 1) + "…";
+    const limit = Math.max(12, maxChars || 38);
+    const lines = [];
+    let remaining = text;
+    while (remaining.length > limit) {
+      let split = -1;
+      for (let i = limit; i >= Math.floor(limit * 0.55); i -= 1) {
+        if (remaining[i] === " " || remaining[i] === "-" || remaining[i] === "·") {
+          split = remaining[i] === "-" ? i + 1 : i;
+          break;
+        }
+      }
+      if (split < 1) split = limit;
+      lines.push(remaining.slice(0, split).trim());
+      remaining = remaining.slice(split).trim();
+    }
+    if (remaining || !lines.length) lines.push(remaining || "unknown");
+    return lines;
+  }
+
+  function svgMultilineText(label, x, y, options) {
+    const opts = options || {};
+    const lines = labelLines(label, opts.maxChars || 38);
+    const lineHeight = opts.lineHeight || 11;
+    const className = opts.className ? ` class="${opts.className}"` : "";
+    const anchor = opts.anchor ? ` text-anchor="${opts.anchor}"` : "";
+    const transform = opts.transform ? ` transform="${opts.transform}"` : "";
+    const title = `<title>${escapeHtml(label)}</title>`;
+    const tspans = lines
+      .map(
+        (line, idx) =>
+          `<tspan x="${x}" dy="${idx === 0 ? 0 : lineHeight}">${escapeHtml(line)}</tspan>`
+      )
+      .join("");
+    return `<text x="${x}" y="${y}"${className}${anchor}${transform}>${title}${tspans}</text>`;
   }
 
   function fmtInt(value) {
@@ -105,10 +136,10 @@
     }
     const present = values.filter((v) => v != null);
     const max = Math.max(maxHint || 0, ...present, 0.0001);
-    const width = 520;
-    const rowH = 28;
-    const left = 150;
-    const right = 54;
+    const width = 760;
+    const rowH = 42;
+    const left = 310;
+    const right = 72;
     const top = 8;
     const height = top + rows.length * rowH + 8;
     const barW = width - left - right;
@@ -118,13 +149,17 @@
       const val = values[i];
       const w = val == null ? 0 : Math.max(2, (val / max) * barW);
       const color = SHORT_COLORS[i % SHORT_COLORS.length];
-      html += `<text x="0" y="${y + 16}" class="lb-axis-label">${escapeHtml(shortLabel(getLabel(row), 22))}</text>`;
-      html += `<rect x="${left}" y="${y + 4}" width="${barW}" height="16" fill="rgba(0,255,0,0.06)" />`;
+      html += svgMultilineText(getLabel(row), 0, y + 13, {
+        maxChars: 45,
+        lineHeight: 11,
+        className: "lb-axis-label",
+      });
+      html += `<rect x="${left}" y="${y + 8}" width="${barW}" height="16" fill="rgba(0,255,0,0.06)" />`;
       if (val != null) {
-        html += `<rect x="${left}" y="${y + 4}" width="${w.toFixed(1)}" height="16" fill="${color}" />`;
-        html += `<text x="${left + w + 6}" y="${y + 16}">${escapeHtml(format(val))}</text>`;
+        html += `<rect x="${left}" y="${y + 8}" width="${w.toFixed(1)}" height="16" fill="${color}" />`;
+        html += `<text x="${left + w + 6}" y="${y + 20}">${escapeHtml(format(val))}</text>`;
       } else {
-        html += `<text x="${left + 6}" y="${y + 16}">—</text>`;
+        html += `<text x="${left + 6}" y="${y + 20}">—</text>`;
       }
     });
     html += "</svg>";
@@ -137,9 +172,9 @@
       emptyChart(el, "No token telemetry");
       return;
     }
-    const width = 520;
-    const rowH = 36;
-    const left = 150;
+    const width = 760;
+    const rowH = 46;
+    const left = 310;
     const right = 20;
     const top = 28;
     const height = top + rows.length * rowH + 8;
@@ -164,7 +199,11 @@
     });
     rows.forEach((row, i) => {
       const y = top + i * rowH;
-      html += `<text x="0" y="${y + 18}" class="lb-axis-label">${escapeHtml(shortLabel(row.profile_label, 22))}</text>`;
+      html += svgMultilineText(row.profile_label, 0, y + 13, {
+        maxChars: 45,
+        lineHeight: 11,
+        className: "lb-axis-label",
+      });
       series.forEach((s, si) => {
         const val = s.getValue(row);
         const w = val == null || val <= 0 ? 0 : Math.max(2, (val / max) * barArea);
@@ -186,9 +225,9 @@
       emptyChart(el, "No outcomes");
       return;
     }
-    const width = 520;
-    const rowH = 28;
-    const left = 150;
+    const width = 760;
+    const rowH = 42;
+    const left = 310;
     const right = 64;
     const top = 24;
     const height = top + rows.length * rowH + 8;
@@ -207,10 +246,14 @@
       const total = resolved + unresolved;
       const rw = total ? (resolved / max) * barW : 0;
       const uw = total ? (unresolved / max) * barW : 0;
-      html += `<text x="0" y="${y + 16}" class="lb-axis-label">${escapeHtml(shortLabel(row.profile_label, 22))}</text>`;
-      html += `<rect x="${left}" y="${y + 4}" width="${rw.toFixed(1)}" height="16" fill="#00ff00" />`;
-      html += `<rect x="${left + rw}" y="${y + 4}" width="${uw.toFixed(1)}" height="16" fill="#335533" />`;
-      html += `<text x="${left + rw + uw + 6}" y="${y + 16}">${resolved}/${total || 0}</text>`;
+      html += svgMultilineText(row.profile_label, 0, y + 13, {
+        maxChars: 45,
+        lineHeight: 11,
+        className: "lb-axis-label",
+      });
+      html += `<rect x="${left}" y="${y + 8}" width="${rw.toFixed(1)}" height="16" fill="#00ff00" />`;
+      html += `<rect x="${left + rw}" y="${y + 8}" width="${uw.toFixed(1)}" height="16" fill="#335533" />`;
+      html += `<text x="${left + rw + uw + 6}" y="${y + 20}">${resolved}/${total || 0}</text>`;
     });
     html += "</svg>";
     el.innerHTML = html;
@@ -231,24 +274,36 @@
       emptyChart(el, "Need success rate + usable tokens-to-root");
       return;
     }
-    const width = 640;
-    const height = 280;
+    const width = 760;
+    const plotHeight = 250;
+    const legendRowH = 30;
+    const height = plotHeight + points.length * legendRowH + 28;
     const pad = { t: 20, r: 20, b: 36, l: 48 };
     const maxX = 100;
     const maxY = Math.max(...points.map((p) => p.y)) * 1.15;
     const maxN = Math.max(...points.map((p) => p.n));
     const xScale = (v) => pad.l + (v / maxX) * (width - pad.l - pad.r);
-    const yScale = (v) => height - pad.b - (v / maxY) * (height - pad.t - pad.b);
+    const yScale = (v) =>
+      plotHeight - pad.b - (v / maxY) * (plotHeight - pad.t - pad.b);
     let html = `<svg viewBox="0 0 ${width} ${height}" role="presentation">`;
-    html += `<line x1="${pad.l}" y1="${height - pad.b}" x2="${width - pad.r}" y2="${height - pad.b}" stroke="rgba(0,255,0,0.35)" />`;
-    html += `<line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${height - pad.b}" stroke="rgba(0,255,0,0.35)" />`;
-    html += `<text x="${width / 2}" y="${height - 8}">Success rate (%)</text>`;
-    html += `<text x="12" y="${height / 2}" transform="rotate(-90 12 ${height / 2})">Tokens → root</text>`;
+    html += `<line x1="${pad.l}" y1="${plotHeight - pad.b}" x2="${width - pad.r}" y2="${plotHeight - pad.b}" stroke="rgba(0,255,0,0.35)" />`;
+    html += `<line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${plotHeight - pad.b}" stroke="rgba(0,255,0,0.35)" />`;
+    html += `<text x="${width / 2}" y="${plotHeight - 8}">Success rate (%)</text>`;
+    html += `<text x="12" y="${plotHeight / 2}" transform="rotate(-90 12 ${plotHeight / 2})">Tokens → root</text>`;
     points.forEach((p) => {
       const r = 6 + (p.n / maxN) * 10;
       const color = SHORT_COLORS[p.i % SHORT_COLORS.length];
       html += `<circle cx="${xScale(p.x).toFixed(1)}" cy="${yScale(p.y).toFixed(1)}" r="${r.toFixed(1)}" fill="${color}" fill-opacity="0.75" stroke="#0f0" />`;
-      html += `<text x="${(xScale(p.x) + r + 4).toFixed(1)}" y="${(yScale(p.y) + 3).toFixed(1)}">${escapeHtml(shortLabel(p.row.profile_label, 18))}</text>`;
+      html += `<text x="${(xScale(p.x) + r + 4).toFixed(1)}" y="${(yScale(p.y) + 3).toFixed(1)}">#${p.i + 1}</text>`;
+    });
+    points.forEach((p, idx) => {
+      const y = plotHeight + 12 + idx * legendRowH;
+      html += `<rect x="12" y="${y - 8}" width="9" height="9" fill="${SHORT_COLORS[p.i % SHORT_COLORS.length]}" />`;
+      html += svgMultilineText(`#${p.i + 1} ${p.row.profile_label}`, 28, y, {
+        maxChars: 92,
+        lineHeight: 11,
+        className: "lb-axis-label",
+      });
     });
     html += "</svg>";
     el.innerHTML = html;
@@ -262,10 +317,12 @@
     }
     const axes = ["success", "speed", "token_efficiency", "request_efficiency"];
     const labels = ["Success", "Speed", "Tokens", "Requests"];
-    const width = 420;
-    const height = 280;
+    const width = 760;
+    const plotHeight = 270;
+    const legendRowH = 30;
+    const height = plotHeight + Math.min(radarRows.length, LIMIT) * legendRowH + 12;
     const cx = width / 2;
-    const cy = height / 2 + 6;
+    const cy = 140;
     const radius = 90;
     const angle = (i) => (-Math.PI / 2) + (i * 2 * Math.PI) / axes.length;
     let html = `<svg viewBox="0 0 ${width} ${height}" role="presentation">`;
@@ -299,8 +356,13 @@
       html += `<polygon points="${pts}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1.5" />`;
     });
     radarRows.slice(0, LIMIT).forEach((row, idx) => {
-      html += `<rect x="8" y="${12 + idx * 14}" width="8" height="8" fill="${SHORT_COLORS[idx % SHORT_COLORS.length]}" />`;
-      html += `<text x="20" y="${20 + idx * 14}">${escapeHtml(shortLabel(row.profile_label, 24))}</text>`;
+      const y = plotHeight + 8 + idx * legendRowH;
+      html += `<rect x="12" y="${y - 8}" width="9" height="9" fill="${SHORT_COLORS[idx % SHORT_COLORS.length]}" />`;
+      html += svgMultilineText(`#${idx + 1} ${row.profile_label}`, 28, y, {
+        maxChars: 92,
+        lineHeight: 11,
+        className: "lb-axis-label",
+      });
     });
     html += "</svg>";
     el.innerHTML = html;
@@ -319,16 +381,18 @@
     cells.forEach((c) => {
       cellMap[`${c.family}|${c.profile_key}`] = c;
     });
-    const left = 100;
-    const top = 90;
-    const cellW = 56;
+    const left = 110;
+    const top = 38;
+    const cellW = 76;
     const cellH = 28;
-    const width = left + profiles.length * cellW + 20;
-    const height = top + families.length * cellH + 20;
+    const gridBottom = top + families.length * cellH;
+    const legendRowH = 30;
+    const width = Math.max(760, left + profiles.length * cellW + 20);
+    const height = gridBottom + profiles.length * legendRowH + 28;
     let html = `<svg viewBox="0 0 ${width} ${height}" role="presentation">`;
     profiles.forEach((p, i) => {
       const x = left + i * cellW + cellW / 2;
-      html += `<text x="${x}" y="80" text-anchor="start" transform="rotate(-55 ${x} 80)">${escapeHtml(shortLabel(p.profile_label, 18))}</text>`;
+      html += `<text x="${x}" y="24" text-anchor="middle" class="lb-axis-label">#${i + 1}</text>`;
     });
     families.forEach((family, fi) => {
       const y = top + fi * cellH;
@@ -344,6 +408,15 @@
         }
         html += `<rect x="${x}" y="${y}" width="${cellW - 2}" height="${cellH - 2}" fill="${fill}" stroke="rgba(0,255,0,0.25)" />`;
         html += `<text x="${x + cellW / 2 - 1}" y="${y + 17}" text-anchor="middle">${rate == null ? "—" : escapeHtml(fmtPct(rate))}</text>`;
+      });
+    });
+    profiles.forEach((p, idx) => {
+      const y = gridBottom + 22 + idx * legendRowH;
+      html += `<rect x="12" y="${y - 8}" width="9" height="9" fill="${SHORT_COLORS[idx % SHORT_COLORS.length]}" />`;
+      html += svgMultilineText(`#${idx + 1} ${p.profile_label}`, 28, y, {
+        maxChars: 92,
+        lineHeight: 11,
+        className: "lb-axis-label",
       });
     });
     html += "</svg>";
@@ -496,7 +569,7 @@
     heatmap($("lb-chart-heatmap"), charts.family_heatmap || {});
     trendChart($("lb-chart-trend"), charts.trend || []);
     barChart($("lb-chart-hardware"), charts.hardware_comparison || [], {
-      getLabel: (r) => `${shortLabel(r.model_key_name, 16)} · ${r.hardware_label || r.hardware_key}`,
+      getLabel: (r) => `${r.model_key_name} · ${r.hardware_label || r.hardware_key}`,
       getValue: (r) => (r.got_root_rate == null ? null : r.got_root_rate * 100),
       format: (v) => `${fmtNum(v, 1)}%`,
       max: 100,
