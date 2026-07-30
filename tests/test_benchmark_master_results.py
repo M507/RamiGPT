@@ -490,6 +490,11 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertEqual(failed["count"], 1)
             self.assertEqual(failed["elapsed_seconds"]["mean"], 180.0)
 
+            md = format_master_markdown(master, include_overall=False)
+            # n is scoreable attempts only (pass + timeout/max_requests), not infra errors
+            self.assertRegex(md, r"\| [^\|]+ \| 2 \| 50\.0% \|")
+            self.assertNotRegex(md, r"\| [^\|]+ \| 3 \| 50\.0% \|")
+
             from ramigpt.benchmark.results import build_run_summary, refresh_result_document_summary
 
             summary = build_run_summary(doc["targets"])

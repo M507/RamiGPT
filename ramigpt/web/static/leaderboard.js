@@ -463,7 +463,7 @@
     const cards = [
       { label: "Profiles", value: fmtInt(summary.profiles) },
       { label: "Runs", value: fmtInt(summary.runs) },
-      { label: "Observations", value: fmtInt(summary.observations) },
+      { label: "Attempted", value: fmtInt(summary.attempted) },
       { label: "Resolved", value: fmtInt(summary.got_root_count) },
     ];
     el.innerHTML = cards

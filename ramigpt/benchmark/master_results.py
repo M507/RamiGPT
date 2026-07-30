@@ -762,6 +762,7 @@ def _rank_scenarios(
                 "target_id": parsed["target_id"],
                 "tools": parsed["tools"],
                 "observations": stats.get("observations", 0),
+                "attempted": stats.get("attempted", 0),
                 "runs": stats.get("runs", 0),
                 "pass_rate": stats.get("pass_rate"),
                 "got_root_rate": stats.get("got_root_rate"),
@@ -973,7 +974,7 @@ def _format_overall_metrics_table(stats: Dict[str, Any]) -> List[str]:
     return [
         "| Metric | Value |",
         "|--------|------:|",
-        f"| Observations | {stats.get('observations', 0)} |",
+        f"| Attempted (n) | {stats.get('attempted', 0)} |",
         f"| Runs | {stats.get('runs', 0)} |",
         f"| Pass rate (attempted) | {_format_rate(stats.get('pass_rate'))} |",
         f"| Got root rate | {_format_rate(stats.get('got_root_rate'))} |",
@@ -1062,7 +1063,7 @@ def format_master_summary(master: Dict[str, Any]) -> str:
                 [
                     f"Overall ({label}):",
                     f"  profile_key={profile_key}",
-                    f"  observations={stats.get('observations')} runs={stats.get('runs')}",
+                    f"  attempted={stats.get('attempted')} runs={stats.get('runs')}",
                     f"  pass_rate={_format_rate(stats.get('pass_rate'))} "
                     f"got_root_rate={_format_rate(stats.get('got_root_rate'))}",
                     f"  elapsed median={_format_num((stats.get('elapsed_seconds') or {}).get('median'))}s "
@@ -1080,7 +1081,7 @@ def format_master_summary(master: Dict[str, Any]) -> str:
         lines.extend(
             [
                 "Overall:",
-                f"  observations={overall.get('observations')} runs={overall.get('runs')}",
+                f"  attempted={overall.get('attempted')} runs={overall.get('runs')}",
                 f"  pass_rate={_format_rate(overall.get('pass_rate'))} "
                 f"got_root_rate={_format_rate(overall.get('got_root_rate'))}",
                 f"  elapsed median={_format_num((overall.get('elapsed_seconds') or {}).get('median'))}s "
@@ -1101,7 +1102,7 @@ def format_master_summary(master: Dict[str, Any]) -> str:
             f"  {row.get('profile_label') or row.get('model_key_name')}: "
             f"pass={_format_rate(row.get('pass_rate'))} "
             f"got_root={_format_rate(row.get('got_root_rate'))} "
-            f"n={row.get('observations')} "
+            f"n={row.get('attempted')} "
             f"median_elapsed={_format_num(row.get('median_elapsed_seconds'))}s "
             f"tokens_to_root={_format_int(row.get('mean_tokens_to_root'))}"
         )
@@ -1114,7 +1115,7 @@ def format_master_summary(master: Dict[str, Any]) -> str:
             f"got_root={_format_rate(row.get('got_root_rate'))} "
             f"hw={row.get('hardware_label')} "
             f"tools={','.join(row.get('tools') or []) or 'none'} "
-            f"n={row.get('observations')} "
+            f"n={row.get('attempted')} "
             f"tokens_to_root={_format_int(row.get('mean_tokens_to_root'))} "
             f"elapsed_to_root={_format_num(row.get('mean_elapsed_to_root'))}s "
             f"ai_req={_format_num(row.get('mean_ai_requests_to_root'))}"
@@ -1153,7 +1154,7 @@ def _format_scenarios_markdown_table(
             f"| {row.get('role')} "
             f"| `{row.get('target_id')}` "
             f"| {_format_tools(row.get('tools'))} "
-            f"| {row.get('observations', 0)} "
+            f"| {row.get('attempted', 0)} "
             f"| {_format_rate(row.get('pass_rate'))} "
             f"| {_format_rate(row.get('got_root_rate'))} "
             f"| {_format_int(row.get('mean_tokens_to_root'))} "
@@ -1243,7 +1244,7 @@ def format_master_markdown(
         for row in profile_rows:
             lines.append(
                 f"| {row.get('profile_label') or row.get('model_key_name')} "
-                f"| {row.get('observations', 0)} "
+                f"| {row.get('attempted', 0)} "
                 f"| {_format_rate(row.get('pass_rate'))} "
                 f"| {_format_rate(row.get('got_root_rate'))} "
                 f"| {_format_num(row.get('median_elapsed_seconds'))} "
@@ -1270,7 +1271,7 @@ def format_master_markdown(
                 f"| {row.get('profile_label') or row.get('model_key_name')} "
                 f"| {_format_int(row.get('mean_tokens_to_root'))} "
                 f"| {_format_rate(row.get('got_root_rate'))} "
-                f"| {row.get('observations', 0)} |"
+                f"| {row.get('attempted', 0)} |"
             )
         lines.append("")
 
@@ -1905,7 +1906,7 @@ def _tools_impact_from_scenarios(scenarios: List[Dict[str, Any]]) -> List[Dict[s
         if rate and rate > 0:
             bucket["known"] += max(int(round(got / rate)), got)
         else:
-            bucket["known"] += max(int(sc.get("observations") or 0), got)
+            bucket["known"] += max(int(sc.get("attempted") or sc.get("observations") or 0), got)
     rows = []
     for bucket in buckets.values():
         rows.append(

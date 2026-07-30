@@ -525,7 +525,7 @@ def format_leaderboard_export_html(master: Optional[Dict[str, Any]]) -> str:
         for label, value in (
             ("Profiles", _fmt_int(summary.get("profiles"))),
             ("Runs", _fmt_int(summary.get("runs"))),
-            ("Observations", _fmt_int(summary.get("observations"))),
+            ("Attempted", _fmt_int(summary.get("attempted"))),
             ("Resolved", _fmt_int(summary.get("got_root_count"))),
         )
     )
@@ -928,7 +928,7 @@ class _PngCanvas:
         items = [
             ("PROFILES", _fmt_int(summary.get("profiles"))),
             ("RUNS", _fmt_int(summary.get("runs"))),
-            ("OBSERVATIONS", _fmt_int(summary.get("observations"))),
+            ("ATTEMPTED", _fmt_int(summary.get("attempted"))),
             ("RESOLVED", _fmt_int(summary.get("got_root_count"))),
         ]
         h = 78
