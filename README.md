@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-31T04:05:05.964684+00:00 · 138 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-31T05:17:21.853848+00:00 · 140 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
@@ -23,7 +23,7 @@ _Last updated: 2026-07-31T04:05:05.964684+00:00 · 138 run(s) · [full JSON](dat
 | openrouter-deepseek-deepseek-v4-flash · Online AI Service | 37 | 43.2% | 45.7% | 181.061 | 6,728 | 55.688 | 4.000 |
 | openrouter-anthropic-claude-sonnet-latest · Online AI Service | 10 | 40.0% | 40.0% | 101.038 | 20,359 | 14.014 | 1.500 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 33 | 39.4% | 50.0% | 119.552 | 5,149 | 40.721 | 4.923 |
-| openwebui-deepseek-r1-14b · Online AI Service | 315 | 35.2% | 36.3% | 181.141 | 4,628 | 132.581 | 1.351 |
+| openwebui-deepseek-r1-14b · Online AI Service | 318 | 35.5% | 36.6% | 181.140 | 4,577 | 130.734 | 1.345 |
 | openrouter-microsoft-phi-4 · Online AI Service | 20 | 35.0% | 36.8% | 101.038 | 6,324 | 51.144 | 3.000 |
 | openwebui-openai-gpt-4o-latest · Online AI Service | 35 | 31.4% | 31.4% | 44.519 | 0 | 27.955 | 4.182 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 16 | 31.2% | 33.3% | 181.183 | 0 | 31.030 | 5.400 |
@@ -34,6 +34,7 @@ _Last updated: 2026-07-31T04:05:05.964684+00:00 · 138 run(s) · [full JSON](dat
 | openrouter-meta-llama-llama-4-maverick · Online AI Service | 54 | 14.8% | 14.8% | 70.785 | 10,961 | 25.704 | 6.125 |
 | openwebui-qwen3-14b · Online AI Service | 154 | 3.2% | 3.5% | 181.267 | 5,655 | 146.442 | 1.400 |
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 17 | 0.0% | 0.0% | 181.070 | — | — | — |
+| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 0 | — | — | — | — | — | — |
 | openrouter-openai-gpt-4o · Online AI Service | 0 | — | — | — | — | — | — |
 | openwebui-openai-gpt-4o-mini-latest · Online AI Service | 0 | — | — | — | — | — | — |
 
@@ -44,7 +45,7 @@ _Last updated: 2026-07-31T04:05:05.964684+00:00 · 138 run(s) · [full JSON](dat
 | openrouter-google-gemma-4-31b-it · Online AI Service | 2,708 | 52.0% | 52 |
 | openrouter-deepseek-deepseek-v4-pro · Online AI Service | 3,460 | 15.1% | 54 |
 | openrouter-moonshotai-kimi-latest · Online AI Service | 3,664 | 100.0% | 3 |
-| openwebui-deepseek-r1-14b · Online AI Service | 4,628 | 36.3% | 315 |
+| openwebui-deepseek-r1-14b · Online AI Service | 4,577 | 36.6% | 318 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 50.0% | 33 |
 | openwebui-qwen3-14b · Online AI Service | 5,655 | 3.5% | 154 |
 | openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 36.8% | 20 |
