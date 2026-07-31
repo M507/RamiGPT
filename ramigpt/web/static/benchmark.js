@@ -28,6 +28,9 @@
   let knownRoles = [];
   let currentAiRole = "";
   let lastLoggedIssueKey = "";
+  let elapsedTickTimer = null;
+  /** @type {{startedAt: string|null, finishedAt: string|null, running: boolean}} */
+  let elapsedClock = { startedAt: null, finishedAt: null, running: false };
 
   async function api(path, options = {}) {
     const opts = {
@@ -563,6 +566,75 @@
     root.setAttribute("aria-label", activity.label || "Benchmark progress");
   }
 
+  function formatElapsed(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  }
+
+  function parseIsoMs(iso) {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? t : null;
+  }
+
+  function currentElapsedSeconds() {
+    const start = parseIsoMs(elapsedClock.startedAt);
+    if (start == null) return null;
+    const end = elapsedClock.running
+      ? Date.now()
+      : parseIsoMs(elapsedClock.finishedAt) || Date.now();
+    return Math.max(0, (end - start) / 1000);
+  }
+
+  function paintElapsedTimers() {
+    const secs = currentElapsedSeconds();
+    const text = secs == null ? "" : formatElapsed(secs);
+    const footer = $("bench-elapsed-footer");
+    const status = $("bench-elapsed-status");
+    if (footer) {
+      if (!text) {
+        footer.hidden = true;
+        footer.textContent = "—";
+        footer.classList.remove("is-running");
+      } else {
+        footer.hidden = false;
+        footer.textContent = text;
+        footer.classList.toggle("is-running", !!elapsedClock.running);
+      }
+    }
+    if (status) {
+      status.textContent = text ? `Time: ${text}` : "";
+      status.hidden = !text;
+      status.classList.toggle("is-running", !!elapsedClock.running);
+    }
+  }
+
+  function syncElapsedClock(run, running, batch) {
+    const startedAt =
+      (batch && batch.started_at) || (run && run.started_at) || null;
+    let finishedAt = (batch && batch.finished_at) || null;
+    if (!finishedAt && !running && run && run.finished_at) {
+      finishedAt = run.finished_at;
+    }
+    elapsedClock = {
+      startedAt,
+      finishedAt,
+      running: !!running && !!startedAt,
+    };
+    paintElapsedTimers();
+    if (elapsedClock.running) {
+      if (!elapsedTickTimer) {
+        elapsedTickTimer = setInterval(paintElapsedTimers, 1000);
+      }
+    } else if (elapsedTickTimer) {
+      clearInterval(elapsedTickTimer);
+      elapsedTickTimer = null;
+    }
+  }
+
   function renderRun(run, running, batch, collabSave) {
     const phaseEl = $("bench-phase");
     const results = $("bench-results");
@@ -592,10 +664,12 @@
     logBenchmarkDiagnostics(run);
     renderProgress(run, running);
 
+    syncElapsedClock(run, running, batch);
+
     if (results) {
       if (!run || !(run.targets || []).length) {
         results.innerHTML = `<div class="muted small">No run yet. Configure AI and remote host, then Start.</div>`;
-
+        paintElapsedTimers();
       } else {
         const modelLabel =
           run.provider || run.model
@@ -604,6 +678,8 @@
         const modelKeyLabel = run.model_key_name
           ? `<div class="muted small">Model key: <code>${escapeHtml(run.model_key_name)}</code></div>`
           : "";
+        const elapsedLabel =
+          `<div class="small bench-elapsed-timer" id="bench-elapsed-status" hidden></div>`;
         const profileLabel = run.profile_label
           ? `<div class="muted small">Model profile: ${escapeHtml(run.profile_label)}</div>`
           : "";
@@ -643,6 +719,7 @@
         results.innerHTML =
           modelLabel +
           modelKeyLabel +
+          elapsedLabel +
           profileLabel +
           suiteProfileLabel +
           hardwareLabel +
@@ -701,6 +778,7 @@
             </div>`;
             })
             .join("");
+        paintElapsedTimers();
       }
     }
 

@@ -195,6 +195,8 @@ _batch: Dict[str, Any] = {
     "current_role": "",
     "stop": False,
     "auto_save_collab": False,
+    "started_at": None,
+    "finished_at": None,
 }
 # Completed runs awaiting explicit "Save collab results" from the UI
 # (or auto-save when the batch was started with auto_save_collab).
@@ -395,6 +397,8 @@ def get_status() -> Dict[str, Any]:
                 "current_provider": _batch.get("current_provider"),
                 "current_model": _batch.get("current_model"),
                 "current_role": _batch.get("current_role"),
+                "started_at": _batch.get("started_at"),
+                "finished_at": _batch.get("finished_at"),
             },
             "targets": [t.to_dict() for t in TARGETS],
             "profiles": list_profiles(),
@@ -1528,6 +1532,8 @@ def start_run(
                 "current_role": role_cfg.role_objective,
                 "stop": False,
                 "auto_save_collab": bool(auto_save_collab),
+                "started_at": _utcnow(),
+                "finished_at": None,
             }
         )
         first = _make_run(
@@ -1659,6 +1665,8 @@ def start_run(
                 auto_save = bool(_batch.get("auto_save_collab"))
                 _batch["active"] = False
                 _batch["stop"] = False
+                if not _batch.get("finished_at"):
+                    _batch["finished_at"] = _utcnow()
             run_batch_dir = None
             try:
                 get_settings_manager().reload()
