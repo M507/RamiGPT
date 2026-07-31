@@ -1257,18 +1257,31 @@ def format_master_markdown(
         lines.append("")
 
     token_eff_rows = (master.get("rankings") or {}).get("profiles", {}).get("by_tokens_to_root") or []
+    token_eff_rows = [
+        row
+        for row in token_eff_rows
+        if row.get("usable_mean_tokens_to_root") is not None
+    ]
+    token_eff_rows.sort(
+        key=lambda r: (
+            r.get("pass_rate") is None,
+            -(r.get("pass_rate") or 0),
+            r.get("usable_mean_tokens_to_root")
+            if r.get("usable_mean_tokens_to_root") is not None
+            else float("inf"),
+            -(r.get("attempted") or 0),
+        )
+    )
     if token_eff_rows:
         lines.extend(
             [
-                "#### Most token-efficient profiles (lowest mean tokens to root)",
+                "#### Most token-efficient profiles (sorted by pass rate)",
                 "",
                 "| Profile | Tokens→root | Pass | n |",
                 "|---------|------------:|-----:|--:|",
             ]
         )
         for row in token_eff_rows[:10]:
-            if row.get("mean_tokens_to_root") is None:
-                continue
             lines.append(
                 f"| {row.get('profile_label') or row.get('model_key_name')} "
                 f"| {_format_int(row.get('mean_tokens_to_root'))} "
