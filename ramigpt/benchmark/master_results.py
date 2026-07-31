@@ -1256,26 +1256,19 @@ def format_master_markdown(
             )
         lines.append("")
 
-    token_eff_rows = (master.get("rankings") or {}).get("profiles", {}).get("by_tokens_to_root") or []
     token_eff_rows = [
         row
-        for row in token_eff_rows
+        for row in (
+            (master.get("rankings") or {}).get("profiles", {}).get("by_tokens_to_root")
+            or []
+        )
         if row.get("usable_mean_tokens_to_root") is not None
     ]
-    token_eff_rows.sort(
-        key=lambda r: (
-            r.get("pass_rate") is None,
-            -(r.get("pass_rate") or 0),
-            r.get("usable_mean_tokens_to_root")
-            if r.get("usable_mean_tokens_to_root") is not None
-            else float("inf"),
-            -(r.get("attempted") or 0),
-        )
-    )
+    # by_tokens_to_root is already ascending by usable mean tokens; keep that order.
     if token_eff_rows:
         lines.extend(
             [
-                "#### Most token-efficient profiles (sorted by pass rate)",
+                "#### Most token-efficient profiles (lowest mean tokens to root)",
                 "",
                 "| Profile | Tokens→root | Pass | n |",
                 "|---------|------------:|-----:|--:|",

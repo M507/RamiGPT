@@ -290,7 +290,7 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn("| Profile | n | Pass | Median (s) |", readme_md)
             self.assertIn("| Profile | Tokens→root | Pass | n |", readme_md)
             self.assertIn(
-                "#### Most token-efficient profiles (sorted by pass rate)",
+                "#### Most token-efficient profiles (lowest mean tokens to root)",
                 readme_md,
             )
             self.assertNotIn("| Got root |", readme_md)
