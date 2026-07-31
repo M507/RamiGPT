@@ -9,15 +9,15 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-07-31T05:26:41.215921+00:00 · 142 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-07-31T05:33:33.222375+00:00 · 143 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 #### Profiles
 
 | Profile | n | Pass | Got root | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |
 |---------|--:|-----:|---------:|-----------:|------------:|-----------------:|------------:|
 | openrouter-anthropic-claude-opus-latest · Online AI Service | 6 | 100.0% | 100.0% | 7.261 | 12,354 | 20.973 | 1.000 |
-| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 6 | 100.0% | 100.0% | 25.418 | 1,798 | 28.969 | 1.833 |
 | openrouter-moonshotai-kimi-latest · Online AI Service | 3 | 66.7% | 100.0% | 84.051 | 3,664 | 72.791 | 1.000 |
+| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 24 | 50.0% | 50.0% | 87.338 | 1,990 | 50.482 | 1.750 |
 | openrouter-google-gemma-4-31b-it · Online AI Service | 52 | 50.0% | 52.0% | 82.439 | 2,708 | 19.825 | 1.769 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 84 | 50.0% | 50.6% | 84.042 | 0 | 65.773 | 7.095 |
 | openrouter-anthropic-claude-haiku-latest · Online AI Service | 9 | 44.4% | 44.4% | 65.036 | 13,997 | 24.590 | 1.250 |
@@ -42,7 +42,7 @@ _Last updated: 2026-07-31T05:26:41.215921+00:00 · 142 run(s) · [full JSON](dat
 
 | Profile | Tokens→root | Got root | n |
 |---------|------------:|---------:|--:|
-| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 1,798 | 100.0% | 6 |
+| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 1,990 | 50.0% | 24 |
 | openrouter-google-gemma-4-31b-it · Online AI Service | 2,708 | 52.0% | 52 |
 | openrouter-deepseek-deepseek-v4-pro · Online AI Service | 3,460 | 15.1% | 54 |
 | openrouter-moonshotai-kimi-latest · Online AI Service | 3,664 | 100.0% | 3 |
