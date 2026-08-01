@@ -479,6 +479,41 @@
         }
     }
 
+    function applyHistorySettingsToForms(settings) {
+        const includeOutputs = !!Number(settings.history_include_outputs);
+        const edgeCount = Number.isInteger(Number(settings.history_output_edge_count))
+            ? String(Number(settings.history_output_edge_count))
+            : "4";
+
+        [
+            ["settings-history-outputs", "settings-history-output-count"],
+            ["app-settings-history-outputs", "app-settings-history-output-count"],
+        ].forEach(function (ids) {
+            const outputToggle = $(ids[0]);
+            const outputCount = $(ids[1]);
+            if (outputToggle) {
+                outputToggle.checked = includeOutputs;
+            }
+            if (outputCount) {
+                outputCount.value = edgeCount;
+                outputCount.disabled = !includeOutputs;
+            }
+        });
+    }
+
+    function readHistorySettingsFromForm(toggleId, countId) {
+        const outputToggle = $(toggleId);
+        const outputCount = $(countId);
+        const edgeCount = Number(outputCount ? outputCount.value : 4);
+        if (!Number.isInteger(edgeCount) || edgeCount < 0 || edgeCount > 40) {
+            throw new Error("History output count must be an integer from 0 to 40.");
+        }
+        return {
+            history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
+            history_output_edge_count: edgeCount,
+        };
+    }
+
     function applySettingsToForm(settings) {
         $("settings-provider").value = settings.ai_provider || "ollama";
         $("settings-openai-model").value = settings.openai_model || "";
@@ -537,6 +572,7 @@
             : "key_...";
 
         $("settings-max-reqs").value = settings.openai_max_num_of_reqs;
+        applyHistorySettingsToForms(settings);
         toggleProviderFields(settings.ai_provider || "ollama");
     }
 
@@ -545,6 +581,10 @@
         const openWebUIModelSelect = $("settings-openwebui-model");
         const openRouterModelSelect = $("settings-openrouter-model");
         const cursorModelSelect = $("settings-cursor-model");
+        const history = readHistorySettingsFromForm(
+            "settings-history-outputs",
+            "settings-history-output-count"
+        );
         const payload = {
             ai_provider: $("settings-provider").value,
             openai_model: $("settings-openai-model").value.trim(),
@@ -558,6 +598,8 @@
             cursor_base_url: $("settings-cursor-base-url").value.trim(),
             cursor_model: (cursorModelSelect && cursorModelSelect.value || preferredCursorModel || "").trim(),
             openai_max_num_of_reqs: parseInt($("settings-max-reqs").value, 10) || 10,
+            history_include_outputs: history.history_include_outputs,
+            history_output_edge_count: history.history_output_edge_count,
             persist: persist !== false,
         };
 
@@ -841,17 +883,7 @@
         if (promptToggle) {
             promptToggle.checked = !!Number(settings.debug);
         }
-        const outputToggle = $("app-settings-history-outputs");
-        if (outputToggle) {
-            outputToggle.checked = !!Number(settings.history_include_outputs);
-        }
-        const outputCount = $("app-settings-history-output-count");
-        if (outputCount) {
-            outputCount.value = Number.isInteger(Number(settings.history_output_edge_count))
-                ? String(Number(settings.history_output_edge_count))
-                : "4";
-            outputCount.disabled = !(outputToggle && outputToggle.checked);
-        }
+        applyHistorySettingsToForms(settings);
         const advancedToggle = $("app-settings-advanced-mode");
         if (advancedToggle) {
             advancedToggle.checked = !!Number(settings.advanced_mode);
@@ -887,16 +919,14 @@
         const roleSelect = $("app-settings-role-objective");
         const rotateRolesToggle = $("app-settings-rotate-roles");
         const sessionV2Toggle = $("app-settings-upgraded-session-v2");
-        const outputToggle = $("app-settings-history-outputs");
-        const outputCount = $("app-settings-history-output-count");
         const advancedToggle = $("app-settings-advanced-mode");
         const benchParallel = $("app-settings-benchmark-parallel");
         const aiQueueToggle = $("app-settings-ai-request-queue");
-        const edgeCount = Number(outputCount ? outputCount.value : 4);
+        const history = readHistorySettingsFromForm(
+            "app-settings-history-outputs",
+            "app-settings-history-output-count"
+        );
         const parallelTargets = Number(benchParallel ? benchParallel.value : 1);
-        if (!Number.isInteger(edgeCount) || edgeCount < 0 || edgeCount > 40) {
-            throw new Error("History output count must be an integer from 0 to 40.");
-        }
         if (!Number.isInteger(parallelTargets) || parallelTargets < 1 || parallelTargets > 50) {
             throw new Error("Benchmark parallel targets must be an integer from 1 to 50.");
         }
@@ -910,8 +940,8 @@
                 upgraded_session_v2:
                     sessionV2Toggle && sessionV2Toggle.checked ? 1 : 0,
                 debug: promptToggle && promptToggle.checked ? 1 : 0,
-                history_include_outputs: outputToggle && outputToggle.checked ? 1 : 0,
-                history_output_edge_count: edgeCount,
+                history_include_outputs: history.history_include_outputs,
+                history_output_edge_count: history.history_output_edge_count,
                 advanced_mode: advancedToggle && advancedToggle.checked ? 1 : 0,
                 benchmark_parallel_targets: parallelTargets,
                 ai_request_queue: aiQueueToggle && aiQueueToggle.checked ? 1 : 0,
@@ -924,7 +954,8 @@
             throw new Error(data.error || "Save failed");
         }
         applyAppSettingsToForm(data.settings || {});
-        const historyStatus = outputToggle && outputToggle.checked
+        const edgeCount = history.history_output_edge_count;
+        const historyStatus = history.history_include_outputs
             ? (edgeCount === 0 ? "all history outputs included" : `first/last ${edgeCount} outputs included`)
             : "command-only history";
         showAppStatus(
@@ -1172,13 +1203,17 @@
             });
         }
 
-        const historyOutputsToggle = $("app-settings-history-outputs");
-        if (historyOutputsToggle) {
+        [
+            ["settings-history-outputs", "settings-history-output-count"],
+            ["app-settings-history-outputs", "app-settings-history-output-count"],
+        ].forEach(function (ids) {
+            const historyOutputsToggle = $(ids[0]);
+            if (!historyOutputsToggle) return;
             historyOutputsToggle.addEventListener("change", function () {
-                const count = $("app-settings-history-output-count");
+                const count = $(ids[1]);
                 if (count) count.disabled = !historyOutputsToggle.checked;
             });
-        }
+        });
 
         const appCloseBtn = $("app-settings-close");
         if (appCloseBtn) {

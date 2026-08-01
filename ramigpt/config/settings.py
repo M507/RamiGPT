@@ -122,7 +122,7 @@ class Settings:
     cursor_base_url: str = ""  # empty → https://api.cursor.com
     openai_max_num_of_reqs: int = 10
     debug: int = 0
-    history_include_outputs: int = 0
+    history_include_outputs: int = 1
     history_output_edge_count: int = 4
     role_objective: str = DEFAULT_ROLE_OBJECTIVE
     rotate_role_objectives: int = 0
@@ -270,7 +270,7 @@ def _load_settings_from_env() -> Settings:
         cursor_base_url=(os.getenv("CURSOR_BASE_URL") or "").strip().rstrip("/"),
         openai_max_num_of_reqs=_env_int("OPENAI_MAX_NUM_OF_REQS", 10),
         debug=_env_int("DEBUG", 0),
-        history_include_outputs=_env_int("HISTORY_INCLUDE_OUTPUTS", 0),
+        history_include_outputs=_env_int("HISTORY_INCLUDE_OUTPUTS", 1),
         history_output_edge_count=_env_int("HISTORY_OUTPUT_EDGE_COUNT", 4),
         role_objective=(
             os.getenv("ROLE_OBJECTIVE") or DEFAULT_ROLE_OBJECTIVE
