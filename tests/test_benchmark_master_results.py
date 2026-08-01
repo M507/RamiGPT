@@ -288,6 +288,7 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
                 readme_md,
             )
             self.assertIn("| Profile | n | Pass | Median (s) |", readme_md)
+            self.assertNotIn("Policy blocks", readme_md)
             self.assertIn("| Profile | Tokens→root | Pass | n |", readme_md)
             self.assertIn(
                 "#### Most token-efficient profiles (lowest mean tokens to root)",
@@ -891,6 +892,37 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["top"], [])
         self.assertIn("error", payload)
+
+    def test_profiles_table_includes_policy_blocks_column(self):
+        from ramigpt.ai.refusal import POLICY_BLOCK_REASON
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run-policy"
+            run_dir.mkdir()
+            doc = _sample_run_doc(run_id="policy-run", status="skipped", got_root=False)
+            doc["targets"][0]["ai_turns"] = [
+                {
+                    "request": 1,
+                    "command": "",
+                    "no_command_reason": POLICY_BLOCK_REASON,
+                    "total_tokens": 100,
+                },
+                {
+                    "request": 2,
+                    "command": "",
+                    "no_command_reason": POLICY_BLOCK_REASON,
+                    "total_tokens": 120,
+                },
+            ]
+            doc["targets"][0]["ai_requests"] = 2
+            (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+            master = build_master_document(root)
+            profile_rows = master["rankings"]["profiles"]["by_pass_rate"]
+            self.assertEqual(profile_rows[0]["policy_blocks"], 2)
+            md = format_master_markdown(master, include_overall=False)
+            self.assertIn("Policy blocks", md)
+            self.assertRegex(md, r"\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]+\| 2 \|")
 
 
 if __name__ == "__main__":

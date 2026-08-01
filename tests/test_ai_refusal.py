@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import unittest
 
-from ramigpt.ai.refusal import POLICY_BLOCK_REASON, detect_policy_violation
+from ramigpt.ai.refusal import (
+    POLICY_BLOCK_REASON,
+    count_policy_blocked_turns,
+    detect_policy_violation,
+)
 
 
 class DetectPolicyViolationTests(unittest.TestCase):
@@ -27,6 +31,18 @@ class DetectPolicyViolationTests(unittest.TestCase):
             detect_policy_violation("I can't assist with that request."),
             POLICY_BLOCK_REASON,
         )
+
+    def test_count_policy_blocked_turns(self):
+        turns = [
+            {"command": "", "no_command_reason": POLICY_BLOCK_REASON},
+            {"command": "sudo -l"},
+            {
+                "command": "",
+                "raw_response": "blocked under Anthropic's Usage Policy",
+            },
+        ]
+        self.assertEqual(count_policy_blocked_turns(turns), 2)
+        self.assertEqual(count_policy_blocked_turns([]), 0)
 
 
 if __name__ == "__main__":

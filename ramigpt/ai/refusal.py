@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Any, Iterable, Optional
 
 # Clear policy / safety refusals (Anthropic Usage Policy, OpenAI refusals, etc.).
 _POLICY_PATTERNS = (
@@ -35,3 +35,19 @@ def detect_policy_violation(raw_response: str) -> Optional[str]:
         if pattern.search(text):
             return POLICY_BLOCK_REASON
     return None
+
+
+def count_policy_blocked_turns(ai_turns: Iterable[Any]) -> int:
+    """Count AI turns that were blocked by a model/provider policy refusal."""
+    total = 0
+    for turn in ai_turns or []:
+        if not isinstance(turn, dict):
+            continue
+        reason = str(turn.get("no_command_reason") or "").strip()
+        if reason and detect_policy_violation(reason):
+            total += 1
+            continue
+        raw = turn.get("raw_response")
+        if raw and detect_policy_violation(str(raw)):
+            total += 1
+    return total

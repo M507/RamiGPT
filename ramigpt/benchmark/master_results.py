@@ -126,6 +126,13 @@ def _int_or_zero(value: Any) -> int:
         return 0
 
 
+def _policy_blocks_from_target(target: Dict[str, Any]) -> int:
+    """Count policy-blocked AI turns on a target result sheet."""
+    from ramigpt.ai.refusal import count_policy_blocked_turns
+
+    return count_policy_blocked_turns(target.get("ai_turns") or [])
+
+
 def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
     if not ts:
         return None
@@ -368,6 +375,7 @@ class _StatsAccumulator:
         message: str = "",
         stop_reason: str = "",
         timeline: Optional[List[Dict[str, Any]]] = None,
+        policy_blocks: int = 0,
     ) -> None:
         self.run_ids.add(run_id)
         agg_key = _aggregate_model_key(model_key_name, provider, model)
@@ -416,6 +424,7 @@ class _StatsAccumulator:
                 ),
                 "commands_count": commands_count,
                 "ai_requests": ai_requests,
+                "policy_blocks": int(policy_blocks or 0),
                 "finished_at": finished_at,
                 "result_path": result_path,
             }
@@ -428,6 +437,7 @@ class _StatsAccumulator:
         total = len(obs)
         attempted_obs = _benchmark_attempted_observations(obs)
         attempted = len(attempted_obs)
+        policy_blocks = sum(int(o.get("policy_blocks") or 0) for o in obs)
         # Root rate uses scoreable attempts only (pass + timeout), not provider aborts.
         got_root_true = sum(1 for o in attempted_obs if o.get("got_root") is True)
         got_root_known = sum(1 for o in attempted_obs if o.get("got_root") is not None)
@@ -471,6 +481,7 @@ class _StatsAccumulator:
             "mean_ai_requests_to_root": got_root_summary.get("mean_ai_requests"),
             "mean_commands_to_root": got_root_summary.get("mean_commands"),
             "tokens_per_second_to_root": got_root_summary.get("tokens_per_second"),
+            "policy_blocks": policy_blocks,
         }
 
 
@@ -567,6 +578,7 @@ def _extract_observations(
             completion_tokens=target.get("completion_tokens"),
             commands_count=target.get("commands_count"),
             ai_requests=target.get("ai_requests"),
+            policy_blocks=_policy_blocks_from_target(target),
             finished_at=finished_at,
             result_path=result_path,
             tools=run_tools,
@@ -642,6 +654,7 @@ def _stats_ranking_fields(stats: Dict[str, Any]) -> Dict[str, Any]:
         "usable_tokens_per_second_to_root": _positive_or_none(
             stats.get("tokens_per_second_to_root")
         ),
+        "policy_blocks": int(stats.get("policy_blocks") or 0),
     }
 
 
@@ -1098,6 +1111,8 @@ def format_master_summary(master: Dict[str, Any]) -> str:
 
     lines.append("Profiles (model · hardware) by pass rate:")
     for row in (master.get("rankings") or {}).get("profiles", {}).get("by_pass_rate") or []:
+        policy_blocks = int(row.get("policy_blocks") or 0)
+        policy_txt = f" policy_blocks={policy_blocks}" if policy_blocks else ""
         lines.append(
             f"  {row.get('profile_label') or row.get('model_key_name')}: "
             f"pass={_format_rate(row.get('pass_rate'))} "
@@ -1105,6 +1120,7 @@ def format_master_summary(master: Dict[str, Any]) -> str:
             f"n={row.get('attempted')} "
             f"median_elapsed={_format_num(row.get('median_elapsed_seconds'))}s "
             f"tokens_to_root={_format_int(row.get('mean_tokens_to_root'))}"
+            f"{policy_txt}"
         )
     lines.append("")
 
@@ -1236,16 +1252,26 @@ def format_master_markdown(
 
     profile_rows = (master.get("rankings") or {}).get("profiles", {}).get("by_pass_rate") or []
     if profile_rows:
+        show_policy_blocks = any(int(r.get("policy_blocks") or 0) > 0 for r in profile_rows)
+        header = (
+            "| Profile | n | Pass | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |"
+        )
+        divider = (
+            "|---------|--:|-----:|-----------:|------------:|-----------------:|------------:|"
+        )
+        if show_policy_blocks:
+            header += " Policy blocks |"
+            divider += "-------------:|"
         lines.extend(
             [
                 "#### Profiles",
                 "",
-                "| Profile | n | Pass | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root |",
-                "|---------|--:|-----:|-----------:|------------:|-----------------:|------------:|",
+                header,
+                divider,
             ]
         )
         for row in profile_rows:
-            lines.append(
+            line = (
                 f"| {row.get('profile_label') or row.get('model_key_name')} "
                 f"| {row.get('attempted', 0)} "
                 f"| {_format_rate(row.get('pass_rate'))} "
@@ -1254,6 +1280,9 @@ def format_master_markdown(
                 f"| {_format_num(row.get('mean_elapsed_to_root'))} "
                 f"| {_format_num(row.get('mean_ai_requests_to_root'))} |"
             )
+            if show_policy_blocks:
+                line += f" {int(row.get('policy_blocks') or 0)} |"
+            lines.append(line)
         lines.append("")
 
     token_eff_rows = [
