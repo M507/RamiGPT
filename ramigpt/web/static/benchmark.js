@@ -757,7 +757,16 @@
                     turn.total_tokens != null
                       ? `${turn.total_tokens} tok`
                       : "— tok";
-                  return `<div class="muted small bench-ai-turn">#${turn.request}: ${escapeHtml(llm)} · ${escapeHtml(shell)} · ${escapeHtml(tok)} · <code>${escapeHtml(turn.command || "")}</code></div>`;
+                  const cmd = (turn.command || "").trim();
+                  let cmdHtml;
+                  if (cmd) {
+                    cmdHtml = `<code>${escapeHtml(cmd)}</code>`;
+                  } else if (turn.no_command_reason) {
+                    cmdHtml = `<span class="bench-ai-no-cmd">${escapeHtml(turn.no_command_reason)}</span>`;
+                  } else {
+                    cmdHtml = `<code></code>`;
+                  }
+                  return `<div class="muted small bench-ai-turn">#${turn.request}: ${escapeHtml(llm)} · ${escapeHtml(shell)} · ${escapeHtml(tok)} · ${cmdHtml}</div>`;
                 })
                 .join("");
               const toolLines = (t.tool_runs || [])

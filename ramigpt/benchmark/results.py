@@ -350,6 +350,8 @@ def _build_target_timing(events: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     Separates tool runs (BeRoot), AI LLM latency, shell execution, and overhead.
     """
+    from ramigpt.ai.refusal import detect_policy_violation
+
     timeline: List[Dict[str, Any]] = []
     tool_runs: List[Dict[str, Any]] = []
     ai_turns: List[Dict[str, Any]] = []
@@ -513,6 +515,12 @@ def _build_target_timing(events: List[Dict[str, Any]]) -> Dict[str, Any]:
             llm_duration = _float_or_none(details.get("duration_seconds"))
             if llm_duration is None:
                 llm_duration = _seconds_between(last_event_ts, ts)
+            command = details.get("filtered_command") or details.get("command") or ""
+            no_command_reason = details.get("no_command_reason")
+            if not command and not no_command_reason:
+                no_command_reason = detect_policy_violation(
+                    details.get("raw_response") or ""
+                )
             turn = {
                 "request": int(req),
                 "ts": ts,
@@ -520,7 +528,8 @@ def _build_target_timing(events: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "finished_at": ts,
                 "llm_duration_seconds": llm_duration,
                 "shell_duration_seconds": None,
-                "command": details.get("filtered_command") or details.get("command") or "",
+                "command": command,
+                "no_command_reason": no_command_reason,
                 "provider": details.get("provider"),
                 "model": details.get("model"),
                 "prompt_tokens": details.get("prompt_tokens"),
@@ -667,12 +676,17 @@ def _format_target_timing_summary(target: Dict[str, Any]) -> List[str]:
             if tokens is not None
             else "tokens=—"
         )
+        command = turn.get("command") or ""
+        if not command and turn.get("no_command_reason"):
+            command_txt = f"(no command — {turn.get('no_command_reason')})"
+        else:
+            command_txt = f"$ {command}"
         lines.append(
             f"      ai #{turn.get('request')}: "
             f"{_format_timing_line('llm', turn.get('llm_duration_seconds'))} "
             f"{_format_timing_line('shell', turn.get('shell_duration_seconds'))} "
             f"{token_txt} "
-            f"$ {turn.get('command') or ''}"
+            f"{command_txt}"
         )
 
     for shell in target.get("shell_runs") or []:

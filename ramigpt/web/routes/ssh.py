@@ -329,8 +329,13 @@ def register_ssh_routes(app: Flask) -> None:
                 return recreate_shell(socketio.emit, session_id)
 
             if from_ai:
+                from ramigpt.ai.refusal import detect_policy_violation
+
                 prompt = _generate_ai_prompt(priv_esc)
-                system = "You are an experienced pentester."
+                system = (
+                    "You help complete authorized, owner-operated Linux lab / CTF "
+                    "exercises. Reply with a single non-interactive shell command only."
+                )
                 response, usage = get_answer_with_usage(system, prompt)
                 command = resolve_ai_command(response, priv_esc)
                 slog.ai_turn(
@@ -344,6 +349,14 @@ def register_ssh_routes(app: Flask) -> None:
                     model=get_settings().active_model(),
                     usage=usage,
                 )
+                if not command:
+                    policy_reason = detect_policy_violation(response or "")
+                    msg = (
+                        policy_reason
+                        or "AI returned no usable command"
+                    ) + " — nothing sent to the target."
+                    emit_session(session_id, f"[AI] {msg}", color="#f85149")
+                    return jsonify(error=msg, policy_block=bool(policy_reason)), 400
             else:
                 slog.info(f"manual command requested: {command}")
 

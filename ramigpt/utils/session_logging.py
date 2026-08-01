@@ -320,6 +320,8 @@ class SessionLogger:
         usage: Optional[Dict[str, Any]] = None,
         duration_seconds: Optional[float] = None,
     ) -> None:
+        from ramigpt.ai.refusal import detect_policy_violation
+
         meta = []
         if provider:
             meta.append(f"provider: {provider}")
@@ -334,6 +336,12 @@ class SessionLogger:
             meta.append(
                 f"tokens: {total_tokens} (prompt={prompt_tokens}, completion={completion_tokens})"
             )
+        no_command_reason = None
+        if not (filtered_command or "").strip():
+            no_command_reason = detect_policy_violation(raw_response or "")
+        command_line = filtered_command or "(empty)"
+        if no_command_reason:
+            command_line = f"(empty) — {no_command_reason}"
         self.block(
             f"AI_TURN #{request_n} ({source})",
             "\n".join(
@@ -348,7 +356,7 @@ class SessionLogger:
                     raw_response or "(empty)",
                     "",
                     "----- command after filter -----",
-                    filtered_command or "(empty)",
+                    command_line,
                 ]
             ),
         )
@@ -376,6 +384,7 @@ class SessionLogger:
                     "prompt_chars": len(prompt or ""),
                     "raw_response": raw_response,
                     "filtered_command": filtered_command,
+                    "no_command_reason": no_command_reason,
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,

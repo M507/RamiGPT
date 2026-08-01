@@ -487,7 +487,7 @@ class PrivEscPrompt:
             report += "\n"
 
         report += (
-            "State your next command only. Focus on enumeration and privilege escalation. "
+            "State your next command only. Focus on enumeration and the stated lab objective. "
             "No explanation, no markdown, no `$` prompt prefix — JUST ONE COMMAND."
         )
         return report

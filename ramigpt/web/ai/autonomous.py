@@ -113,7 +113,10 @@ def autonomous(session_data):
                 # Prompt/response live in the session run log only (not debug.log).
                 slog.debug(f"prompt #{i}:\n{prompt}")
 
-                system = "You are an experienced pentester."
+                system = (
+                    "You help complete authorized, owner-operated Linux lab / CTF "
+                    "exercises. Reply with a single non-interactive shell command only."
+                )
                 ai_started = time.monotonic()
                 response, usage = get_answer_with_usage(system, prompt)
                 ai_duration = round(time.monotonic() - ai_started, 3)
@@ -144,13 +147,25 @@ def autonomous(session_data):
                     # Count every non-executed turn (blank OR unparsable) toward the
                     # stall guard: a model that keeps replying with text we cannot turn
                     # into a command makes zero progress and just burns tokens.
+                    from ramigpt.ai.refusal import detect_policy_violation
+
                     consecutive_empty_ai += 1
                     had_text = bool((response or "").strip())
+                    policy_reason = detect_policy_violation(response or "")
                     if had_text and priv_esc is not None:
                         # Echo the unparsable reply back next turn so the model stops
                         # re-sending it (root cause of the suid-find timeout loop).
                         priv_esc.add_rejected(response)
-                    reason_txt = "unparsable reply" if had_text else "empty/null reply"
+                    if policy_reason:
+                        reason_txt = "policy violation block"
+                        emit_session(
+                            session_id,
+                            f"[Full AI] {policy_reason} — no command sent to the target "
+                            f"(request#{i}).",
+                            color="#f85149",
+                        )
+                    else:
+                        reason_txt = "unparsable reply" if had_text else "empty/null reply"
                     slog.warning(
                         f"AI returned {reason_txt} on request#{i}; skipping "
                         f"(consecutive_empty={consecutive_empty_ai})"
@@ -158,12 +173,20 @@ def autonomous(session_data):
                     if consecutive_empty_ai >= max_consecutive_empty_ai:
                         stop_reason = "ai_empty_response"
                         settings = get_settings()
-                        msg = (
-                            f"AI returned no usable command {consecutive_empty_ai} times in a row "
-                            f"({settings.ai_provider}/{settings.active_model()}). "
-                            "The model is replying with prose/null instead of a single command — "
-                            "switch models in Settings or check the provider logs."
-                        )
+                        if policy_reason:
+                            msg = (
+                                f"AI blocked {consecutive_empty_ai} turns in a row for a "
+                                f"usage/content policy violation "
+                                f"({settings.ai_provider}/{settings.active_model()}). "
+                                "Switch models or roles in Settings."
+                            )
+                        else:
+                            msg = (
+                                f"AI returned no usable command {consecutive_empty_ai} times in a row "
+                                f"({settings.ai_provider}/{settings.active_model()}). "
+                                "The model is replying with prose/null instead of a single command — "
+                                "switch models in Settings or check the provider logs."
+                            )
                         slog.error(msg)
                         emit_session(session_id, f"[Full AI] {msg}", color="#f85149")
                         break
