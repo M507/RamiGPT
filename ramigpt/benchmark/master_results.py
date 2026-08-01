@@ -1274,7 +1274,7 @@ def format_master_markdown(
                 "|---------|------------:|-----:|--:|",
             ]
         )
-        for row in token_eff_rows[:10]:
+        for row in token_eff_rows:
             lines.append(
                 f"| {row.get('profile_label') or row.get('model_key_name')} "
                 f"| {_format_int(row.get('mean_tokens_to_root'))} "
