@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from ramigpt.benchmark.deploy import (
     RemoteDeployConfig,
@@ -85,7 +85,27 @@ class BenchmarkDeployFastPathTests(unittest.TestCase):
         )
 
         mock_ports.assert_not_called()
-        mock_deploy.assert_called_once()
+        mock_deploy.assert_called_once_with(
+            self.cfg, log=ANY, targets=self.targets, wipe_images=True
+        )
+
+    @patch("ramigpt.benchmark.deploy.deploy_remote")
+    @patch("ramigpt.benchmark.deploy.verify_targets_ssh")
+    @patch("ramigpt.benchmark.deploy.check_target_ports")
+    def test_normal_deploy_does_not_wipe_images(
+        self, mock_ports, mock_verify, mock_deploy
+    ):
+        mock_ports.return_value = [
+            {"id": self.targets[0].id, "host": self.cfg.host, "port": self.targets[0].port, "open": False},
+            {"id": self.targets[1].id, "host": self.cfg.host, "port": self.targets[1].port, "open": True},
+        ]
+        mock_deploy.return_value = self.cfg.host
+
+        ensure_remote_benchmark(self.cfg, log=lambda _m: None, targets=self.targets)
+
+        mock_deploy.assert_called_once_with(
+            self.cfg, log=ANY, targets=self.targets, wipe_images=False
+        )
 
     @patch("ramigpt.benchmark.deploy._tcp_port_open")
     def test_check_target_ports_parallel_order(self, mock_tcp):

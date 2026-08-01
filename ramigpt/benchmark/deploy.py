@@ -244,10 +244,15 @@ def deploy_remote(
     cfg: RemoteDeployConfig,
     log: LogFn = _default_log,
     targets: Optional[Sequence] = None,
+    *,
+    wipe_images: bool = False,
 ) -> str:
     """
     Use Ansible to install Docker (if needed), copy compose assets, bring selected
     targets up, and verify only those SSH ports on the remote host.
+
+    When wipe_images is True, also remove ramigpt_bench images so the next
+    ``up --build`` restores a clean official base image.
     """
     from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
 
@@ -288,10 +293,13 @@ def deploy_remote(
         "bench_compose_services": services,
         "bench_ssh_ports": ports,
         "bench_all_ssh_ports": all_ports,
+        "bench_wipe_images": bool(wipe_images),
     }
+    wipe_note = ", wipe images" if wipe_images else ""
     log(
         f"Deploying {len(selected)} target(s) via Ansible: "
-        f"{', '.join(t.id for t in selected)} (ports {', '.join(str(p) for p in ports)})"
+        f"{', '.join(t.id for t in selected)} "
+        f"(ports {', '.join(str(p) for p in ports)}{wipe_note})"
     )
 
     with tempfile.TemporaryDirectory(prefix="ramigpt-bench-") as tmp:
@@ -449,6 +457,9 @@ def ensure_remote_benchmark(
 
     Fast path: when every selected SSH port is open and accepts lowpriv login,
     skip Ansible entirely. Otherwise run the full playbook deploy.
+
+    force_deploy=True skips the fast path and also wipes bench images so labs
+    are rebuilt from the official compose/Dockerfile assets.
     """
     from ramigpt.utils.ubuntu_requirements import ensure_ubuntu_requirements
 
@@ -473,8 +484,13 @@ def ensure_remote_benchmark(
         else:
             missing = [str(p["port"]) for p in ports if not p["open"]]
             log(f"Closed port(s) on {host}: {', '.join(missing)} — running Ansible deploy")
+    else:
+        log(
+            f"Force redeploy on {host}: remove bench containers/images and "
+            "rebuild official lab targets"
+        )
 
-    return deploy_remote(cfg, log=log, targets=selected)
+    return deploy_remote(cfg, log=log, targets=selected, wipe_images=bool(force_deploy))
 
 
 def all_target_ports_open(

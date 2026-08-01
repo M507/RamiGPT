@@ -275,7 +275,8 @@ Before clicking **Start Benchmark**:
 2. Confirm AI **Test connection** succeeded.
 3. Confirm target profile / checked list.
 4. Optionally enable **Auto-save collab results** (writes under `data/benchmark/results/`).
-5. Click **Start Benchmark**.
+5. Optionally enable **Rebuild remote labs** if a previous agent run may have corrupted a target (wipes bench containers/images on the remote host and recreates the official labs **before every run** in the batch).
+6. Click **Start Benchmark**.
 
 During a run: sessions appear under the **Benchmark** sidebar group; use **Stop** to abort.
 

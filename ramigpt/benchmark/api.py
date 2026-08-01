@@ -155,6 +155,12 @@ def register_benchmark_routes(app: Flask) -> None:
         auto_save_collab = bool(
             body.get("auto_save_collab", body.get("autosave_collab", False))
         )
+        force_redeploy = bool(
+            body.get(
+                "force_redeploy",
+                body.get("force_deploy", body.get("rebuild_remote_labs", False)),
+            )
+        )
         try:
             timeout_i = int(timeout)
         except (TypeError, ValueError):
@@ -172,6 +178,7 @@ def register_benchmark_routes(app: Flask) -> None:
                 target_ids=target_ids,
                 suite_profile_id=str(suite_profile_id).strip() if suite_profile_id else None,
                 auto_save_collab=auto_save_collab,
+                force_redeploy=force_redeploy,
             )
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

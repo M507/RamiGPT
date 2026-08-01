@@ -195,6 +195,7 @@ _batch: Dict[str, Any] = {
     "current_role": "",
     "stop": False,
     "auto_save_collab": False,
+    "force_redeploy": False,
     "started_at": None,
     "finished_at": None,
 }
@@ -1298,7 +1299,19 @@ def _worker(run: BenchmarkRun) -> None:
 
         run.phase = "deploying"
         target_names = ", ".join(t.id for t in selected)
-        _log(run, f"Ensuring benchmark targets on {expected_host}: {target_names}")
+        force_redeploy = False
+        with _lock:
+            # Keep the flag for the whole batch: rebuild before every run slot.
+            force_redeploy = bool(_batch.get("force_redeploy"))
+        if force_redeploy:
+            _log(
+                run,
+                f"Rebuild remote labs before run {run.repetition}/{run.repetitions} — "
+                f"wiping containers/images and recreating official targets on "
+                f"{expected_host}: {target_names}",
+            )
+        else:
+            _log(run, f"Ensuring benchmark targets on {expected_host}: {target_names}")
         run.host = ensure_remote_benchmark(
             RemoteDeployConfig(
                 host=run.remote["host"],
@@ -1308,6 +1321,7 @@ def _worker(run: BenchmarkRun) -> None:
             ),
             log=log_fn,
             targets=selected,
+            force_deploy=force_redeploy,
         )
 
         run.phase = "running"
@@ -1435,6 +1449,7 @@ def start_run(
     target_ids: Optional[List[str]] = None,
     suite_profile_id: Optional[str] = None,
     auto_save_collab: bool = False,
+    force_redeploy: bool = False,
 ) -> BenchmarkRun:
     global _current, run_batch_dir
 
@@ -1532,6 +1547,7 @@ def start_run(
                 "current_role": role_cfg.role_objective,
                 "stop": False,
                 "auto_save_collab": bool(auto_save_collab),
+                "force_redeploy": bool(force_redeploy),
                 "started_at": _utcnow(),
                 "finished_at": None,
             }
@@ -1560,12 +1576,13 @@ def start_run(
         f"runs={total_runs} batch={batch_id[:8]} targets={selected_ids}"
     )
     profile_note = f", profile={suite_sp_name}" if suite_sp_name else ""
+    rebuild_note = ", rebuild_remote_labs=yes" if force_redeploy else ""
     _log(
         first,
         f"Benchmark queued (mode={mode}, tools={enabled or ['full_ai_only']}, "
         f"targets={selected_ids}, timeout={first.timeout_seconds}s, "
         f"ai={ai_cfg.ai_provider}/{ai_cfg.active_model()}, "
-        f"role={role_cfg.role_objective}{profile_note}, "
+        f"role={role_cfg.role_objective}{profile_note}{rebuild_note}, "
         f"run={1}/{total_runs} ({_format_slot_plan(first_slot)}), logs={first.log_dir})",
     )
     if total_runs > 1:

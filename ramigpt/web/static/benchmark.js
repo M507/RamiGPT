@@ -19,6 +19,7 @@
   const MAX_PLAN_ENTRIES = 10;
   const MAX_TOTAL_RUNS = 50;
   const AUTO_SAVE_COLLAB_KEY = "ramigpt.bench.autoSaveCollab";
+  const FORCE_REDEPLOY_KEY = "ramigpt.bench.forceRedeploy";
   /** @type {Record<string, string[]>} */
   const modelListCache = {};
   /** @type {Record<string, string>} */
@@ -1296,6 +1297,7 @@
       target_ids: targetIds,
       suite_profile_id: selectedTargetProfileId() || undefined,
       auto_save_collab: isAutoSaveCollabChecked(),
+      force_redeploy: isForceRedeployChecked(),
       remote: {
         host: ($("bench-remote-host").value || "").trim(),
         port: parseInt($("bench-remote-port").value, 10) || 22,
@@ -1364,6 +1366,11 @@
     return !!(el && el.checked);
   }
 
+  function isForceRedeployChecked() {
+    const el = $("bench-force-redeploy");
+    return !!(el && el.checked);
+  }
+
   function loadAutoSaveCollabPreference() {
     const el = $("bench-auto-save-collab");
     if (!el) return;
@@ -1379,6 +1386,26 @@
     if (!el) return;
     try {
       localStorage.setItem(AUTO_SAVE_COLLAB_KEY, el.checked ? "1" : "0");
+    } catch (_err) {
+      /* ignore storage errors */
+    }
+  }
+
+  function loadForceRedeployPreference() {
+    const el = $("bench-force-redeploy");
+    if (!el) return;
+    try {
+      el.checked = localStorage.getItem(FORCE_REDEPLOY_KEY) === "1";
+    } catch (_err) {
+      /* ignore storage errors */
+    }
+  }
+
+  function persistForceRedeployPreference() {
+    const el = $("bench-force-redeploy");
+    if (!el) return;
+    try {
+      localStorage.setItem(FORCE_REDEPLOY_KEY, el.checked ? "1" : "0");
     } catch (_err) {
       /* ignore storage errors */
     }
@@ -1595,6 +1622,7 @@
     const resetBtn = $("bench-reset-results");
     const saveBtn = $("bench-save-collab");
     const autoSave = $("bench-auto-save-collab");
+    const forceRedeploy = $("bench-force-redeploy");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
     const verifyBtn = $("bench-verify-targets");
@@ -1609,6 +1637,10 @@
     if (autoSave) {
       loadAutoSaveCollabPreference();
       autoSave.addEventListener("change", persistAutoSaveCollabPreference);
+    }
+    if (forceRedeploy) {
+      loadForceRedeployPreference();
+      forceRedeploy.addEventListener("change", persistForceRedeployPreference);
     }
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);

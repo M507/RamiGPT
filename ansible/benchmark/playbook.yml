@@ -6,6 +6,7 @@
 #   bench_compose_services: [bench-sudo-vim, ...]  # compose service names to start
 #   bench_ssh_ports: [2211, ...]                   # only wait for these
 #   bench_all_ssh_ports: [2211, 2212, ...]         # all suite ports (teardown/DNAT cleanup)
+#   bench_wipe_images: true                        # also remove ramigpt-bench images before rebuild
 
 - name: Deploy RamiGPT privilege-escalation benchmark targets
   hosts: benchmark_hosts
@@ -18,6 +19,7 @@
     bench_compose_services: []
     bench_ssh_ports: []
     bench_all_ssh_ports: []
+    bench_wipe_images: false
     bench_wait_timeout: 120
 
   tasks:
@@ -138,9 +140,28 @@
           -f {{ bench_remote_dir }}/docker-compose.yml
           --project-directory {{ bench_remote_dir }}
           down --remove-orphans
+          {{ '--rmi local' if (bench_wipe_images | default(false) | bool) else '' }}
       register: compose_down
       changed_when: compose_down.rc == 0
       failed_when: false
+
+    - name: Remove RamiGPT benchmark images for a clean rebuild
+      # Restores official labs after agents clobber container filesystems (e.g. /etc/sudoers).
+      ansible.builtin.shell: |
+        set +e
+        for ref in ramigpt-bench-base ramigpt-bench-base:latest; do
+          ids="$(docker images -q --filter "reference=${ref}")"
+          if [ -n "$ids" ]; then
+            docker rmi -f $ids
+          fi
+        done
+        exit 0
+      args:
+        executable: /bin/bash
+      register: bench_wipe_rmi
+      changed_when: bench_wipe_rmi.stdout | trim != ''
+      failed_when: false
+      when: bench_wipe_images | default(false) | bool
 
     - name: Drop stale Docker DNAT rules for benchmark SSH ports
       # Host-network sshd must not compete with leftover `docker publish` DNATs.

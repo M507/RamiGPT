@@ -42,7 +42,8 @@
             <input type="number" id="bench-timeout" value="180" min="10" max="3600">
           </label>
           <label class="muted small" style="justify-content:flex-end">
-            Check <strong>Auto-save collab results</strong> before Start to write sheets under <code>data/benchmark/results/</code> when the run finishes (or click <strong>Save collab results</strong> after).
+            Check <strong>Auto-save collab results</strong> before Start to write sheets under <code>data/benchmark/results/</code> when the run finishes.
+            Check <strong>Rebuild remote labs</strong> to wipe bench containers/images on the remote host and recreate the official targets before <em>each</em> run in the batch.
           </label>
         </div>
         <div class="bench-run-plan">
@@ -173,6 +174,10 @@
       <label class="bench-auto-save-check" for="bench-auto-save-collab" title="When checked, write collab result sheets under data/benchmark/results/ as soon as the benchmark finishes">
         <input type="checkbox" id="bench-auto-save-collab">
         <span>Auto-save collab results</span>
+      </label>
+      <label class="bench-auto-save-check" for="bench-force-redeploy" title="Before every run in the batch: kill all ramigpt_bench containers and images on the remote host, then rebuild and force-recreate the official lab targets">
+        <input type="checkbox" id="bench-force-redeploy">
+        <span>Rebuild remote labs</span>
       </label>
     </div>
     <div class="modal-actions">
