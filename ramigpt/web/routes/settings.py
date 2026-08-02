@@ -30,6 +30,7 @@ _SETTINGS_ALLOWED = {
     "debug",
     "history_include_outputs",
     "history_output_edge_count",
+    "ai_provider_error_retries",
     "role_objective",
     "rotate_role_objectives",
     "upgraded_session_v2",

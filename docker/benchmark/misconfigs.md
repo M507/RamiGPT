@@ -10,7 +10,8 @@ Lab targets used by RamiGPT to evaluate privilege-escalation agents. Each contai
 | `apply-misconfig.sh` | Runtime profiles keyed by `MISCONFIG=…` |
 | `entrypoint.sh` | Applies profile, then binds sshd on `SSH_PORT` |
 | `docker-compose.yml` | Remote Linux lab: `network_mode: host` (no publish/DNAT); per service `SSH_PORT` + `MISCONFIG` (+ rare `cap_add`) |
-| `ramigpt/benchmark/targets.py` | Suite registry (id, port, family, primitive, `misconfig`) + UI **profiles** |
+| `ramigpt/benchmark/targets.py` | Suite registry (id, port, family, primitive, `misconfig`) |
+| [`data/benchmark/profiles.json`](../../data/benchmark/profiles.json) | UI **target profiles** (Select from presets) |
 | [`BENCHMARK_INTEGRATION.md`](BENCHMARK_INTEGRATION.md) | How labs connect to app, verify harness, tests, and profiles |
 
 **Adding a target** (preferred order):
@@ -821,4 +822,4 @@ python3 -m ramigpt.benchmark.verify 10.10.1.109 --targets sudo-env,cap-python
 
 ### UI target profiles
 
-See **[`BENCHMARK_INTEGRATION.md`](BENCHMARK_INTEGRATION.md)** for the full profile list (22 presets), default selection (**Regression sample**), verify vs AI flows, automated tests, and the maintainer checklist when adding labs.
+See **[`BENCHMARK_INTEGRATION.md`](BENCHMARK_INTEGRATION.md)** for the full profile list (34 presets), default selection (**Regression sample**), verify vs AI flows, automated tests, and the maintainer checklist when adding labs.

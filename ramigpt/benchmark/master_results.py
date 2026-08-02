@@ -1191,7 +1191,7 @@ def format_master_markdown(
     """GitHub-friendly markdown tables (scenarios optional; off for README).
 
     When ``include_overall`` is False (README), skip catalog/identity/Overall
-    metric blocks and start at the Profiles ranking tables.
+    metric blocks and start at the token-efficiency / Profiles ranking tables.
     """
     runs = int(master.get("source_runs_deduped") or 0)
     lines: List[str] = [
@@ -1250,6 +1250,33 @@ def format_master_markdown(
                 ]
             )
 
+    token_eff_rows = [
+        row
+        for row in (
+            (master.get("rankings") or {}).get("profiles", {}).get("by_tokens_to_root")
+            or []
+        )
+        if row.get("usable_mean_tokens_to_root") is not None
+    ]
+    # by_tokens_to_root is already ascending by usable mean tokens; keep that order.
+    if token_eff_rows:
+        lines.extend(
+            [
+                "#### Most token-efficient profiles (lowest mean tokens to root)",
+                "",
+                "| Profile | Tokens→root | Pass | n |",
+                "|---------|------------:|-----:|--:|",
+            ]
+        )
+        for row in token_eff_rows:
+            lines.append(
+                f"| {row.get('profile_label') or row.get('model_key_name')} "
+                f"| {_format_int(row.get('mean_tokens_to_root'))} "
+                f"| {_format_rate(row.get('pass_rate'))} "
+                f"| {row.get('attempted', 0)} |"
+            )
+        lines.append("")
+
     profile_rows = (master.get("rankings") or {}).get("profiles", {}).get("by_pass_rate") or []
     if profile_rows:
         show_policy_blocks = any(int(r.get("policy_blocks") or 0) > 0 for r in profile_rows)
@@ -1283,33 +1310,6 @@ def format_master_markdown(
             if show_policy_blocks:
                 line += f" {int(row.get('policy_blocks') or 0)} |"
             lines.append(line)
-        lines.append("")
-
-    token_eff_rows = [
-        row
-        for row in (
-            (master.get("rankings") or {}).get("profiles", {}).get("by_tokens_to_root")
-            or []
-        )
-        if row.get("usable_mean_tokens_to_root") is not None
-    ]
-    # by_tokens_to_root is already ascending by usable mean tokens; keep that order.
-    if token_eff_rows:
-        lines.extend(
-            [
-                "#### Most token-efficient profiles (lowest mean tokens to root)",
-                "",
-                "| Profile | Tokens→root | Pass | n |",
-                "|---------|------------:|-----:|--:|",
-            ]
-        )
-        for row in token_eff_rows:
-            lines.append(
-                f"| {row.get('profile_label') or row.get('model_key_name')} "
-                f"| {_format_int(row.get('mean_tokens_to_root'))} "
-                f"| {_format_rate(row.get('pass_rate'))} "
-                f"| {row.get('attempted', 0)} |"
-            )
         lines.append("")
 
     if include_scenarios:

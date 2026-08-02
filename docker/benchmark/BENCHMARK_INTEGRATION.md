@@ -62,7 +62,19 @@ Verify uses **`scripts/benchmark/checks/*.sh`** over SSH (`sshpass`). AI runs us
 
 ## Target profiles (UI presets)
 
-Profiles are **not** separate enrollment or docker entities. Each `BenchmarkProfile` in `targets.py` is a named list of target ids shown in the Benchmark modal **Select from** dropdown.
+Profiles are **not** separate enrollment or docker entities. They are named target selections in [`data/benchmark/profiles.json`](../../data/benchmark/profiles.json), loaded at import time by `ramigpt.benchmark.targets.load_profiles()` and shown in the Benchmark modal **Select from** dropdown.
+
+### Source file
+
+| Path | Role |
+|------|------|
+| [`data/benchmark/profiles.json`](../../data/benchmark/profiles.json) | Canonical profile definitions (`default_profile_id` + `profiles[]`) |
+| `ramigpt/benchmark/targets.py` | Loader (`load_profiles`), `PROFILES`, `DEFAULT_TARGET_PROFILE_ID` |
+
+Each profile entry is either:
+
+- **`target_ids`**: explicit curated list of lab ids, or
+- **`select`**: dynamic match — `families`, `exclude_families`, `expects_root`, and/or `id_contains_any`
 
 ### Default selection
 
@@ -70,7 +82,7 @@ Opening the modal pre-selects **`regression-sample`** (~19 labs), **not** all 28
 
 | Constant | Value |
 |----------|-------|
-| `DEFAULT_TARGET_PROFILE_ID` | `regression-sample` |
+| `DEFAULT_TARGET_PROFILE_ID` | from `profiles.json` → `regression-sample` |
 | Helper | `get_default_target_ids()` |
 
 Use **Select all (285)** in the dropdown when you need the full suite.
@@ -79,11 +91,11 @@ Use **Select all (285)** in the dropdown when you need the full suite.
 
 | Group | Profiles |
 |-------|----------|
-| **Quick runs** | Does it work? (3) · Regression sample (19) · Easy & portable (20) |
-| **Themed runs** | Non-sudo (197) · Detect-only (17) · Cron & scheduled jobs (19) · Library & PATH hijacks (18) · Quick credential leaks (12) · SUID classics (12) |
+| **Quick runs** | Does it work? (3) · Regression sample (19) · Easy & portable (20) · Coverage gaps (27) · Balanced challenge (22) |
+| **Themed runs** | Non-sudo (197) · Detect-only (17) · Cron & scheduled jobs (19) · Library & PATH hijacks (18) · Quick credential leaks (12) · SUID classics (12) · Cloud & DevOps credentials (20) · Desktop & app credentials (18) · Obscure GTFOBins (29) · Interpreter escapes (21) · Web servers & daemons (16) · File permission mix (16) · Package-manager sudo (13) · Hard non-sudo (20) · Services & enumeration (19) · Capabilities & loaders (14) |
 | **Full families** | All sudo · Classic sudo · Advanced sudo · SUID (all) · Writable · Capabilities · Python/PATH · Credentials (all) · Services · NFS · Shell · Doas · SGID |
 
-Family buckets use `_target_ids(FAMILY_*)`. Themed presets use curated lists (`_pick_target_ids`, `_target_ids_matching_id`, …) defined above `PROFILES` in `targets.py`.
+Family buckets and filters such as non-sudo / detect-only use `select` in the JSON so new labs join automatically. Curated mixes list explicit `target_ids`.
 
 ### Run metadata (target profile vs model profile)
 
@@ -164,7 +176,7 @@ python3 -m pytest tests/test_benchmark_registry.py \
 
 | File | What it enforces |
 |------|------------------|
-| `tests/test_benchmark_registry.py` | **285** targets; catalog ↔ targets ↔ compose ↔ check scripts; ports unique in 2170–2454; `apply-misconfig.sh` supports every `misconfig`; every target appears in at least one `PROFILES` entry; **22** profiles |
+| `tests/test_benchmark_registry.py` | **285** targets; catalog ↔ targets ↔ compose ↔ check scripts; ports unique in 2170–2454; `apply-misconfig.sh` supports every `misconfig`; every target appears in at least one `PROFILES` entry; **34** profiles |
 | `tests/test_benchmark_targets.py` | Profile contents (does-it-work, non-sudo, detect-only, all-sudo); default profile = regression-sample; `resolve_profile_for_target_ids()`; unique profile ids; `group` field on profiles |
 | `tests/test_benchmark_verify.py` | `write_catalog()`; `_run_one_check()` pass/fail/flagged; missing-script handling |
 | `tests/test_root_detection.py` | Flag and uid detection; no false positives on unprivileged output |
@@ -186,11 +198,11 @@ Follow [`AI_PLAYBOOK_FOR_ADDING_MISCONFIGURED_SERVICE.md`](AI_PLAYBOOK_FOR_ADDIN
 | 4 | `scripts/benchmark/checks/<id>.sh` — probe (source `_common.sh`) |
 | 5 | Regenerate catalog: `python3 -m ramigpt.benchmark.verify --write-catalog` |
 | 6 | `misconfigs.md` — family table row |
-| 7 | **Profiles** — if new **family**, extend `_target_ids(FAMILY_*)` profile; if thematic fit, add id to curated list (`_CRON_AND_JOBS`, `_LIBRARY_HIJACKS`, …) or create a new `BenchmarkProfile` |
+| 7 | **Profiles** — edit [`data/benchmark/profiles.json`](../../data/benchmark/profiles.json): family buckets use `select.families` (auto-include new labs); curated mixes need an explicit `target_ids` entry |
 | 8 | Run registry tests (see above) |
 | 9 | After deploy: `./scripts/benchmark/verify-misconfigs.sh <lab-ip> <new-id>` |
 
-Removing a lab: reverse the list; drop the id from any curated `_pick_target_ids` / profile lists.
+Removing a lab: reverse the list; drop the id from any curated `target_ids` lists in `profiles.json`.
 
 ---
 
@@ -211,7 +223,8 @@ Removing a lab: reverse the list; drop the id from any curated `_pick_target_ids
 
 | Path | Role |
 |------|------|
-| `ramigpt/benchmark/targets.py` | `TARGETS`, `PROFILES`, helpers |
+| `ramigpt/benchmark/targets.py` | `TARGETS`, profile loader, `PROFILES` |
+| `data/benchmark/profiles.json` | Suite-target UI presets (`PROFILES` source) |
 | `ramigpt/benchmark/verify.py` | Verify runner + catalog writer |
 | `ramigpt/benchmark/orchestrator.py` | Deploy + Full AI batch runs |
 | `ramigpt/benchmark/api.py` | Flask routes |
@@ -228,7 +241,7 @@ Removing a lab: reverse the list; drop the id from any curated `_pick_target_ids
 Summary of work tied to the expanded suite, profiles, and tests:
 
 - **Full 4-way sync** — 285 targets across compose, `targets.py`, check scripts, and `catalog.tsv`.
-- **22 target profiles** — quick, themed, and full-family presets; grouped UI dropdown.
+- **34 target profiles** — quick, themed mixes (coverage gaps, obscure GTFOBins, cloud/desktop creds, …), and full-family presets; grouped UI dropdown.
 - **Default modal selection** — Regression sample instead of all 285 targets.
 - **Run metadata** — `suite_profile_id` / `suite_profile_name` on benchmark runs and `result.json`.
 - **Verify module** — flag-aware detect-only handling; shared `BENCH_FLAG` with root detection.

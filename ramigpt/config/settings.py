@@ -88,6 +88,7 @@ JSON_SETTING_FIELDS = (
     "debug",
     "history_include_outputs",
     "history_output_edge_count",
+    "ai_provider_error_retries",
     "role_objective",
     "rotate_role_objectives",
     "upgraded_session_v2",
@@ -124,6 +125,7 @@ class Settings:
     debug: int = 0
     history_include_outputs: int = 1
     history_output_edge_count: int = 4
+    ai_provider_error_retries: int = 0
     role_objective: str = DEFAULT_ROLE_OBJECTIVE
     rotate_role_objectives: int = 0
     upgraded_session_v2: int = 1
@@ -193,6 +195,7 @@ class Settings:
             "debug": self.debug,
             "history_include_outputs": self.history_include_outputs,
             "history_output_edge_count": self.history_output_edge_count,
+            "ai_provider_error_retries": self.ai_provider_error_retries,
             "role_objective": selected_role,
             "role_objective_options": list(role_objectives),
             "rotate_role_objectives": self.rotate_role_objectives,
@@ -272,6 +275,7 @@ def _load_settings_from_env() -> Settings:
         debug=_env_int("DEBUG", 0),
         history_include_outputs=_env_int("HISTORY_INCLUDE_OUTPUTS", 1),
         history_output_edge_count=_env_int("HISTORY_OUTPUT_EDGE_COUNT", 4),
+        ai_provider_error_retries=_env_int("AI_PROVIDER_ERROR_RETRIES", 0),
         role_objective=(
             os.getenv("ROLE_OBJECTIVE") or DEFAULT_ROLE_OBJECTIVE
         ).strip(),
@@ -307,6 +311,7 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             "debug",
             "history_include_outputs",
             "history_output_edge_count",
+            "ai_provider_error_retries",
             "rotate_role_objectives",
             "upgraded_session_v2",
             "advanced_mode",
@@ -318,6 +323,8 @@ def _apply_updates(settings: Settings, updates: Dict[str, Any]) -> Settings:
             value = 1 if value else 0
         if key == "history_output_edge_count" and not 0 <= value <= 40:
             raise ValueError("History output count must be between 0 and 40.")
+        if key == "ai_provider_error_retries" and not 0 <= value <= 20:
+            raise ValueError("AI provider error retries must be between 0 and 20.")
         if key == "benchmark_parallel_targets" and not 1 <= value <= 50:
             raise ValueError("Benchmark parallel targets must be between 1 and 50.")
         if key == "role_objective":

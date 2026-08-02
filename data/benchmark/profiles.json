@@ -1,0 +1,658 @@
+{
+  "schema_version": 1,
+  "default_profile_id": "regression-sample",
+  "profiles": [
+    {
+      "id": "does-it-work",
+      "name": "Does it work?",
+      "description": "Fastest smoke test: sudo vim, sudo ALL, and sudo awk",
+      "group": "Quick runs",
+      "target_ids": [
+        "sudo-vim",
+        "sudo-all",
+        "sudo-awk"
+      ]
+    },
+    {
+      "id": "regression-sample",
+      "name": "Regression sample",
+      "description": "One representative target per major vector (~20 labs)",
+      "group": "Quick runs",
+      "target_ids": [
+        "sudo-vim",
+        "sudo-awk",
+        "sudo-ld-preload",
+        "suid-find",
+        "suid-python",
+        "writable-crontab",
+        "writable-passwd",
+        "cap-python",
+        "python-hijack",
+        "nfs-exports",
+        "cred-root-key",
+        "cred-cleartext",
+        "path-hijack",
+        "sgid-secret",
+        "rbash-escape",
+        "root-tcp-service",
+        "doas-nopass",
+        "redis-unauth",
+        "kernel-detect-only"
+      ]
+    },
+    {
+      "id": "easy-portable",
+      "name": "Easy & portable",
+      "description": "Well-known GTFOBins-style and file-permission LPE paths",
+      "group": "Quick runs",
+      "target_ids": [
+        "sudo-vim",
+        "sudo-env",
+        "suid-find",
+        "suid-python",
+        "writable-crontab",
+        "writable-passwd",
+        "cap-python",
+        "python-hijack",
+        "sudo-all",
+        "writable-sudoers",
+        "cap-dac-read",
+        "cred-root-key",
+        "cred-cleartext",
+        "path-hijack",
+        "cred-history",
+        "suid-env",
+        "sgid-secret",
+        "rbash-escape",
+        "doas-nopass",
+        "redis-unauth"
+      ]
+    },
+    {
+      "id": "coverage-gaps",
+      "name": "Coverage gaps",
+      "description": "Sparsely scored labs across families (creds, obscure bins, writables, shell)",
+      "group": "Quick runs",
+      "target_ids": [
+        "cap-chown",
+        "rbash-escape",
+        "node-path-hijack",
+        "cap-setfcap",
+        "sudo-ansible",
+        "php-auto-prepend",
+        "cap-net-bind",
+        "writable-shm-hook",
+        "writable-tmp-hook",
+        "sudo-sqlite3",
+        "sudo-dos2unix",
+        "sudo-lua",
+        "suid-lua",
+        "cred-ldap",
+        "cred-terraform",
+        "cred-vault-token",
+        "pkexec-detect-only",
+        "cred-ci-vars",
+        "cred-keepass",
+        "suid-openssl",
+        "suid-install",
+        "sudo-ed",
+        "suid-ed",
+        "writable-environment",
+        "cred-gnupg",
+        "cred-mongodb",
+        "cgroup-detect-only"
+      ]
+    },
+    {
+      "id": "balanced-challenge",
+      "name": "Balanced challenge",
+      "description": "Cross-family mix: sudo env, SUID hijacks, writables, caps, creds, services",
+      "group": "Quick runs",
+      "target_ids": [
+        "sudo-find",
+        "sudo-ld-preload",
+        "suid-python",
+        "writable-sudoers",
+        "path-hijack",
+        "python-cwd",
+        "writable-ld-so-preload",
+        "cap-dac-override",
+        "cap-fowner",
+        "suid-path-hijack",
+        "cred-shadow-read",
+        "sgid-secret",
+        "sudo-wildcard-tar",
+        "suid-dlopen",
+        "rbash-escape",
+        "php-include-hijack",
+        "doas-nopass",
+        "cred-aws-creds",
+        "redis-unauth",
+        "writable-systemd-dropin",
+        "root-udp-service",
+        "cred-kubeconfig"
+      ]
+    },
+    {
+      "id": "non-sudo",
+      "name": "Non-sudo (recommended)",
+      "description": "Every family except frozen sudo labs \u2014 aligns with suite growth policy",
+      "group": "Themed runs",
+      "select": {
+        "exclude_families": [
+          "sudo",
+          "sudo-advanced"
+        ]
+      }
+    },
+    {
+      "id": "detect-only",
+      "name": "Detect-only / enumeration",
+      "description": "Labs that improve realism without a compose-portable root path",
+      "group": "Themed runs",
+      "select": {
+        "expects_root": false
+      }
+    },
+    {
+      "id": "cron-and-jobs",
+      "name": "Cron & scheduled jobs",
+      "description": "Writable cron, systemd drop-ins, init scripts, and pollers",
+      "group": "Themed runs",
+      "select": {
+        "id_contains_any": [
+          "cron",
+          "init-d",
+          "systemd",
+          "logrotate",
+          "motd",
+          "rc-local",
+          "anacron",
+          "pam",
+          "supervisor",
+          "udev",
+          "vpn-hook",
+          "at-allow",
+          "wildcard-cron"
+        ]
+      }
+    },
+    {
+      "id": "library-hijacks",
+      "name": "Library & PATH hijacks",
+      "description": "LD_PRELOAD, PYTHONPATH, ld.so, and import-path abuse",
+      "group": "Themed runs",
+      "target_ids": [
+        "sudo-ld-preload",
+        "python-hijack",
+        "sudo-pythonpath",
+        "path-hijack",
+        "writable-lib",
+        "python-cwd",
+        "writable-ld-so-preload",
+        "sudo-ld-library-path",
+        "sudo-perl5lib",
+        "sudo-rubylib",
+        "suid-path-hijack",
+        "writable-ld-so-conf",
+        "suid-dlopen",
+        "ld-preload-script",
+        "php-include-hijack",
+        "node-path-hijack",
+        "sudo-nodepath",
+        "php-auto-prepend"
+      ]
+    },
+    {
+      "id": "quick-credentials",
+      "name": "Quick credential leaks",
+      "description": "Common keys, history, cloud tokens, and socket creds",
+      "group": "Themed runs",
+      "target_ids": [
+        "cred-root-key",
+        "cred-cleartext",
+        "cred-history",
+        "cred-ansible",
+        "cred-shadow-read",
+        "mysql-socket",
+        "cred-env-file",
+        "cred-netrc",
+        "cred-git-config",
+        "cred-aws-creds",
+        "cred-docker-config",
+        "cred-kubeconfig"
+      ]
+    },
+    {
+      "id": "suid-classics",
+      "name": "SUID classics",
+      "description": "Core GTFOBins-style SUID binaries (subset of full SUID suite)",
+      "group": "Themed runs",
+      "target_ids": [
+        "suid-find",
+        "suid-python",
+        "suid-chmod",
+        "suid-cp",
+        "suid-gawk",
+        "suid-env",
+        "suid-base64",
+        "suid-more",
+        "suid-perl",
+        "suid-install",
+        "suid-ed",
+        "suid-less"
+      ]
+    },
+    {
+      "id": "cloud-devops-creds",
+      "name": "Cloud & DevOps credentials",
+      "description": "AWS, GCP, K8s, Docker, Terraform, Vault, CI, and config-management secrets",
+      "group": "Themed runs",
+      "target_ids": [
+        "cred-ansible",
+        "cred-aws-creds",
+        "cred-docker-config",
+        "cred-kubeconfig",
+        "cred-jenkins-secrets",
+        "cred-puppet-secrets",
+        "cred-npmrc",
+        "cred-gcloud",
+        "cred-s3cfg",
+        "cred-terraform",
+        "cred-vault-token",
+        "cred-secrets-yml",
+        "cred-docker-env",
+        "cred-ci-vars",
+        "cred-pypirc",
+        "cred-rclone",
+        "cred-salt",
+        "cred-chef",
+        "cred-boto",
+        "cred-tokens-json"
+      ]
+    },
+    {
+      "id": "desktop-app-creds",
+      "name": "Desktop & app credentials",
+      "description": "Browsers, KeePass, GnuPG, mail/IRC clients, VPN, and local tool secrets",
+      "group": "Themed runs",
+      "target_ids": [
+        "cred-tmux-conf",
+        "cred-viminfo",
+        "cred-lesshst",
+        "cred-irssi",
+        "cred-muttrc",
+        "cred-screenlog",
+        "cred-msmtp",
+        "cred-ftp-netrc",
+        "cred-chromium",
+        "cred-firefox",
+        "cred-redis-cli",
+        "cred-filezilla",
+        "cred-msf4",
+        "cred-keepass",
+        "cred-pass-store",
+        "cred-gnupg",
+        "cred-slack",
+        "cred-openvpn"
+      ]
+    },
+    {
+      "id": "obscure-gtfobins",
+      "name": "Obscure GTFOBins",
+      "description": "Under-tested sudo/SUID text utilities (fold, hd, paste, rev, tac, \u2026)",
+      "group": "Themed runs",
+      "target_ids": [
+        "sudo-shuf",
+        "sudo-fold",
+        "sudo-hd",
+        "sudo-paste",
+        "sudo-rev",
+        "sudo-tac",
+        "sudo-column",
+        "sudo-fmt",
+        "sudo-comm",
+        "sudo-ptx",
+        "suid-fold",
+        "suid-hd",
+        "suid-rev",
+        "suid-tac",
+        "suid-paste",
+        "suid-column",
+        "suid-fmt",
+        "suid-comm",
+        "suid-ptx",
+        "sudo-split",
+        "sudo-hexdump",
+        "sudo-join",
+        "sudo-csplit",
+        "sudo-iconv",
+        "suid-hexdump",
+        "suid-join",
+        "suid-csplit",
+        "suid-iconv",
+        "suid-shuf"
+      ]
+    },
+    {
+      "id": "interpreter-escapes",
+      "name": "Interpreter escapes",
+      "description": "Python/Perl/PHP/Ruby/Node/Lua via sudo, SUID, and import-path hijacks",
+      "group": "Themed runs",
+      "target_ids": [
+        "sudo-python",
+        "suid-python",
+        "cap-python",
+        "python-hijack",
+        "sudo-pythonpath",
+        "python-cwd",
+        "sudo-perl5lib",
+        "sudo-rubylib",
+        "php-include-hijack",
+        "node-path-hijack",
+        "sudo-nodepath",
+        "php-auto-prepend",
+        "sudo-perl",
+        "suid-perl",
+        "sudo-php",
+        "suid-php",
+        "sudo-ruby",
+        "sudo-node",
+        "suid-node",
+        "sudo-lua",
+        "suid-lua"
+      ]
+    },
+    {
+      "id": "web-and-daemons",
+      "name": "Web servers & daemons",
+      "description": "Apache/Nginx/webroot, PHP prepend, Redis/MySQL, and package-manager sudo",
+      "group": "Themed runs",
+      "target_ids": [
+        "sudo-composer",
+        "sudo-npm",
+        "php-include-hijack",
+        "root-tcp-service",
+        "writable-webroot",
+        "mysql-socket",
+        "sudo-yarn",
+        "writable-apache-config",
+        "writable-nginx-config",
+        "cred-mysql-cnf",
+        "redis-unauth",
+        "cred-pgpass",
+        "php-auto-prepend",
+        "root-udp-service",
+        "cred-npmrc",
+        "cred-redis-cli"
+      ]
+    },
+    {
+      "id": "file-permission-mix",
+      "name": "File permission mix",
+      "description": "Writable auth files, SUID chmod/writable, DAC capabilities, shadow read",
+      "group": "Themed runs",
+      "target_ids": [
+        "writable-passwd",
+        "writable-shadow",
+        "writable-sudoers",
+        "suid-writable",
+        "cap-dac-read",
+        "writable-root-ssh",
+        "cap-chown",
+        "cap-dac-override",
+        "cap-fowner",
+        "cap-fsetid",
+        "suid-chmod",
+        "suid-writable-exec",
+        "cred-shadow-read",
+        "sgid-secret",
+        "writable-sshd-config",
+        "writable-pam"
+      ]
+    },
+    {
+      "id": "package-manager-sudo",
+      "name": "Package-manager sudo",
+      "description": "pip/npm/gem/composer/yarn/ansible sudo plus related credential leaks",
+      "group": "Themed runs",
+      "target_ids": [
+        "cred-ansible",
+        "sudo-git-hook",
+        "sudo-composer",
+        "sudo-pip",
+        "sudo-gem",
+        "sudo-npm",
+        "sudo-backup",
+        "sudo-yarn",
+        "sudo-ansible",
+        "cred-npmrc",
+        "cred-pypirc",
+        "cred-salt",
+        "cred-chef"
+      ]
+    },
+    {
+      "id": "hard-non-sudo",
+      "name": "Hard non-sudo",
+      "description": "Loader, capability, PHP/Node hijack, and unusual writable paths (no classic sudo)",
+      "group": "Themed runs",
+      "target_ids": [
+        "writable-ld-so-preload",
+        "suid-path-hijack",
+        "wildcard-cron",
+        "writable-ld-so-conf",
+        "logrotate-writable",
+        "cred-core-dump",
+        "suid-dlopen",
+        "ld-preload-script",
+        "rbash-escape",
+        "php-include-hijack",
+        "node-path-hijack",
+        "cap-setfcap",
+        "php-auto-prepend",
+        "writable-udev-rules",
+        "cap-net-bind",
+        "writable-shm-hook",
+        "writable-tmp-hook",
+        "pkexec-detect-only",
+        "cred-keepass",
+        "writable-environment"
+      ]
+    },
+    {
+      "id": "services-and-enum",
+      "name": "Services & enumeration",
+      "description": "Root network services plus host/kernel/container detect-only labs",
+      "group": "Themed runs",
+      "target_ids": [
+        "nfs-exports",
+        "writable-exports",
+        "root-tcp-service",
+        "redis-unauth",
+        "root-udp-service",
+        "kernel-detect-only",
+        "exploits-detect-only",
+        "apparmor-detect-only",
+        "ptrace-detect-only",
+        "selinux-detect-only",
+        "docker-detect-only",
+        "fstab-detect-only",
+        "capabilities-detect-only",
+        "namespaces-detect-only",
+        "pkexec-detect-only",
+        "sudo-version-detect-only",
+        "dbus-detect-only",
+        "cgroup-detect-only",
+        "mounts-detect-only"
+      ]
+    },
+    {
+      "id": "capabilities-plus",
+      "name": "Capabilities & loaders",
+      "description": "File capabilities mixed with LD_PRELOAD / writable-lib adjacent paths",
+      "group": "Themed runs",
+      "target_ids": [
+        "sudo-ld-preload",
+        "cap-python",
+        "cap-dac-read",
+        "cap-chown",
+        "writable-lib",
+        "writable-ld-so-preload",
+        "cap-dac-override",
+        "cap-fowner",
+        "cap-fsetid",
+        "suid-dlopen",
+        "ld-preload-script",
+        "cap-setfcap",
+        "cap-net-bind",
+        "capabilities-detect-only"
+      ]
+    },
+    {
+      "id": "all-sudo-problems",
+      "name": "All sudo problems",
+      "description": "Every classic and advanced sudo misconfiguration",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "sudo",
+          "sudo-advanced"
+        ]
+      }
+    },
+    {
+      "id": "classic-sudo",
+      "name": "Classic sudo commands",
+      "description": "NOPASSWD command and GTFOBins-style sudo targets",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "sudo"
+        ]
+      }
+    },
+    {
+      "id": "advanced-sudo",
+      "name": "Advanced sudo configuration",
+      "description": "Environment, group, script, and authentication sudo issues",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "sudo-advanced"
+        ]
+      }
+    },
+    {
+      "id": "suid",
+      "name": "SUID binaries (all)",
+      "description": "Every unsafe and writable SUID executable in the suite",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "suid"
+        ]
+      }
+    },
+    {
+      "id": "writable",
+      "name": "Writable files and loaders",
+      "description": "Writable system files, root jobs, keys, and loader paths",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "writable"
+        ]
+      }
+    },
+    {
+      "id": "capabilities",
+      "name": "Linux capabilities",
+      "description": "Dangerous file capabilities on interpreters",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "capabilities"
+        ]
+      }
+    },
+    {
+      "id": "python-path",
+      "name": "Python and PATH hijacks",
+      "description": "Python import-path and executable PATH attacks",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "python",
+          "path"
+        ]
+      }
+    },
+    {
+      "id": "credentials",
+      "name": "Credential leaks (all)",
+      "description": "Every keys, passwords, history, and config leak lab",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "credentials"
+        ]
+      }
+    },
+    {
+      "id": "services",
+      "name": "Network services",
+      "description": "Misconfigured daemons listening as root",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "services"
+        ]
+      }
+    },
+    {
+      "id": "nfs",
+      "name": "NFS detection",
+      "description": "NFS export and writable-export detect-only labs",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "nfs"
+        ]
+      }
+    },
+    {
+      "id": "shell",
+      "name": "Shell restrictions",
+      "description": "Restricted shells and escape paths",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "shell"
+        ]
+      }
+    },
+    {
+      "id": "doas",
+      "name": "Doas misconfigurations",
+      "description": "OpenDoas policy mistakes",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "doas"
+        ]
+      }
+    },
+    {
+      "id": "sgid",
+      "name": "SGID binaries",
+      "description": "SGID binaries and group-owned secrets",
+      "group": "Full families",
+      "select": {
+        "families": [
+          "sgid"
+        ]
+      }
+    }
+  ]
+}

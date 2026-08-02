@@ -68,6 +68,16 @@ def autonomous(session_data):
         stop_flag = stop_full_ai_by_session.setdefault(session_id, threading.Event())
         reconnect_budget = 3
         consecutive_empty_ai = 0
+        # During benchmarking only: how many times to re-attempt the same AI
+        # request after an ai_provider_error before aborting the target.
+        provider_error_retries_left = 0
+        if session_data.get("from_benchmark"):
+            try:
+                provider_error_retries_left = max(
+                    0, int(ai_settings.ai_provider_error_retries or 0)
+                )
+            except (TypeError, ValueError):
+                provider_error_retries_left = 0
         # Counts consecutive turns that produced no runnable command (blank OR
         # unparsable). The rejected-reply feedback gets a few turns to steer the
         # model back before we stop and stop wasting tokens.
@@ -621,8 +631,26 @@ def autonomous(session_data):
                 emit_session(session_id, f"Error: {str(e)}", color="#f85149")
 
                 # Provider/network failures are not PTY faults — abort instead of
-                # burning reconnect budget on pointless SSH respawns.
+                # burning reconnect budget on pointless SSH respawns. During
+                # benchmarking, optionally retry the same AI request N times
+                # (AI Settings → ai_provider_error_retries) before aborting.
                 if is_ai_provider_error:
+                    if provider_error_retries_left > 0:
+                        provider_error_retries_left -= 1
+                        slog.event(
+                            "AI_PROVIDER_RETRY",
+                            f"Retrying after ai_provider_error "
+                            f"({provider_error_retries_left} left)",
+                            ai_request=i,
+                        )
+                        emit_session(
+                            session_id,
+                            f"[Full AI] AI provider error — retrying request#{i} "
+                            f"({provider_error_retries_left} retries left)…",
+                            color="#58a6ff",
+                        )
+                        i -= 1  # re-attempt the same request number
+                        continue
                     stop_reason = "ai_provider_error"
                     break
 

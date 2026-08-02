@@ -572,6 +572,12 @@
             : "key_...";
 
         $("settings-max-reqs").value = settings.openai_max_num_of_reqs;
+        const retryEl = $("settings-ai-provider-error-retries");
+        if (retryEl) {
+            retryEl.value = Number.isInteger(Number(settings.ai_provider_error_retries))
+                ? String(Number(settings.ai_provider_error_retries))
+                : "0";
+        }
         applyHistorySettingsToForms(settings);
         toggleProviderFields(settings.ai_provider || "ollama");
     }
@@ -585,6 +591,11 @@
             "settings-history-outputs",
             "settings-history-output-count"
         );
+        const retryEl = $("settings-ai-provider-error-retries");
+        const providerErrorRetries = Number(retryEl ? retryEl.value : 0);
+        if (!Number.isInteger(providerErrorRetries) || providerErrorRetries < 0 || providerErrorRetries > 20) {
+            throw new Error("AI provider error retries must be an integer from 0 to 20.");
+        }
         const payload = {
             ai_provider: $("settings-provider").value,
             openai_model: $("settings-openai-model").value.trim(),
@@ -600,6 +611,7 @@
             openai_max_num_of_reqs: parseInt($("settings-max-reqs").value, 10) || 10,
             history_include_outputs: history.history_include_outputs,
             history_output_edge_count: history.history_output_edge_count,
+            ai_provider_error_retries: providerErrorRetries,
             persist: persist !== false,
         };
 

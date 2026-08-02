@@ -140,7 +140,7 @@ class BenchmarkRegistryTests(unittest.TestCase):
         self.assertEqual(covered, set(self.targets_by_id))
 
     def test_profile_count_matches_ui_presets(self):
-        self.assertEqual(len(PROFILES), 22)
+        self.assertEqual(len(PROFILES), 34)
 
 
 if __name__ == "__main__":

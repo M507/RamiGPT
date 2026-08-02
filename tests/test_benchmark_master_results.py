@@ -294,6 +294,12 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
                 "#### Most token-efficient profiles (lowest mean tokens to root)",
                 readme_md,
             )
+            self.assertLess(
+                readme_md.index(
+                    "#### Most token-efficient profiles (lowest mean tokens to root)"
+                ),
+                readme_md.index("#### Profiles"),
+            )
             self.assertNotIn("| Got root |", readme_md)
             self.assertNotIn("#### Overall —", readme_md)
             self.assertNotIn("**Catalog:**", readme_md)

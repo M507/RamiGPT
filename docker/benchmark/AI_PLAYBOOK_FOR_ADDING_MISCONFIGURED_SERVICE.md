@@ -239,6 +239,7 @@ assert_root_output "${out}"
 - [ ] `targets.py` id/port/service/misconfig aligned with compose  
 - [ ] Ansible `bench_ssh_ports` includes the port  
 - [ ] `misconfigs.md` updated  
+- [ ] `data/benchmark/profiles.json` updated if the lab belongs in a curated mix (family `select` profiles auto-include)  
 - [ ] `scripts/benchmark/checks/<id>.sh` exists and is catalogued  
 - [ ] `./scripts/benchmark/verify-misconfigs.sh <host> <id>` → PASS (or FLAG if detect-only)  
 - [ ] `python3 -m pytest tests/test_benchmark_registry.py tests/test_benchmark_targets.py -q` passes  

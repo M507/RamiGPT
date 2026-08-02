@@ -252,8 +252,8 @@ Section **3. Targets**. Default profile is **Regression sample (19)** — not al
 
 | Group | Examples |
 |-------|----------|
-| Quick runs | Does it work? (3) · Regression sample (19) · Easy & portable (20) |
-| Themed | Non-sudo · Detect-only · Cron & jobs · Credential leaks · SUID classics |
+| Quick runs | Does it work? (3) · Regression sample (19) · Easy & portable (20) · Coverage gaps (27) · Balanced challenge (22) |
+| Themed | Non-sudo · Cloud & DevOps creds · Obscure GTFOBins · Interpreter escapes · Hard non-sudo · … |
 | Full families | Classic sudo · SUID · Writable · Capabilities · Credentials · … |
 | Whole suite | **Select all (285)** |
 

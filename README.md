@@ -13,6 +13,30 @@ _Last updated: 2026-08-02T18:44:21.731346+00:00 · 189 run(s) · [full JSON](dat
 
 **Pass** is the percentage of scoreable attempts in which the model successfully escalated privileges to root.
 
+#### Most token-efficient profiles (lowest mean tokens to root)
+
+| Profile | Tokens→root | Pass | n |
+|---------|------------:|-----:|--:|
+| openrouter-qwen-qwen3-coder · Online AI Service | 1,541 | 22.2% | 18 |
+| openrouter-minimax-minimax-m3 · Online AI Service | 1,830 | 26.3% | 19 |
+| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 1,990 | 50.0% | 24 |
+| openrouter-moonshotai-kimi-latest · Online AI Service | 2,476 | 33.3% | 21 |
+| openrouter-google-gemma-4-31b-it · Online AI Service | 2,708 | 50.0% | 52 |
+| openrouter-anthropic-claude-sonnet-5 · Online AI Service | 2,899 | 42.9% | 21 |
+| openrouter-tencent-hy3 · Online AI Service | 2,924 | 11.1% | 18 |
+| openrouter-deepseek-deepseek-v4-pro · Online AI Service | 3,460 | 14.8% | 54 |
+| openwebui-deepseek-r1-14b · Online AI Service | 4,653 | 25.5% | 740 |
+| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 39.4% | 33 |
+| openwebui-qwen3-14b · Online AI Service | 5,655 | 3.2% | 154 |
+| openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 35.0% | 20 |
+| openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 43.2% | 37 |
+| openrouter-meta-llama-llama-4-maverick · Online AI Service | 10,961 | 14.8% | 54 |
+| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 11,071 | 52.8% | 72 |
+| openrouter-qwen-qwen3-30b-a3b-thinking-2507 · Online AI Service | 11,099 | 22.2% | 54 |
+| openrouter-anthropic-claude-opus-latest · Online AI Service | 12,354 | 100.0% | 6 |
+| openrouter-anthropic-claude-haiku-latest · Online AI Service | 13,997 | 44.4% | 9 |
+| openrouter-anthropic-claude-sonnet-latest · Online AI Service | 20,359 | 40.0% | 10 |
+
 #### Profiles
 
 | Profile | n | Pass | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root | Policy blocks |
@@ -44,31 +68,7 @@ _Last updated: 2026-08-02T18:44:21.731346+00:00 · 189 run(s) · [full JSON](dat
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 17 | 0.0% | 181.070 | — | — | — | 0 |
 | openrouter-anthropic-claude-opus-5 · Online AI Service | 0 | — | — | — | — | — | 6 |
 | openrouter-openai-gpt-4o · Online AI Service | 0 | — | — | — | — | — | 0 |
-| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 0 | — | — | — | — | — | 0 |
-
-#### Most token-efficient profiles (lowest mean tokens to root)
-
-| Profile | Tokens→root | Pass | n |
-|---------|------------:|-----:|--:|
-| openrouter-qwen-qwen3-coder · Online AI Service | 1,541 | 22.2% | 18 |
-| openrouter-minimax-minimax-m3 · Online AI Service | 1,830 | 26.3% | 19 |
-| openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 1,990 | 50.0% | 24 |
-| openrouter-moonshotai-kimi-latest · Online AI Service | 2,476 | 33.3% | 21 |
-| openrouter-google-gemma-4-31b-it · Online AI Service | 2,708 | 50.0% | 52 |
-| openrouter-anthropic-claude-sonnet-5 · Online AI Service | 2,899 | 42.9% | 21 |
-| openrouter-tencent-hy3 · Online AI Service | 2,924 | 11.1% | 18 |
-| openrouter-deepseek-deepseek-v4-pro · Online AI Service | 3,460 | 14.8% | 54 |
-| openwebui-deepseek-r1-14b · Online AI Service | 4,653 | 25.5% | 740 |
-| openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 39.4% | 33 |
-| openwebui-qwen3-14b · Online AI Service | 5,655 | 3.2% | 154 |
-| openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 35.0% | 20 |
-| openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 43.2% | 37 |
-| openrouter-meta-llama-llama-4-maverick · Online AI Service | 10,961 | 14.8% | 54 |
-| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 11,071 | 52.8% | 72 |
-| openrouter-qwen-qwen3-30b-a3b-thinking-2507 · Online AI Service | 11,099 | 22.2% | 54 |
-| openrouter-anthropic-claude-opus-latest · Online AI Service | 12,354 | 100.0% | 6 |
-| openrouter-anthropic-claude-haiku-latest · Online AI Service | 13,997 | 44.4% | 9 |
-| openrouter-anthropic-claude-sonnet-latest · Online AI Service | 20,359 | 40.0% | 10 |
+| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 0 | — | — | — | — | — | 0 | |
 
 <!-- benchmark-master:end -->
 
@@ -337,7 +337,7 @@ UI Benchmark modal → **Test targets (get root)** runs the same probes against 
 7. Set per-target timeout (default **180s** in the UI).
 8. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
 
-**Target profiles** (22 presets in the **Select from** dropdown): quick runs (*Does it work?*, *Regression sample*, *Easy & portable*), themed runs (*Non-sudo*, *Detect-only*, *Cron & scheduled jobs*, …), and full family buckets (*Classic sudo*, *SUID*, *Credentials*, …). Defined in `ramigpt/benchmark/targets.py` (`PROFILES`). Full integration details: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md).
+**Target profiles** (34 presets in the **Select from** dropdown): quick runs (*Does it work?*, *Regression sample*, *Coverage gaps*, *Balanced challenge*, …), themed mixes (*Cloud & DevOps credentials*, *Obscure GTFOBins*, *Interpreter escapes*, *Hard non-sudo*, …), and full family buckets (*Classic sudo*, *SUID*, *Credentials*, …). Defined in [`data/benchmark/profiles.json`](data/benchmark/profiles.json) (loaded by `ramigpt/benchmark/targets.py`). Full integration details: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md).
 
 ### Remote deploy (Ansible)
 

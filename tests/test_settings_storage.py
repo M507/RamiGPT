@@ -121,6 +121,24 @@ class SettingsStorageTests(unittest.TestCase):
             self.assertIn("CURSOR_API_KEY=new-cursor-key", env_text)
             self.assertNotIn("CURSOR_MODEL=", env_text)
 
+    def test_ai_provider_error_retries_default_and_validation(self):
+        self.assertEqual(Settings().ai_provider_error_retries, 0)
+        updated = settings_module._apply_updates(
+            Settings(), {"ai_provider_error_retries": 3}
+        )
+        self.assertEqual(updated.ai_provider_error_retries, 3)
+        self.assertEqual(
+            updated.to_public_dict()["ai_provider_error_retries"], 3
+        )
+        with self.assertRaises(ValueError):
+            settings_module._apply_updates(
+                Settings(), {"ai_provider_error_retries": -1}
+            )
+        with self.assertRaises(ValueError):
+            settings_module._apply_updates(
+                Settings(), {"ai_provider_error_retries": 21}
+            )
+
     def test_role_objectives_load_names_and_values_from_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             roles_path = Path(tmp) / "role_objectives.json"
