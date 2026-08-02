@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from flask import Flask, jsonify, request
 
-from ramigpt.benchmark.deploy import RemoteDeployConfig, test_ssh_access
+from ramigpt.benchmark.deploy import (
+    RemoteDeployConfig,
+    get_deploy_status,
+    is_deploy_only_running,
+    request_stop_deploy,
+    start_deploy_async,
+    test_ssh_access,
+)
 from ramigpt.benchmark.orchestrator import clear_pending_collab, get_status, request_stop, save_collab_results, start_run
 from ramigpt.benchmark.remote_config import load_remote_config, merge_remote_override, public_remote_config
 from ramigpt.ai.model_catalog import list_models_for_provider, saved_model_for_provider
@@ -82,6 +89,55 @@ def register_benchmark_routes(app: Flask) -> None:
             debug_logger.exception("Remote SSH test failed")
             return jsonify(ok=False, error=str(exc)), 400
 
+    @app.route("/api/benchmark/deploy", methods=["POST"])
+    def api_benchmark_deploy_start():
+        """Deploy selected labs via Ansible without starting Full AI or verify."""
+        body = request.get_json(silent=True) or {}
+        merged = merge_remote_override(
+            body.get("remote") if isinstance(body.get("remote"), dict) else body
+        )
+        if not merged.get("host") or not merged.get("username") or not merged.get("password"):
+            return jsonify(
+                ok=False,
+                error="host, username, and password required (from UI or data/benchmark/remote.json)",
+            ), 400
+        target_ids = body.get("target_ids", body.get("targets"))
+        if isinstance(target_ids, list) and len(target_ids) == 0:
+            return jsonify(ok=False, error="Select at least one benchmark target"), 400
+        force_redeploy = bool(
+            body.get(
+                "force_redeploy",
+                body.get("force_deploy", body.get("rebuild_remote_labs", False)),
+            )
+        )
+        try:
+            run = start_deploy_async(
+                RemoteDeployConfig(
+                    host=merged["host"],
+                    username=merged["username"],
+                    password=merged["password"],
+                    port=int(merged.get("port") or 22),
+                ),
+                target_ids=target_ids if isinstance(target_ids, list) else None,
+                force_redeploy=force_redeploy,
+            )
+        except ValueError as exc:
+            return jsonify(ok=False, error=str(exc)), 400
+        except RuntimeError as exc:
+            return jsonify(ok=False, error=str(exc)), 409
+        except Exception as exc:  # noqa: BLE001
+            debug_logger.exception("Failed to start deploy-only")
+            return jsonify(ok=False, error=str(exc)), 500
+        return jsonify(ok=True, run=run), 202
+
+    @app.route("/api/benchmark/deploy/status", methods=["GET"])
+    def api_benchmark_deploy_status():
+        return jsonify(get_deploy_status()), 200
+
+    @app.route("/api/benchmark/deploy/stop", methods=["POST"])
+    def api_benchmark_deploy_stop():
+        return jsonify(request_stop_deploy()), 200
+
     @app.route("/api/benchmark/verify", methods=["POST"])
     def api_benchmark_verify_start():
         """Run per-target root probes against already-deployed containers on the remote lab."""
@@ -137,6 +193,10 @@ def register_benchmark_routes(app: Flask) -> None:
     def api_benchmark_start():
         if not request.is_json:
             return jsonify(error="JSON body required"), 400
+        if is_deploy_only_running():
+            return jsonify(
+                error="A deploy-only run is in progress — wait for it to finish (or stop it) before starting the benchmark",
+            ), 409
         body = request.get_json(silent=True) or {}
         preset = load_remote_config()
         mode = "remote"

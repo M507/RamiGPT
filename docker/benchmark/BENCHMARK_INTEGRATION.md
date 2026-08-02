@@ -24,6 +24,7 @@ scripts/benchmark/checks/
 
 App paths:
   GET  /api/benchmark/status   ── targets, profiles, defaults
+  POST /api/benchmark/deploy   ── Ansible deploy only (no Full AI)
   POST /api/benchmark/verify   ── SSH probes (sanity check)
   POST /api/benchmark/start    ── Ansible deploy + Full AI runs
 
@@ -51,6 +52,7 @@ ramigpt/domain/root_detection.py
 
 | Flow | Trigger | Purpose |
 |------|---------|---------|
+| **Deploy only** | UI *Deploy selected targets* · `POST /api/benchmark/deploy` | Ansible deploy (selected targets) without Full AI — so you can sanity-check before a real run |
 | **Verify (sanity check)** | UI *Test targets (get root)* · `verify-misconfigs.sh` · `python -m ramigpt.benchmark.verify` | Deterministic shell probe per target; confirms lab is exploitable before/after deploy |
 | **Benchmark run (AI eval)** | UI *Start Benchmark* · `POST /api/benchmark/start` | Ansible deploy (selected targets) → optional BeRoot/LinEnum/LinPEAS → Full AI until root or timeout |
 
@@ -125,7 +127,7 @@ python3 -m ramigpt.benchmark.verify 10.10.1.109
 python3 -m ramigpt.benchmark.verify 10.10.1.109 --targets sudo-env,cap-python
 ```
 
-UI: Benchmark modal → section **4. Sanity-check misconfigs** → `POST /api/benchmark/verify`.
+UI: Benchmark modal → section **4. Deploy only** → `POST /api/benchmark/deploy`, then section **5. Sanity-check misconfigs** → `POST /api/benchmark/verify`.
 
 ### Detect-only targets (17)
 

@@ -124,11 +124,29 @@
       </section>
 
       <section class="bench-section">
-        <h3>4. Sanity-check misconfigs</h3>
+        <h3>4. Deploy only</h3>
+        <p class="muted small">
+          Deploys the <strong>selected</strong> labs to the remote host via Ansible
+          (same path as Start Benchmark) <strong>without</strong> starting Full AI.
+          Use this first, then run the sanity-check below. Honors
+          <strong>Rebuild remote labs</strong> in the footer when checked.
+        </p>
+        <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0;gap:0.5rem">
+          <button type="button" class="btn btn-secondary" id="bench-deploy-only">
+            Deploy selected targets
+          </button>
+          <button type="button" class="btn btn-ghost" id="bench-deploy-stop" disabled>Stop deploy</button>
+        </div>
+        <pre class="bench-log" id="bench-deploy-log" style="max-height:160px;margin-top:0.75rem"></pre>
+      </section>
+
+      <section class="bench-section">
+        <h3>5. Sanity-check misconfigs</h3>
         <p class="muted small">
           Probes each <strong>selected</strong> target as <code>lowpriv</code> and confirms it can obtain root
           (read <code>/root/flag.txt</code>). Detect-only labs (e.g. NFS exports) are flagged, not expected to root.
           Same checks as <code>scripts/benchmark/verify-misconfigs.sh &lt;ip&gt;</code>.
+          Deploy the labs above first if they are not already running.
         </p>
         <div class="modal-actions" style="justify-content:flex-start;padding:0;border:0;gap:0.5rem">
           <button type="button" class="btn btn-secondary" id="bench-verify-targets">

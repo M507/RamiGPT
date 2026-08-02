@@ -117,6 +117,8 @@
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
     refresh().catch((e) => setStatus(e.message, true));
+    refreshDeploy().catch(() => {});
+    refreshVerify().catch(() => {});
     startPolling();
   }
 
@@ -1440,6 +1442,85 @@
     return ($("bench-remote-host").value || "").trim() || "";
   }
 
+  function renderDeploy(run) {
+    const logEl = $("bench-deploy-log");
+    const stopBtn = $("bench-deploy-stop");
+    const startBtn = $("bench-deploy-only");
+    if (logEl) logEl.textContent = (run && run.log) || "";
+    if (stopBtn) stopBtn.disabled = !(run && run.running);
+    if (startBtn) startBtn.disabled = !!(run && run.running);
+    if (!run) return;
+    if (run.running) {
+      setStatus(`Deploying ${ (run.target_ids || []).length || "?" } target(s) on ${run.host || "…"}…`);
+    } else if (run.error) {
+      setStatus(run.error, true);
+    } else if (run.phase === "done") {
+      const n = (run.target_ids || []).length;
+      setStatus(
+        `Deploy-only complete — ${n} target${n === 1 ? "" : "s"} ready on ${run.host || "remote"}. You can run Sanity-check next.`
+      );
+    } else if (run.phase === "stopped") {
+      setStatus("Deploy-only stopped.", true);
+    }
+  }
+
+  let deployPoll = null;
+  async function refreshDeploy() {
+    try {
+      const data = await api("/api/benchmark/deploy/status");
+      renderDeploy(data.run);
+      if (data.running) {
+        if (!deployPoll) deployPoll = setInterval(refreshDeploy, 1500);
+      } else if (deployPoll) {
+        clearInterval(deployPoll);
+        deployPoll = null;
+      }
+    } catch (_err) {
+      /* ignore poll errors while modal closed */
+    }
+  }
+
+  async function startDeployOnly() {
+    const targetIds = selectedTargetIds();
+    if (!targetIds.length) {
+      setStatus("Select at least one target to deploy.", true);
+      return;
+    }
+    const host = ($("bench-remote-host").value || "").trim();
+    if (!host) {
+      setStatus("Enter the remote lab host / IP first.", true);
+      return;
+    }
+    setStatus(`Deploying ${targetIds.length} target(s) on ${host}…`);
+    try {
+      // Empty username/password falls back to data/benchmark/remote.json on the server.
+      await api("/api/benchmark/deploy", {
+        method: "POST",
+        body: {
+          host,
+          port: parseInt($("bench-remote-port").value, 10) || 22,
+          username: ($("bench-remote-user").value || "").trim(),
+          password: $("bench-remote-pass").value || "",
+          target_ids: targetIds,
+          force_redeploy: isForceRedeployChecked(),
+        },
+      });
+      await refreshDeploy();
+      if (!deployPoll) deployPoll = setInterval(refreshDeploy, 1500);
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
+  async function stopDeployOnly() {
+    try {
+      await api("/api/benchmark/deploy/stop", { method: "POST", body: {} });
+      await refreshDeploy();
+    } catch (err) {
+      setStatus(err.message || String(err), true);
+    }
+  }
+
   function renderVerify(run) {
     const results = $("bench-verify-results");
     const logEl = $("bench-verify-log");
@@ -1634,6 +1715,8 @@
     const forceRedeploy = $("bench-force-redeploy");
     const openBtn = $("btn-benchmark");
     const testBtn = $("bench-test-remote");
+    const deployBtn = $("bench-deploy-only");
+    const deployStop = $("bench-deploy-stop");
     const verifyBtn = $("bench-verify-targets");
     const verifyStop = $("bench-verify-stop");
     const copyLog = $("bench-copy-log");
@@ -1653,6 +1736,8 @@
     }
     if (openBtn) openBtn.addEventListener("click", openModal);
     if (testBtn) testBtn.addEventListener("click", testRemoteAccess);
+    if (deployBtn) deployBtn.addEventListener("click", startDeployOnly);
+    if (deployStop) deployStop.addEventListener("click", stopDeployOnly);
     if (verifyBtn) verifyBtn.addEventListener("click", startVerify);
     if (verifyStop) verifyStop.addEventListener("click", stopVerify);
     if (copyLog) copyLog.addEventListener("click", copyRunLog);

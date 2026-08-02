@@ -333,8 +333,9 @@ UI Benchmark modal → **Test targets (get root)** runs the same probes against 
 3. Set the **remote lab host** (SSH for Ansible; prefills from `data/benchmark/remote.json`).
 4. Configure **model plan** and **role plan** (multiple models/roles and runs per target).
 5. Pick a **target profile** (default: **Regression sample**, ~19 labs) or use **Select all** for the full suite.
-6. Set per-target timeout (default **180s** in the UI).
-7. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
+6. Optionally **Deploy selected targets** (section 4) then **Test targets (get root)** (section 5) to sanity-check labs before AI runs.
+7. Set per-target timeout (default **180s** in the UI).
+8. **Start Benchmark** — sessions appear under the **Benchmark** group; Full AI runs on each target in order.
 
 **Target profiles** (22 presets in the **Select from** dropdown): quick runs (*Does it work?*, *Regression sample*, *Easy & portable*), themed runs (*Non-sudo*, *Detect-only*, *Cron & scheduled jobs*, …), and full family buckets (*Classic sudo*, *SUID*, *Credentials*, …). Defined in `ramigpt/benchmark/targets.py` (`PROFILES`). Full integration details: [`docker/benchmark/BENCHMARK_INTEGRATION.md`](docker/benchmark/BENCHMARK_INTEGRATION.md).
 

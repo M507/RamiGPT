@@ -7,12 +7,15 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from ramigpt.benchmark.targets import BENCH_PASSWORD, BENCH_USERNAME, TARGETS
+from ramigpt.benchmark.targets import BENCH_PASSWORD, BENCH_USERNAME, TARGETS, resolve_targets
 from ramigpt.paths import PROJECT_ROOT
 from ramigpt.utils import debug_logger
 
@@ -501,3 +504,145 @@ def all_target_ports_open(
     """True when every given (or all) benchmark target SSH port accepts connections."""
     results = check_target_ports(host, log=log, targets=targets)
     return bool(results) and all(p["open"] for p in results)
+
+
+# ---------------------------------------------------------------------------
+# Deploy-only async job (UI: deploy selected labs without starting Full AI)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DeployOnlyRun:
+    id: str
+    host: str
+    phase: str = "idle"
+    running: bool = False
+    log_lines: List[str] = field(default_factory=list)
+    target_ids: List[str] = field(default_factory=list)
+    error: str = ""
+    force_redeploy: bool = False
+    started_at: float = 0.0
+    finished_at: float = 0.0
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "host": self.host,
+            "phase": self.phase,
+            "running": self.running,
+            "error": self.error,
+            "force_redeploy": self.force_redeploy,
+            "target_ids": list(self.target_ids),
+            "log": "\n".join(self.log_lines[-200:]),
+            "ok": (not self.running) and (not self.error) and self.phase == "done",
+        }
+
+
+_deploy_lock = threading.Lock()
+_deploy_active: Optional[DeployOnlyRun] = None
+
+
+def get_deploy_status() -> Dict[str, Any]:
+    with _deploy_lock:
+        if _deploy_active is None:
+            return {"running": False, "phase": "idle", "run": None}
+        return {
+            "running": _deploy_active.running,
+            "phase": _deploy_active.phase,
+            "run": _deploy_active.to_public_dict(),
+        }
+
+
+def is_deploy_only_running() -> bool:
+    with _deploy_lock:
+        return bool(_deploy_active is not None and _deploy_active.running)
+
+
+def _deploy_log(run: DeployOnlyRun, message: str) -> None:
+    line = message.rstrip()
+    run.log_lines.append(line)
+    debug_logger.info(f"[bench-deploy] {line}")
+
+
+def start_deploy_async(
+    cfg: RemoteDeployConfig,
+    *,
+    target_ids: Optional[Sequence[str]] = None,
+    force_redeploy: bool = False,
+) -> Dict[str, Any]:
+    """
+    Deploy selected benchmark targets on the remote lab host without starting
+    Full AI / verify. Uses the same Ansible path as a normal benchmark start.
+    """
+    global _deploy_active
+
+    from ramigpt.benchmark.orchestrator import get_status as get_benchmark_status
+
+    bench = get_benchmark_status()
+    if bench.get("running"):
+        raise RuntimeError("A benchmark run is already in progress — stop it before deploy-only")
+
+    targets = resolve_targets(list(target_ids) if target_ids is not None else None)
+    if not targets:
+        raise ValueError("Select at least one benchmark target")
+
+    with _deploy_lock:
+        if _deploy_active is not None and _deploy_active.running:
+            raise RuntimeError("A deploy-only run is already in progress")
+        run = DeployOnlyRun(
+            id=str(uuid.uuid4()),
+            host=cfg.host,
+            phase="starting",
+            running=True,
+            target_ids=[t.id for t in targets],
+            force_redeploy=bool(force_redeploy),
+            started_at=time.time(),
+        )
+        _deploy_active = run
+
+    def worker() -> None:
+        try:
+            _deploy_log(
+                run,
+                f"Deploy-only: {len(targets)} target(s) on {cfg.host} "
+                f"({'rebuild' if force_redeploy else 'ensure ready'})",
+            )
+            run.phase = "deploying"
+            ensure_remote_benchmark(
+                cfg,
+                log=lambda msg: _deploy_log(run, msg),
+                targets=targets,
+                force_deploy=bool(force_redeploy),
+            )
+            with _deploy_lock:
+                if run.phase == "stopping":
+                    _deploy_log(run, "Deploy finished after stop was requested")
+                    run.phase = "stopped"
+                else:
+                    _deploy_log(
+                        run,
+                        f"Deploy-only complete — {len(targets)} target(s) ready on {cfg.host}. "
+                        "You can run Sanity-check misconfigs next.",
+                    )
+                    run.phase = "done"
+        except Exception as exc:  # noqa: BLE001
+            run.error = str(exc)
+            run.phase = "error"
+            _deploy_log(run, f"ERROR: {exc}")
+            debug_logger.exception("[bench-deploy] failed")
+        finally:
+            run.running = False
+            run.finished_at = time.time()
+
+    threading.Thread(target=worker, name=f"bench-deploy-{run.id[:8]}", daemon=True).start()
+    return run.to_public_dict()
+
+
+def request_stop_deploy() -> Dict[str, Any]:
+    """Soft-stop: mark the job stopping (Ansible may still finish the current playbook)."""
+    with _deploy_lock:
+        if _deploy_active is None or not _deploy_active.running:
+            return {"ok": False, "error": "No active deploy-only run"}
+        _deploy_active.phase = "stopping"
+        _deploy_log(_deploy_active, "Stop requested — waiting for current deploy step to finish…")
+        return {"ok": True}

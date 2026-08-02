@@ -259,7 +259,9 @@ Section **3. Targets**. Default profile is **Regression sample (19)** — not al
 
 Only **checked** targets are port-checked, deployed, verified, and scored.
 
-Section **4. Sanity-check misconfigs** → **Test targets (get root)** runs the same probes as `verify-misconfigs.sh` (optional before a real run).
+Section **4. Deploy only** → **Deploy selected targets** brings up the checked labs via Ansible without starting Full AI (optional; Start Benchmark also deploys).
+
+Section **5. Sanity-check misconfigs** → **Test targets (get root)** runs the same probes as `verify-misconfigs.sh` (optional before a real run; deploy first if labs are not already up).
 
 ---
 
