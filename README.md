@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-08-01T14:45:03.967808+00:00 · 179 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-08-01T15:34:26.247850+00:00 · 180 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Pass** is the percentage of scoreable attempts in which the model successfully escalated privileges to root.
 
@@ -31,7 +31,7 @@ _Last updated: 2026-08-01T14:45:03.967808+00:00 · 179 run(s) · [full JSON](dat
 | openwebui-openai-gpt-4o-latest · Online AI Service | 35 | 31.4% | 44.519 | 0 | 27.955 | 4.182 | 0 |
 | openwebui-openai-gpt-4-turbo-latest · Online AI Service | 16 | 31.2% | 181.183 | 0 | 31.030 | 5.400 | 0 |
 | openrouter-minimax-minimax-m3 · Online AI Service | 19 | 26.3% | 181.181 | 1,830 | 123.010 | 1.200 | 0 |
-| openwebui-deepseek-r1-14b · Online AI Service | 722 | 25.1% | 221.092 | 4,621 | 126.222 | 1.420 | 0 |
+| openwebui-deepseek-r1-14b · Online AI Service | 740 | 25.5% | 221.091 | 4,653 | 125.017 | 1.476 | 0 |
 | openwebui-openai-gpt-5-latest · Online AI Service | 32 | 25.0% | 61.037 | 0 | 64.496 | 1.375 | 0 |
 | openwebui-openai-gpt-5.2-latest · Online AI Service | 255 | 23.5% | 181.185 | 0 | 68.189 | 6.317 | 0 |
 | openrouter-qwen-qwen3-30b-a3b-thinking-2507 · Online AI Service | 54 | 22.2% | 101.041 | 11,099 | 43.105 | 1.417 | 0 |
@@ -57,7 +57,7 @@ _Last updated: 2026-08-01T14:45:03.967808+00:00 · 179 run(s) · [full JSON](dat
 | openrouter-anthropic-claude-sonnet-5 · Online AI Service | 2,899 | 42.9% | 21 |
 | openrouter-tencent-hy3 · Online AI Service | 2,924 | 11.1% | 18 |
 | openrouter-deepseek-deepseek-v4-pro · Online AI Service | 3,460 | 14.8% | 54 |
-| openwebui-deepseek-r1-14b · Online AI Service | 4,621 | 25.1% | 722 |
+| openwebui-deepseek-r1-14b · Online AI Service | 4,653 | 25.5% | 740 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 5,149 | 39.4% | 33 |
 | openwebui-qwen3-14b · Online AI Service | 5,655 | 3.2% | 154 |
 | openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 35.0% | 20 |
