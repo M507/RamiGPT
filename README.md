@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-08-02T18:44:21.731346+00:00 · 189 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-08-02T20:10:18.018234+00:00 · 190 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Pass** is the percentage of scoreable attempts in which the model successfully escalated privileges to root.
 
@@ -31,18 +31,18 @@ _Last updated: 2026-08-02T18:44:21.731346+00:00 · 189 run(s) · [full JSON](dat
 | openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 35.0% | 20 |
 | openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 43.2% | 37 |
 | openrouter-meta-llama-llama-4-maverick · Online AI Service | 10,961 | 14.8% | 54 |
-| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 11,071 | 52.8% | 72 |
 | openrouter-qwen-qwen3-30b-a3b-thinking-2507 · Online AI Service | 11,099 | 22.2% | 54 |
 | openrouter-anthropic-claude-opus-latest · Online AI Service | 12,354 | 100.0% | 6 |
 | openrouter-anthropic-claude-haiku-latest · Online AI Service | 13,997 | 44.4% | 9 |
 | openrouter-anthropic-claude-sonnet-latest · Online AI Service | 20,359 | 40.0% | 10 |
+| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 24,365 | 61.8% | 89 |
 
 #### Profiles
 
 | Profile | n | Pass | Median (s) | Tokens→root | Elapsed→root (s) | AI req→root | Policy blocks |
 |---------|--:|-----:|-----------:|------------:|-----------------:|------------:|-------------:|
 | openrouter-anthropic-claude-opus-latest · Online AI Service | 6 | 100.0% | 7.261 | 12,354 | 20.973 | 1.000 | 0 |
-| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 72 | 52.8% | 111.883 | 11,071 | 99.935 | 6.947 | 0 |
+| openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 89 | 61.8% | 126.491 | 24,365 | 165.400 | 13.545 | 0 |
 | openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 24 | 50.0% | 87.338 | 1,990 | 50.482 | 1.750 | 0 |
 | openrouter-google-gemma-4-31b-it · Online AI Service | 52 | 50.0% | 82.439 | 2,708 | 19.825 | 1.769 | 0 |
 | openwebui-openai-gpt-3.5-turbo-latest · Online AI Service | 84 | 50.0% | 84.042 | 0 | 65.773 | 7.095 | 0 |
@@ -68,7 +68,7 @@ _Last updated: 2026-08-02T18:44:21.731346+00:00 · 189 run(s) · [full JSON](dat
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 17 | 0.0% | 181.070 | — | — | — | 0 |
 | openrouter-anthropic-claude-opus-5 · Online AI Service | 0 | — | — | — | — | — | 6 |
 | openrouter-openai-gpt-4o · Online AI Service | 0 | — | — | — | — | — | 0 |
-| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 0 | — | — | — | — | — | 0 | |
+| openwebui-openai-gpt-4o-mini-latest · Online AI Service | 0 | — | — | — | — | — | 0 |
 
 <!-- benchmark-master:end -->
 
