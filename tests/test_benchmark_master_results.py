@@ -262,11 +262,13 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
     def test_format_master_markdown_tables(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            run_dir = root / "run1"
-            run_dir.mkdir()
-            (run_dir / "result.json").write_text(
-                json.dumps(_sample_run_doc(run_id="r1")), encoding="utf-8"
-            )
+            # Token-efficiency table requires n > 9 attempts.
+            for idx in range(1, 11):
+                run_dir = root / f"run{idx}"
+                run_dir.mkdir()
+                (run_dir / "result.json").write_text(
+                    json.dumps(_sample_run_doc(run_id=f"r{idx}")), encoding="utf-8"
+                )
             master = build_master_document(root)
             md = format_master_markdown(master)
             self.assertIn("| Profile |", md)
@@ -312,6 +314,47 @@ class BenchmarkMasterResultsTests(unittest.TestCase):
             self.assertIn("`beroot`", with_scenarios)
             self.assertIn("#### Overall — ollama-qwen3-14b", with_scenarios)
             self.assertIn("#### Profiles", with_scenarios)
+
+    def test_token_efficiency_table_omits_profiles_with_n_le_9(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Efficient but tiny sample (n=3) — must be omitted.
+            for idx in range(1, 4):
+                run_dir = root / f"tiny-{idx}"
+                run_dir.mkdir()
+                doc = _sample_run_doc(
+                    run_id=f"tiny-{idx}",
+                    model_key_name="ollama-tiny-efficient",
+                    model="tiny:efficient",
+                )
+                doc["targets"][0]["tokens_total"] = 100
+                (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+            # Larger sample (n=10) — must appear.
+            for idx in range(1, 11):
+                run_dir = root / f"big-{idx}"
+                run_dir.mkdir()
+                doc = _sample_run_doc(
+                    run_id=f"big-{idx}",
+                    model_key_name="ollama-big-sample",
+                    model="big:sample",
+                )
+                doc["targets"][0]["tokens_total"] = 900
+                (run_dir / "result.json").write_text(json.dumps(doc), encoding="utf-8")
+
+            master = build_master_document(root)
+            md = format_master_markdown(master, include_overall=False)
+            self.assertIn(
+                "#### Most token-efficient profiles (lowest mean tokens to root)", md
+            )
+            self.assertIn("ollama-big-sample", md)
+            # Tiny profile still appears in the main Profiles table...
+            self.assertIn("ollama-tiny-efficient", md)
+            # ...but not in the token-efficiency ranking rows (n=3).
+            eff_section = md.split("#### Most token-efficient profiles")[1].split(
+                "#### Profiles"
+            )[0]
+            self.assertNotIn("ollama-tiny-efficient", eff_section)
+            self.assertIn("ollama-big-sample", eff_section)
 
     def test_update_readme_benchmark_section(self):
         with tempfile.TemporaryDirectory() as tmp:

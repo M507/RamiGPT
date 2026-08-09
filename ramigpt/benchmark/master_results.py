@@ -1257,8 +1257,10 @@ def format_master_markdown(
             or []
         )
         if row.get("usable_mean_tokens_to_root") is not None
+        and int(row.get("attempted") or 0) > 9
     ]
     # by_tokens_to_root is already ascending by usable mean tokens; keep that order.
+    # Profiles with n <= 9 are omitted (too few attempts for a stable efficiency ranking).
     if token_eff_rows:
         lines.extend(
             [
