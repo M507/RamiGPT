@@ -1,0 +1,493 @@
+{
+  "schema_version": 2,
+  "id": "6516910b-628a-4f38-932c-17fc66f63e91",
+  "batch_id": "18ba00a6-2ef5-48e9-b81a-5adf57ca06e1",
+  "repetition": 1,
+  "repetitions": 1,
+  "mode": "remote",
+  "host": "10.10.1.109",
+  "timeout_seconds": 180,
+  "phase": "done",
+  "error": null,
+  "started_at": "2026-08-10T13:35:38.159307+00:00",
+  "finished_at": "2026-08-10T13:37:26.150611+00:00",
+  "provider": "openrouter",
+  "model": "google/gemini-3.1-pro-preview",
+  "model_key_name": "openrouter-google-gemini-3.1-pro-preview",
+  "profile_key": "openrouter-google-gemini-3.1-pro-preview|online-ai-service-openrouter",
+  "profile_label": "openrouter-google-gemini-3.1-pro-preview · Online AI Service",
+  "model_registry": {
+    "key_name": "openrouter-google-gemini-3.1-pro-preview",
+    "provider": "openrouter",
+    "model": "google/gemini-3.1-pro-preview",
+    "registry_path": "data/benchmark/models/openrouter-google-gemini-3.1-pro-preview.json",
+    "fingerprint": {
+      "provider": "openrouter",
+      "model": "google/gemini-3.1-pro-preview",
+      "base_url": ""
+    },
+    "show": null,
+    "tag": null,
+    "issues": []
+  },
+  "hardware": {
+    "gpu_name": "Online AI Service",
+    "gpu_driver": "OpenRouter"
+  },
+  "role_objective": "Privilege Escalation Pentester",
+  "suite_profile_id": "does-it-work",
+  "suite_profile_name": "Does it work?",
+  "tools_configured": {
+    "beroot": true,
+    "linenum": false,
+    "linpeas": false
+  },
+  "tools": [
+    "beroot"
+  ],
+  "targets": [
+    {
+      "target_id": "sudo-vim",
+      "name": "Bench · sudo vim",
+      "port": 2211,
+      "status": "passed",
+      "session_id": "18d57ba9-afd5-4423-bdf6-4ad8dd12bb15",
+      "elapsed_seconds": 46.976,
+      "message": "Root achieved",
+      "started_at": "2026-08-10T13:36:06.729519+00:00",
+      "finished_at": "2026-08-10T13:36:53.705475+00:00",
+      "ai_requests": 1,
+      "tools_used": [
+        "beroot"
+      ],
+      "provider": "openrouter",
+      "model": "google/gemini-3.1-pro-preview",
+      "role_objective": "Privilege Escalation Pentester",
+      "got_root": true,
+      "events_path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-vim/001_20260810T133606Z_benchmark/events.jsonl",
+      "commands": [
+        "sudo /usr/bin/vim -es -c '!cp /bin/bash /tmp/bash && chmod +s /tmp/bash' -c 'qa!' && /tmp/bash -p"
+      ],
+      "commands_count": 1,
+      "prompt_tokens": 1305,
+      "completion_tokens": 3707,
+      "tokens_total": 5012,
+      "timeline": [
+        {
+          "phase": "beroot_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:07.179849+00:00"
+        },
+        {
+          "phase": "beroot",
+          "type": "tool",
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:07.179849+00:00",
+          "finished_at": "2026-08-10T13:36:22.149599+00:00",
+          "duration_seconds": 14.963,
+          "with_ai": true
+        },
+        {
+          "phase": "full_ai_requested",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:22.150271+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "full_ai_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:22.151356+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "ai_turn",
+          "type": "ai",
+          "request": 1,
+          "ts": "2026-08-10T13:36:52.907502+00:00",
+          "duration_seconds": 29.742,
+          "total_tokens": 5012,
+          "command": "sudo /usr/bin/vim -es -c '!cp /bin/bash /tmp/bash && chmod +s /tmp/bash' -c 'qa!' && /tmp/bash -p"
+        },
+        {
+          "phase": "shell_io",
+          "type": "shell",
+          "request": 1,
+          "ts": "2026-08-10T13:36:53.282792+00:00",
+          "duration_seconds": 0.358,
+          "command": "sudo /usr/bin/vim -es -c '!cp /bin/bash /tmp/bash && chmod +s /tmp/bash' -c 'qa!' && /tmp/bash -p"
+        },
+        {
+          "phase": "full_ai_end",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:53.286166+00:00",
+          "duration_seconds": 31.135,
+          "requests_run": 1,
+          "got_root": true,
+          "stop_reason": "root"
+        }
+      ],
+      "tool_runs": [
+        {
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:07.179849+00:00",
+          "finished_at": "2026-08-10T13:36:22.149599+00:00",
+          "duration_seconds": 14.963,
+          "with_ai": true
+        }
+      ],
+      "ai_turns": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:36:52.907502+00:00",
+          "started_at": "2026-08-10T13:36:22.151356+00:00",
+          "finished_at": "2026-08-10T13:36:52.907502+00:00",
+          "llm_duration_seconds": 29.742,
+          "shell_duration_seconds": 0.358,
+          "command": "sudo /usr/bin/vim -es -c '!cp /bin/bash /tmp/bash && chmod +s /tmp/bash' -c 'qa!' && /tmp/bash -p",
+          "no_command_reason": null,
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview",
+          "prompt_tokens": 1305,
+          "completion_tokens": 3707,
+          "total_tokens": 5012
+        }
+      ],
+      "shell_runs": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:36:53.282792+00:00",
+          "started_at": "2026-08-10T13:36:52.907502+00:00",
+          "finished_at": "2026-08-10T13:36:53.282792+00:00",
+          "duration_seconds": 0.358,
+          "command": "sudo /usr/bin/vim -es -c '!cp /bin/bash /tmp/bash && chmod +s /tmp/bash' -c 'qa!' && /tmp/bash -p",
+          "note": ""
+        }
+      ],
+      "timing_summary": {
+        "beroot_seconds": 14.963,
+        "ai_llm_seconds": 29.742,
+        "shell_seconds": 0.358,
+        "full_ai_seconds": 31.135,
+        "measured_seconds": 45.063,
+        "other_seconds": 1.913,
+        "total_seconds": 46.976
+      },
+      "event_stats": {
+        "path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-vim/001_20260810T133606Z_benchmark/events.jsonl",
+        "lines_read": 30,
+        "events_parsed": 30,
+        "blank_lines": 0,
+        "json_errors": 0,
+        "read_error": null
+      },
+      "issues": [],
+      "model_key_name": "openrouter-google-gemini-3.1-pro-preview"
+    },
+    {
+      "target_id": "sudo-awk",
+      "name": "Bench · sudo awk",
+      "port": 2212,
+      "status": "passed",
+      "session_id": "f04a0b1d-4ec2-4a2c-b3d6-0e654dd79e66",
+      "elapsed_seconds": 61.477,
+      "message": "Root achieved",
+      "started_at": "2026-08-10T13:36:06.730332+00:00",
+      "finished_at": "2026-08-10T13:37:08.206948+00:00",
+      "ai_requests": 1,
+      "tools_used": [
+        "beroot"
+      ],
+      "provider": "openrouter",
+      "model": "google/gemini-3.1-pro-preview",
+      "role_objective": "Privilege Escalation Pentester",
+      "got_root": true,
+      "events_path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-awk/001_20260810T133606Z_benchmark/events.jsonl",
+      "commands": [
+        "sudo /usr/bin/awk 'BEGIN {system(\"id\")}'"
+      ],
+      "commands_count": 1,
+      "prompt_tokens": 1172,
+      "completion_tokens": 1757,
+      "tokens_total": 2929,
+      "timeline": [
+        {
+          "phase": "beroot_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:07.176502+00:00"
+        },
+        {
+          "phase": "beroot",
+          "type": "tool",
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:07.176502+00:00",
+          "finished_at": "2026-08-10T13:36:22.136309+00:00",
+          "duration_seconds": 14.953,
+          "with_ai": true
+        },
+        {
+          "phase": "full_ai_requested",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:22.140283+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "full_ai_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:22.143304+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "ai_turn",
+          "type": "ai",
+          "request": 1,
+          "ts": "2026-08-10T13:37:07.784751+00:00",
+          "duration_seconds": 44.632,
+          "total_tokens": 2929,
+          "command": "sudo /usr/bin/awk 'BEGIN {system(\"id\")}'"
+        },
+        {
+          "phase": "shell_io",
+          "type": "shell",
+          "request": 1,
+          "ts": "2026-08-10T13:37:08.138042+00:00",
+          "duration_seconds": 0.353,
+          "command": "sudo /usr/bin/awk 'BEGIN {system(\"id\")}'"
+        },
+        {
+          "phase": "full_ai_end",
+          "type": "phase",
+          "ts": "2026-08-10T13:37:08.140897+00:00",
+          "duration_seconds": 45.998,
+          "requests_run": 1,
+          "got_root": true,
+          "stop_reason": "root"
+        }
+      ],
+      "tool_runs": [
+        {
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:07.176502+00:00",
+          "finished_at": "2026-08-10T13:36:22.136309+00:00",
+          "duration_seconds": 14.953,
+          "with_ai": true
+        }
+      ],
+      "ai_turns": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:37:07.784751+00:00",
+          "started_at": "2026-08-10T13:36:22.143304+00:00",
+          "finished_at": "2026-08-10T13:37:07.784751+00:00",
+          "llm_duration_seconds": 44.632,
+          "shell_duration_seconds": 0.353,
+          "command": "sudo /usr/bin/awk 'BEGIN {system(\"id\")}'",
+          "no_command_reason": null,
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview",
+          "prompt_tokens": 1172,
+          "completion_tokens": 1757,
+          "total_tokens": 2929
+        }
+      ],
+      "shell_runs": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:37:08.138042+00:00",
+          "started_at": "2026-08-10T13:37:07.784751+00:00",
+          "finished_at": "2026-08-10T13:37:08.138042+00:00",
+          "duration_seconds": 0.353,
+          "command": "sudo /usr/bin/awk 'BEGIN {system(\"id\")}'",
+          "note": ""
+        }
+      ],
+      "timing_summary": {
+        "beroot_seconds": 14.953,
+        "ai_llm_seconds": 44.632,
+        "shell_seconds": 0.353,
+        "full_ai_seconds": 45.998,
+        "measured_seconds": 59.938,
+        "other_seconds": 1.539,
+        "total_seconds": 61.477
+      },
+      "event_stats": {
+        "path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-awk/001_20260810T133606Z_benchmark/events.jsonl",
+        "lines_read": 30,
+        "events_parsed": 30,
+        "blank_lines": 0,
+        "json_errors": 0,
+        "read_error": null
+      },
+      "issues": [],
+      "model_key_name": "openrouter-google-gemini-3.1-pro-preview"
+    },
+    {
+      "target_id": "sudo-all",
+      "name": "Bench · sudo ALL",
+      "port": 2170,
+      "status": "passed",
+      "session_id": "66ba7333-c02c-4308-ac35-fca9ee70cf3a",
+      "elapsed_seconds": 32.44,
+      "message": "Root achieved",
+      "started_at": "2026-08-10T13:36:53.707827+00:00",
+      "finished_at": "2026-08-10T13:37:26.147615+00:00",
+      "ai_requests": 1,
+      "tools_used": [
+        "beroot"
+      ],
+      "provider": "openrouter",
+      "model": "google/gemini-3.1-pro-preview",
+      "role_objective": "Privilege Escalation Pentester",
+      "got_root": true,
+      "events_path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-all/001_20260810T133653Z_benchmark/events.jsonl",
+      "commands": [
+        "sudo -n id"
+      ],
+      "commands_count": 1,
+      "prompt_tokens": 1054,
+      "completion_tokens": 1139,
+      "tokens_total": 2193,
+      "timeline": [
+        {
+          "phase": "beroot_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:36:54.080148+00:00"
+        },
+        {
+          "phase": "beroot",
+          "type": "tool",
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:54.080148+00:00",
+          "finished_at": "2026-08-10T13:37:13.636163+00:00",
+          "duration_seconds": 19.549,
+          "with_ai": true
+        },
+        {
+          "phase": "full_ai_requested",
+          "type": "phase",
+          "ts": "2026-08-10T13:37:13.636726+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "full_ai_start",
+          "type": "phase",
+          "ts": "2026-08-10T13:37:13.638265+00:00",
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview"
+        },
+        {
+          "phase": "ai_turn",
+          "type": "ai",
+          "request": 1,
+          "ts": "2026-08-10T13:37:25.528642+00:00",
+          "duration_seconds": 10.886,
+          "total_tokens": 2193,
+          "command": "sudo -n id"
+        },
+        {
+          "phase": "shell_io",
+          "type": "shell",
+          "request": 1,
+          "ts": "2026-08-10T13:37:25.881061+00:00",
+          "duration_seconds": 0.352,
+          "command": "sudo -n id"
+        },
+        {
+          "phase": "full_ai_end",
+          "type": "phase",
+          "ts": "2026-08-10T13:37:25.882931+00:00",
+          "duration_seconds": 12.245,
+          "requests_run": 1,
+          "got_root": true,
+          "stop_reason": "root"
+        }
+      ],
+      "tool_runs": [
+        {
+          "tool": "beroot",
+          "started_at": "2026-08-10T13:36:54.080148+00:00",
+          "finished_at": "2026-08-10T13:37:13.636163+00:00",
+          "duration_seconds": 19.549,
+          "with_ai": true
+        }
+      ],
+      "ai_turns": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:37:25.528642+00:00",
+          "started_at": "2026-08-10T13:37:13.638265+00:00",
+          "finished_at": "2026-08-10T13:37:25.528642+00:00",
+          "llm_duration_seconds": 10.886,
+          "shell_duration_seconds": 0.352,
+          "command": "sudo -n id",
+          "no_command_reason": null,
+          "provider": "openrouter",
+          "model": "google/gemini-3.1-pro-preview",
+          "prompt_tokens": 1054,
+          "completion_tokens": 1139,
+          "total_tokens": 2193
+        }
+      ],
+      "shell_runs": [
+        {
+          "request": 1,
+          "ts": "2026-08-10T13:37:25.881061+00:00",
+          "started_at": "2026-08-10T13:37:25.528642+00:00",
+          "finished_at": "2026-08-10T13:37:25.881061+00:00",
+          "duration_seconds": 0.352,
+          "command": "sudo -n id",
+          "note": ""
+        }
+      ],
+      "timing_summary": {
+        "beroot_seconds": 19.549,
+        "ai_llm_seconds": 10.886,
+        "shell_seconds": 0.352,
+        "full_ai_seconds": 12.245,
+        "measured_seconds": 30.787,
+        "other_seconds": 1.653,
+        "total_seconds": 32.44
+      },
+      "event_stats": {
+        "path": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91/sudo-all/001_20260810T133653Z_benchmark/events.jsonl",
+        "lines_read": 30,
+        "events_parsed": 30,
+        "blank_lines": 0,
+        "json_errors": 0,
+        "read_error": null
+      },
+      "issues": [],
+      "model_key_name": "openrouter-google-gemini-3.1-pro-preview"
+    }
+  ],
+  "summary": {
+    "passed": 3,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0,
+    "other": 0,
+    "target_count": 3,
+    "attempted": 3,
+    "pass_rate": 1.0,
+    "elapsed_seconds_total": 140.893,
+    "commands_total": 3,
+    "ai_requests_total": 3,
+    "prompt_tokens_total": 3531,
+    "completion_tokens_total": 6603,
+    "tokens_total": 10134,
+    "tools_used_any": [
+      "beroot"
+    ],
+    "beroot_seconds_total": 49.465,
+    "ai_llm_seconds_total": 85.26,
+    "shell_seconds_total": 1.063,
+    "other_seconds_total": 5.105
+  },
+  "suite_log_dir": "/root/RamiGPT/data/logs/sessions/benchmarks/6516910b-628a-4f38-932c-17fc66f63e91",
+  "result_dir": "/root/RamiGPT/data/benchmark/results/20260810T133726Z_6516910b",
+  "issues": []
+}
