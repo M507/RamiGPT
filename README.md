@@ -9,7 +9,7 @@
 
 
 <!-- benchmark-master:start -->
-_Last updated: 2026-08-10T13:37:30.499614+00:00 · 260 run(s) · [full JSON](data/benchmark/results/master.json)_
+_Last updated: 2026-08-10T14:03:16.878305+00:00 · 265 run(s) · [full JSON](data/benchmark/results/master.json)_
 
 **Pass** is the percentage of scoreable attempts in which the model successfully escalated privileges to root.
 
@@ -33,6 +33,8 @@ _Last updated: 2026-08-10T13:37:30.499614+00:00 · 260 run(s) · [full JSON](dat
 | openrouter-anthropic-claude-sonnet-4.5 · Online AI Service | 3,835 | 76.5% | 17 |
 | openrouter-deepseek-deepseek-v3.2 · Online AI Service | 4,637 | 25.4% | 59 |
 | openwebui-deepseek-r1-14b · Online AI Service | 4,653 | 25.5% | 740 |
+| openrouter-google-gemini-3.5-flash · Online AI Service | 4,688 | 5.6% | 18 |
+| openrouter-google-gemini-3.5-flash-lite · Online AI Service | 5,002 | 61.1% | 18 |
 | openwebui-qwen3-14b · Online AI Service | 5,655 | 3.2% | 154 |
 | openrouter-microsoft-phi-4 · Online AI Service | 6,324 | 35.0% | 20 |
 | openrouter-deepseek-deepseek-v4-flash · Online AI Service | 6,728 | 43.2% | 37 |
@@ -48,9 +50,10 @@ _Last updated: 2026-08-10T13:37:30.499614+00:00 · 260 run(s) · [full JSON](dat
 | openrouter-anthropic-claude-opus-4.1 · Online AI Service | 3 | 100.0% | 39.464 | 1,801 | 39.227 | 1.333 | 0 |
 | openrouter-anthropic-claude-opus-4.8 · Online AI Service | 11 | 100.0% | 64.757 | 3,834 | 61.413 | 1.545 | 0 |
 | openrouter-anthropic-claude-opus-latest · Online AI Service | 6 | 100.0% | 7.261 | 12,354 | 20.973 | 1.000 | 0 |
-| openrouter-google-gemini-3.1-pro-preview · Online AI Service | 3 | 100.0% | 46.976 | 3,378 | 46.964 | 1.000 | 0 |
+| openrouter-google-gemini-3.1-pro-preview · Online AI Service | 5 | 100.0% | 46.976 | 3,364 | 47.124 | 1.000 | 0 |
 | openrouter-anthropic-claude-sonnet-4.5 · Online AI Service | 17 | 76.5% | 76.424 | 3,835 | 69.978 | 2.077 | 0 |
 | openwebui-qwen-qwen3.6-35b-a3b-fp8-latest · Online AI Service | 381 | 61.4% | 181.015 | 33,990 | 140.818 | 13.662 | 0 |
+| openrouter-google-gemini-3.5-flash-lite · Online AI Service | 18 | 61.1% | 73.671 | 5,002 | 62.482 | 2.364 | 0 |
 | openrouter-anthropic-claude-opus-4 · Online AI Service | 18 | 50.0% | 146.608 | 2,398 | 63.813 | 1.333 | 0 |
 | openrouter-anthropic-claude-sonnet-4.6 · Online AI Service | 24 | 50.0% | 87.338 | 1,990 | 50.482 | 1.750 | 0 |
 | openrouter-google-gemma-4-31b-it · Online AI Service | 69 | 47.8% | 86.154 | 2,671 | 23.459 | 1.697 | 0 |
@@ -78,9 +81,11 @@ _Last updated: 2026-08-10T13:37:30.499614+00:00 · 260 run(s) · [full JSON](dat
 | openrouter-meta-llama-llama-4-maverick · Online AI Service | 80 | 12.5% | 70.046 | 9,842 | 31.656 | 5.600 | 0 |
 | openrouter-tencent-hy3 · Online AI Service | 18 | 11.1% | 201.211 | 2,924 | 124.954 | 1.000 | 0 |
 | openwebui-openai-gpt-5-mini-latest · Online AI Service | 27 | 7.4% | 181.071 | 0 | 147.726 | 3.000 | 0 |
+| openrouter-google-gemini-3.5-flash · Online AI Service | 18 | 5.6% | 181.239 | 4,688 | 65.253 | 1.000 | 0 |
 | openwebui-qwen3-14b · Online AI Service | 154 | 3.2% | 181.267 | 5,655 | 146.442 | 1.400 | 0 |
 | openrouter-anthropic-claude-fable-5 · Online AI Service | 0 | — | — | — | — | — | 15 |
 | openrouter-anthropic-claude-opus-5 · Online AI Service | 0 | — | — | — | — | — | 151 |
+| openrouter-google-gemini-3.6-flash · Online AI Service | 0 | — | — | — | — | — | 0 |
 | openrouter-google-gemma-4-31b-it-free · Online AI Service | 0 | — | — | — | — | — | 0 |
 | openrouter-openai-gpt-4o · Online AI Service | 0 | — | — | — | — | — | 0 |
 
